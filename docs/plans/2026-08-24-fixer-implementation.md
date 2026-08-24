@@ -968,26 +968,26 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-3. Run Rust tests and documentation tests:
+1. Run Rust tests and documentation tests:
 
 ```bash
 cargo test --workspace --all-features
 cargo test --doc --workspace
 ```
 
-4. Run Web gates:
+1. Run Web gates:
 
 ```bash
 pnpm --dir web test
 pnpm --dir web build
 ```
 
-5. Run the bounded local E2E suite and the critical browser flow. Do not run ignored real-network tests unless credentials and explicit approval are present.
-6. Build release binaries and directly probe CLI help, an offline local scrape dry-run, Server startup security defaults, health API, nested Web route, and one confirmed Fixture-backed write.
-7. Inspect dependency licenses and known security advisories; fix actionable findings or document accepted risk.
-8. Confirm logs and generated manifests contain no fixture secrets, authorization headers, cookies, proxy credentials, or local paths outside intended reports.
-9. Update `CHANGELOG.md` with implemented features, known limitations, compatibility, and migration notes.
-10. Commit only necessary release changes:
+1. Run the bounded local E2E suite and the critical browser flow. Do not run ignored real-network tests unless credentials and explicit approval are present.
+2. Build release binaries and directly probe CLI help, an offline local scrape dry-run, Server startup security defaults, health API, nested Web route, and one confirmed Fixture-backed write.
+3. Inspect dependency licenses and known security advisories; fix actionable findings or document accepted risk.
+4. Confirm logs and generated manifests contain no fixture secrets, authorization headers, cookies, proxy credentials, or local paths outside intended reports.
+5. Update `CHANGELOG.md` with implemented features, known limitations, compatibility, and migration notes.
+6. Commit only necessary release changes:
 
 ```bash
 git add CHANGELOG.md <verified-fix-files>
