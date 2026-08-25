@@ -1,0 +1,24 @@
+[package]
+name = "fixer-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "fixer"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+fixer-core = { path = "../fixer-core" }
+fixer-provider-local = { path = "../fixer-provider-local" }
+fixer-sdk = { path = "../fixer-sdk" }
+fixer-writer-local = { path = "../fixer-writer-local" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

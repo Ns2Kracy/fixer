@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local"]
+members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-cli"]
 resolver = "3"
 
 [workspace.package]
@@ -22,3 +22,4 @@ quick-xml = { version = "0.41.0", features = ["serialize"] }
 tempfile = "3.27.0"
 insta = "1.47.0"
 reflink-copy = "0.1.30"
+clap = { version = "4.6.6", features = ["derive"] }
