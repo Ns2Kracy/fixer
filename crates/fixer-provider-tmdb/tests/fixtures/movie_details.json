@@ -1,0 +1,31 @@
+{
+  "id": 843,
+  "title": "花样年华",
+  "original_title": "花樣年華",
+  "original_language": "cn",
+  "overview": "TMDB 提供的中文简介。",
+  "release_date": "2000-09-29",
+  "runtime": 99,
+  "poster_path": "/poster.jpg",
+  "backdrop_path": "/backdrop.jpg",
+  "vote_average": 8.1,
+  "genres": [
+    {"id": 18, "name": "Drama"},
+    {"id": 10749, "name": "Romance"}
+  ],
+  "credits": {
+    "cast": [
+      {"id": 1337, "name": "Tony Leung Chiu-wai", "character": "Chow Mo-wan", "order": 0},
+      {"id": 1338, "name": "Maggie Cheung", "character": "Su Li-zhen", "order": 1}
+    ],
+    "crew": [
+      {"id": 12453, "name": "Wong Kar-wai", "job": "Director", "department": "Directing"},
+      {"id": 12453, "name": "Wong Kar-wai", "job": "Screenplay", "department": "Writing"}
+    ]
+  },
+  "images": {
+    "posters": [{"file_path": "/poster-alt.jpg"}],
+    "backdrops": [{"file_path": "/backdrop-alt.jpg"}]
+  },
+  "external_ids": {"imdb_id": "tt0118694"}
+}

@@ -121,6 +121,91 @@ async fn resolves_through_the_local_metadata_provider() {
     assert_eq!(outcome.value().titles.entries().len(), 2);
 }
 
+#[tokio::test]
+async fn local_and_tmdb_merge_complementary_movie_fields() {
+    use fixer_http::{HttpConfig, ReqwestHttpClient};
+    use fixer_provider_local::{LocalProvider, parse_json};
+    use fixer_provider_tmdb::{TmdbConfig, TmdbProvider};
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/3/search/movie"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            include_str!("../../fixer-provider-tmdb/tests/fixtures/search_movie.json"),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/3/movie/843"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            include_str!("../../fixer-provider-tmdb/tests/fixtures/movie_details.json"),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let mut local_movie = parse_json(include_str!(
+        "../../fixer-provider-local/tests/fixtures/movie.json"
+    ))
+    .unwrap();
+    local_movie
+        .summaries
+        .insert("zh-CN", "本地中文简介。".to_owned())
+        .unwrap();
+    let local = LocalProvider::from_documents([local_movie]).unwrap();
+    let tmdb = TmdbProvider::new(
+        TmdbConfig::new("test-token")
+            .unwrap()
+            .with_base_url(server.uri())
+            .unwrap(),
+    )
+    .unwrap();
+    let fixer = Fixer::builder()
+        .provider(local)
+        .provider(tmdb)
+        .preferred_languages(["zh-CN", "en"])
+        .unwrap()
+        .http_client(ReqwestHttpClient::new(HttpConfig::default()).unwrap())
+        .build()
+        .unwrap();
+    let resolved = fixer.movie("花样年华").year(2000).resolve().await.unwrap();
+    assert!(
+        resolved
+            .value
+            .summaries
+            .entries()
+            .iter()
+            .any(|entry| entry.value() == "本地中文简介。")
+    );
+    assert!(!resolved.value.credits.is_empty());
+    assert!(!resolved.value.artwork.is_empty());
+    assert!(
+        resolved
+            .value
+            .releases
+            .iter()
+            .any(|release| release.release_date.month == Some(9))
+    );
+    assert!(
+        resolved
+            .provenance
+            .sources_for("movie.summaries")
+            .iter()
+            .any(|source| source.provider.as_str() == "local")
+    );
+    assert!(
+        resolved
+            .provenance
+            .sources_for("movie.credits")
+            .iter()
+            .any(|source| source.provider.as_str() == "tmdb")
+    );
+}
+
 #[test]
 fn builder_rejects_invalid_configuration() {
     assert!(matches!(

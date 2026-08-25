@@ -42,6 +42,9 @@ pub(crate) fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult
         .provider(provider)
         .preferred_languages(["zh-CN", "en", "und"])
         .map_err(AppError::new)?;
+    if let Some(tmdb) = config.tmdb_provider()? {
+        builder = builder.provider(tmdb);
+    }
     if let Some(proxy) = &config.proxy {
         builder = builder.proxy(proxy.clone());
     }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-cli"]
+members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-cli", "crates/fixer-provider-tmdb"]
 resolver = "3"
 
 [workspace.package]
@@ -23,3 +23,5 @@ tempfile = "3.27.0"
 insta = "1.47.0"
 reflink-copy = "0.1.30"
 clap = { version = "4.6.6", features = ["derive"] }
+url = "2.5.8"
+wiremock = "0.6.5"

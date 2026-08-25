@@ -15,6 +15,8 @@ tokio.workspace = true
 
 [dev-dependencies]
 fixer-provider-local = { path = "../fixer-provider-local" }
+fixer-provider-tmdb = { path = "../fixer-provider-tmdb" }
+wiremock.workspace = true
 trybuild.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

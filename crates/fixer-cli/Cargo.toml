@@ -13,6 +13,7 @@ path = "src/main.rs"
 clap.workspace = true
 fixer-core = { path = "../fixer-core" }
 fixer-provider-local = { path = "../fixer-provider-local" }
+fixer-provider-tmdb = { path = "../fixer-provider-tmdb" }
 fixer-sdk = { path = "../fixer-sdk" }
 fixer-writer-local = { path = "../fixer-writer-local" }
 serde.workspace = true
