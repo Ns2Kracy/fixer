@@ -1,0 +1,11 @@
+---
+source: crates/fixer-writer-local/tests/writers.rs
+assertion_line: 103
+expression: bytes(&nfo)
+---
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <title>花样年华</title>
+  <originaltitle>In the Mood for Love</originaltitle>
+  <year>2000</year>
+</movie>

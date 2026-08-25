@@ -1,0 +1,22 @@
+---
+source: crates/fixer-writer-local/tests/writers.rs
+assertion_line: 119
+expression: content
+---
+{
+  "schema_version": 1,
+  "work_id": "movie-1",
+  "provenance": {
+    "movie.titles": [
+      {
+        "provider": "local",
+        "external_id": null,
+        "locale": "zh-CN",
+        "observed_at_unix_ms": 0
+      }
+    ]
+  },
+  "planned_files": {
+    "movie_json": "Movie/movie.json"
+  }
+}

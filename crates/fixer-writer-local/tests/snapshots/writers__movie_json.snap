@@ -1,0 +1,38 @@
+---
+source: crates/fixer-writer-local/tests/writers.rs
+assertion_line: 102
+expression: bytes(&json)
+---
+{
+  "id": "movie-1",
+  "titles": [
+    {
+      "kind": "tagged",
+      "language": "zh-CN",
+      "value": "花样年华"
+    },
+    {
+      "kind": "tagged",
+      "language": "en",
+      "value": "In the Mood for Love"
+    }
+  ],
+  "summaries": [],
+  "releases": [
+    {
+      "id": "movie-1-release",
+      "release_date": {
+        "year": 2000,
+        "month": null,
+        "day": null
+      },
+      "edition": null,
+      "runtime": null
+    }
+  ],
+  "credits": [],
+  "genres": [],
+  "artwork": [],
+  "ratings": [],
+  "content_ratings": []
+}
