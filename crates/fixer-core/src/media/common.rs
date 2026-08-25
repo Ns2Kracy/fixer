@@ -1,6 +1,6 @@
 //! Value objects shared across media domains.
 
-use crate::{CoreError, LocalizedValue};
+use crate::{CoreError, ExternalId, LocalizedValue};
 use serde::{Deserialize, Serialize};
 
 macro_rules! string_id {
@@ -200,6 +200,8 @@ pub struct ArtworkReference {
     pub kind: ArtworkKind,
     /// Provider URL or local path, retained as data without access.
     pub location: String,
+    /// Stable provider artwork identity, when available.
+    pub external_id: Option<ExternalId>,
 }
 
 impl ArtworkReference {
@@ -207,7 +209,17 @@ impl ArtworkReference {
     pub fn new(kind: ArtworkKind, location: impl Into<String>) -> Result<Self, CoreError> {
         let location = location.into();
         validate_text("artwork.location", &location, 4096)?;
-        Ok(Self { kind, location })
+        Ok(Self {
+            kind,
+            location,
+            external_id: None,
+        })
+    }
+
+    /// Adds a stable provider artwork identity.
+    pub fn with_external_id(mut self, external_id: ExternalId) -> Self {
+        self.external_id = Some(external_id);
+        self
     }
 }
 

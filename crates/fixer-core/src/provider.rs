@@ -205,6 +205,7 @@ macro_rules! candidate {
             pub external_id: ExternalId,
             pub title: String,
             pub year: Option<u16>,
+            pub sequence: Option<String>,
         }
         impl $name {
             /// Constructs a candidate.
@@ -221,7 +222,16 @@ macro_rules! candidate {
                     external_id,
                     title,
                     year,
+                    sequence: None,
                 })
+            }
+
+            /// Adds a domain-specific sequence identifier.
+            pub fn with_sequence(mut self, sequence: impl Into<String>) -> Result<Self, CoreError> {
+                let sequence = sequence.into();
+                validate_query_title(&sequence)?;
+                self.sequence = Some(sequence);
+                Ok(self)
             }
         }
     };
