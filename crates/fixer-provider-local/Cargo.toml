@@ -1,5 +1,5 @@
 [package]
-name = "fixer-sdk"
+name = "fixer-provider-local"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,11 +7,11 @@ rust-version.workspace = true
 
 [dependencies]
 fixer-core = { path = "../fixer-core" }
-fixer-http = { path = "../fixer-http" }
-futures-util.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 
 [dev-dependencies]
-fixer-provider-local = { path = "../fixer-provider-local" }
-trybuild.workspace = true
+futures-lite.workspace = true
+tempfile.workspace = true

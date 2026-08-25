@@ -1,6 +1,7 @@
 use fixer_core::{
     ExternalId, MetadataDocument, Movie, MovieRelease, ProviderId, ReleaseDate, ReleaseId, WorkId,
 };
+use fixer_provider_local::{LocalProvider, parse_json};
 use fixer_sdk::{Fixer, FixtureDocument, FixtureProvider, SdkError};
 use std::time::{Duration, Instant};
 
@@ -100,6 +101,24 @@ async fn lower_level_search_select_and_fetch_are_available() {
     let selected = search.select(0).unwrap();
     let outcome = selected.fetch_selected().await.unwrap();
     assert_eq!(outcome.value().release_year(), Some(2000));
+}
+
+#[tokio::test]
+async fn resolves_through_the_local_metadata_provider() {
+    let provider = LocalProvider::from_documents([parse_json(include_str!(
+        "../../fixer-provider-local/tests/fixtures/movie.json"
+    ))
+    .unwrap()])
+    .unwrap();
+    let fixer = Fixer::builder()
+        .provider(provider)
+        .offline()
+        .build()
+        .unwrap();
+
+    let outcome = fixer.movie("花样年华").year(2000).resolve().await.unwrap();
+    assert_eq!(outcome.value().release_year(), Some(2000));
+    assert_eq!(outcome.value().titles.entries().len(), 2);
 }
 
 #[test]
