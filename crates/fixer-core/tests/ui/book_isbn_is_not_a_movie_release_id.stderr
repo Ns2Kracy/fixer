@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui/book_isbn_is_not_a_movie_release_id.rs:6:38
+  |
+6 |     let _release = MovieRelease::new(isbn, date);
+  |                    ----------------- ^^^^ expected `ReleaseId`, found `Isbn13`
+  |                    |
+  |                    arguments to this function are incorrect
+  |
+note: associated function defined here
+ --> src/media/movie.rs
+  |
+  |     pub const fn new(id: ReleaseId, release_date: ReleaseDate) -> Self {
+  |                  ^^^

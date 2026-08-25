@@ -18,6 +18,9 @@ pub enum CoreError {
     /// An external identifier namespace or value was invalid.
     #[error("invalid external identifier {field}: `{input}`")]
     InvalidExternalId { field: &'static str, input: String },
+    /// A domain value failed boundary validation.
+    #[error("invalid {field}: `{value}`")]
+    InvalidDomainValue { field: &'static str, value: String },
     /// A provenance field path was empty or malformed.
     #[error("invalid provenance field path `{input}`")]
     InvalidFieldPath { input: String },
