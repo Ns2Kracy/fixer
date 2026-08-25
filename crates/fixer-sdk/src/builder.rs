@@ -2,7 +2,7 @@
 
 use crate::{Fixer, SdkError};
 use fixer_core::{HttpClient, LanguageTag, Provider, ProviderId};
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 /// Builder for a [`Fixer`] instance.
 ///
@@ -27,6 +27,9 @@ pub struct FixerBuilder {
     providers: Vec<Arc<dyn Provider>>,
     preferred_languages: Vec<LanguageTag>,
     http: Option<Arc<dyn HttpClient>>,
+    offline: bool,
+    proxy: Option<String>,
+    timeout: Option<Duration>,
 }
 
 impl FixerBuilder {
@@ -55,6 +58,24 @@ impl FixerBuilder {
         self
     }
 
+    /// Prevents network providers from being invoked.
+    pub const fn offline(mut self) -> Self {
+        self.offline = true;
+        self
+    }
+
+    /// Stores an explicit global proxy for the default transport.
+    pub fn proxy(mut self, proxy: impl Into<String>) -> Self {
+        self.proxy = Some(proxy.into());
+        self
+    }
+
+    /// Stores a request timeout for the default transport.
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
     /// Validates providers and constructs the SDK.
     pub fn build(self) -> Result<Fixer, SdkError> {
         if self.providers.is_empty() {
@@ -67,10 +88,13 @@ impl FixerBuilder {
                 return Err(SdkError::DuplicateProvider(id));
             }
         }
-        Ok(Fixer::new(
+        Fixer::new(
             self.providers,
             self.preferred_languages,
             self.http,
-        ))
+            self.offline,
+            self.proxy,
+            self.timeout,
+        )
     }
 }

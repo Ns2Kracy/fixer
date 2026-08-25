@@ -176,6 +176,8 @@ pub enum HttpError {
     Offline,
     #[error("HTTP request timed out")]
     Timeout,
+    #[error("HTTP response returned non-success status {status}")]
+    Status { status: u16 },
     #[error("HTTP transport failed: {0}")]
     Transport(String),
     #[error("HTTP request or response was invalid: {0}")]

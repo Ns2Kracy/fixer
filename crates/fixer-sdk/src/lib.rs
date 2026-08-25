@@ -42,6 +42,8 @@ pub enum SdkError {
     UnexpectedDocument,
     #[error("movie merge failed: {0}")]
     Merge(String),
+    #[error("invalid HTTP configuration: {0}")]
+    HttpConfig(String),
 }
 
 struct DisabledHttpClient;
@@ -60,6 +62,7 @@ pub struct Fixer {
     pub(crate) providers: Arc<[Arc<dyn Provider>]>,
     pub(crate) preferred_languages: Arc<[LanguageTag]>,
     pub(crate) http: Arc<dyn HttpClient>,
+    pub(crate) offline: bool,
 }
 
 impl Fixer {
@@ -72,12 +75,35 @@ impl Fixer {
         providers: Vec<Arc<dyn Provider>>,
         preferred_languages: Vec<LanguageTag>,
         http: Option<Arc<dyn HttpClient>>,
-    ) -> Self {
-        Self {
+        offline: bool,
+        proxy: Option<String>,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<Self, SdkError> {
+        let http = match http {
+            Some(http) => http,
+            None if offline => Arc::new(DisabledHttpClient),
+            None => {
+                let mut config = fixer_http::HttpConfig::default();
+                if let Some(proxy) = proxy {
+                    config = config
+                        .with_proxy(proxy)
+                        .map_err(|error| SdkError::HttpConfig(error.to_string()))?;
+                }
+                if let Some(timeout) = timeout {
+                    config = config.with_timeout(timeout);
+                }
+                Arc::new(
+                    fixer_http::ReqwestHttpClient::new(config)
+                        .map_err(|error| SdkError::HttpConfig(error.to_string()))?,
+                )
+            }
+        };
+        Ok(Self {
             providers: providers.into(),
             preferred_languages: preferred_languages.into(),
-            http: http.unwrap_or_else(|| Arc::new(DisabledHttpClient)),
-        }
+            http,
+            offline,
+        })
     }
 
     /// Starts an ergonomic typed movie query.

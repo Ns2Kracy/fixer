@@ -20,14 +20,26 @@ pub(crate) async fn search_movie(
 ) -> Result<SearchOutcome, SdkError> {
     let request =
         SearchRequest::movie(title, year)?.with_locales(fixer.preferred_languages.to_vec());
+    let skipped_network = fixer.offline
+        && fixer.providers.iter().any(|provider| {
+            provider.descriptor().supports(MediaKind::Movie)
+                && provider.descriptor().requires_network()
+        });
     let futures = fixer
         .providers
         .iter()
         .filter(|provider| provider.descriptor().supports(MediaKind::Movie))
+        .filter(|provider| !fixer.offline || !provider.descriptor().requires_network())
         .map(|provider| provider.search(request.clone(), fixer.http.as_ref()));
     let results = join_all(futures).await;
     let mut candidates = Vec::new();
     let mut warnings = Vec::new();
+    if skipped_network {
+        warnings.push(ResolutionWarning {
+            code: "offline_provider_skipped".to_owned(),
+            message: "offline mode skipped one or more network providers".to_owned(),
+        });
+    }
     for result in results {
         match result {
             Ok(found) => candidates.extend(found),

@@ -1,5 +1,5 @@
-use fixer_core::{ProviderId};
-use fixer_sdk::{FixtureDocument, FixtureProvider, Fixer};
+use fixer_core::ProviderId;
+use fixer_sdk::{Fixer, FixtureDocument, FixtureProvider};
 
 fn accepts<T>(_: T) {}
 
