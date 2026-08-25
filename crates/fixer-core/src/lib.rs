@@ -6,14 +6,25 @@
 
 mod confidence;
 mod error;
+pub mod http;
 mod identity;
 mod locale;
 pub mod media;
+pub mod output;
 mod provenance;
+pub mod provider;
 
 pub use confidence::Confidence;
 pub use error::CoreError;
+pub use http::{Header, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse};
 pub use identity::{ExternalId, ProviderId};
 pub use locale::{LanguageTag, LocalePolicy, LocalizedEntry, LocalizedValue};
 pub use media::*;
+pub use output::{
+    OutputOperation, OutputPlan, PlannedContent, PlanningError, WriteRequest, Writer,
+};
 pub use provenance::{ProvenanceMap, SourceRef, Sourced};
+pub use provider::{
+    BoxFuture, Candidate, FetchRequest, MediaKind, MetadataDocument, MovieCandidate, Provider,
+    ProviderDescriptor, ProviderError, SearchRequest,
+};
