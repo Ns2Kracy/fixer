@@ -60,4 +60,12 @@ impl Movie {
             content_ratings: Vec::new(),
         }
     }
+
+    /// Returns the earliest known release year.
+    pub fn release_year(&self) -> Option<u16> {
+        self.releases
+            .iter()
+            .map(|release| release.release_date.year)
+            .min()
+    }
 }

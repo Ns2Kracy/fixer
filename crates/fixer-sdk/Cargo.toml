@@ -1,0 +1,15 @@
+[package]
+name = "fixer-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fixer-core = { path = "../fixer-core" }
+futures-util.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+trybuild.workspace = true
