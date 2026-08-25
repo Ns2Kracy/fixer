@@ -5,6 +5,7 @@
 mod builder;
 pub mod fixture;
 mod orchestrator;
+pub mod output;
 pub mod query;
 
 pub use builder::FixerBuilder;

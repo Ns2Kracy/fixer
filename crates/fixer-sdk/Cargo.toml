@@ -9,9 +9,12 @@ rust-version.workspace = true
 fixer-core = { path = "../fixer-core" }
 fixer-http = { path = "../fixer-http" }
 futures-util.workspace = true
+reflink-copy.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
 fixer-provider-local = { path = "../fixer-provider-local" }
 trybuild.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
