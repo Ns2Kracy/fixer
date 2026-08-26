@@ -1,6 +1,6 @@
 //! Anime-specific hierarchy and episode numbering.
 
-use super::common::{Summaries, Titles, WorkId};
+use super::common::{ArtworkReference, Summaries, Titles, WorkId};
 use crate::CoreError;
 use serde::{Deserialize, Serialize};
 
@@ -90,6 +90,7 @@ pub struct AnimeSeries {
     pub id: WorkId,
     pub titles: Titles,
     pub summaries: Summaries,
+    pub artwork: Vec<ArtworkReference>,
     pub relation: AnimeSeriesRelation,
     pub cours: Vec<Cour>,
 }
@@ -106,6 +107,7 @@ impl AnimeSeries {
             id,
             titles,
             summaries: Summaries::new(),
+            artwork: Vec::new(),
             relation,
             cours,
         }

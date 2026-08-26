@@ -1,9 +1,9 @@
 use fixer_core::{
-    AnimeEpisode, AnimeEpisodeClass, AnimeSeries, AnimeSeriesRelation, Asset, AssetId, AssetKind,
-    AssetPath, BookEdition, BookWork, Cour, Credit, CreditRole, Disc, Duration, Episode,
-    EpisodeSequence, Genre, Isbn10, Isbn13, LocalizedValue, Movie, MovieRelease, MusicArtist,
-    MusicRelease, MusicReleaseGroup, OrderingScheme, Person, PersonId, ReleaseDate, ReleaseId,
-    Season, Series, SourcePath, Track, TrackSequence, WorkId,
+    AnimeEpisode, AnimeEpisodeClass, AnimeSeries, AnimeSeriesRelation, ArtworkKind,
+    ArtworkReference, Asset, AssetId, AssetKind, AssetPath, BookEdition, BookWork, Cour, Credit,
+    CreditRole, Disc, Duration, Episode, EpisodeSequence, Genre, Isbn10, Isbn13, LocalizedValue,
+    Movie, MovieRelease, MusicArtist, MusicRelease, MusicReleaseGroup, OrderingScheme, Person,
+    PersonId, ReleaseDate, ReleaseId, Season, Series, SourcePath, Track, TrackSequence, WorkId,
 };
 
 fn titles(primary: &str) -> LocalizedValue<String> {
@@ -62,11 +62,14 @@ fn anime_round_trips_cour_classification_and_numbering() {
         Some(13),
     )
     .unwrap();
-    let anime = AnimeSeries::new(
+    let mut anime = AnimeSeries::new(
         WorkId::new("anime-1").unwrap(),
         titles("Example Anime"),
         AnimeSeriesRelation::Adaptation,
         vec![Cour::new(1, vec![episode]).unwrap()],
+    );
+    anime.artwork.push(
+        ArtworkReference::new(ArtworkKind::Cover, "https://images.example/anime.jpg").unwrap(),
     );
 
     let decoded: AnimeSeries =
