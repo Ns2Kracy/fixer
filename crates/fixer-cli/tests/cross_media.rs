@@ -233,3 +233,143 @@ fn plan_cannot_accept_execution_flags() {
             .contains("unexpected argument '--apply'")
     );
 }
+
+fn conflicting_movie_library(
+    policy: &str,
+) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let library = root.path().join("library");
+    fs::create_dir(&library).unwrap();
+    for (name, id, summary) in [
+        ("first.json", "first", "First summary"),
+        ("second.json", "second", "Second summary"),
+    ] {
+        fs::write(
+            library.join(name),
+            format!(
+                r#"{{
+                  "id": {{ "namespace": "local", "value": "{id}" }},
+                  "titles": {{ "en": "Conflicted Movie" }},
+                  "year": 2020,
+                  "summary": {{ "en": "{summary}" }}
+                }}"#,
+            ),
+        )
+        .unwrap();
+    }
+    let config = root.path().join("fixer.json");
+    fs::write(
+        &config,
+        format!(r#"{{"enabled_providers":["local"],"conflict_policy":"{policy}"}}"#),
+    )
+    .unwrap();
+    (root, config, library)
+}
+
+#[test]
+fn review_conflict_policy_returns_review_exit_and_blocks_apply() {
+    let (_root, config, library) = conflicting_movie_library("review");
+    let output = fixer()
+        .args(["--config", config.to_str().unwrap(), "--offline", "scrape"])
+        .arg(&library)
+        .args(["--kind", "movie", "--apply"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(4),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("review required")
+    );
+    assert!(!library.join("movie.json").exists());
+    assert!(!library.join("fixer-manifest.json").exists());
+}
+
+#[test]
+fn conflict_policy_can_prefer_first_or_fail() {
+    let (_preferred_root, preferred_config, preferred_library) =
+        conflicting_movie_library("prefer_first");
+    let preferred = fixer()
+        .args([
+            "--config",
+            preferred_config.to_str().unwrap(),
+            "--offline",
+            "plan",
+        ])
+        .arg(&preferred_library)
+        .args(["--kind", "movie", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        preferred.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preferred.stderr)
+    );
+
+    let (_error_root, error_config, error_library) = conflicting_movie_library("error");
+    let failed = fixer()
+        .args([
+            "--config",
+            error_config.to_str().unwrap(),
+            "--offline",
+            "plan",
+        ])
+        .arg(&error_library)
+        .args(["--kind", "movie"])
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(
+        String::from_utf8(failed.stderr)
+            .unwrap()
+            .contains("conflict policy rejected 1 metadata conflict")
+    );
+}
+
+#[test]
+fn configured_placement_is_used_when_the_cli_flag_is_absent() {
+    let root = tempfile::tempdir().unwrap();
+    let library = root.path().join("library");
+    fs::create_dir(&library).unwrap();
+    let media = library.join("Example.Movie.2020.mkv");
+    fs::write(&media, b"movie").unwrap();
+    let config = root.path().join("fixer.json");
+    fs::write(
+        &config,
+        r#"{"enabled_providers":["local"],"placement":"copy"}"#,
+    )
+    .unwrap();
+
+    let output = fixer()
+        .args(["--config", config.to_str().unwrap(), "--offline", "plan"])
+        .arg(&media)
+        .args(["--kind", "movie", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        value["output_root"]
+            .as_str()
+            .unwrap()
+            .ends_with("Example Movie (2020)")
+    );
+    assert!(
+        value["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|operation| operation["operation"] == "copy")
+    );
+    assert!(!library.join("Example Movie (2020)").exists());
+}

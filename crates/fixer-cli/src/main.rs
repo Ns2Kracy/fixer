@@ -28,12 +28,14 @@ impl std::error::Error for AppError {}
 pub(crate) enum RunStatus {
     Success,
     PartialSuccess,
+    ReviewRequired,
 }
 impl RunStatus {
     fn exit_code(self) -> ExitCode {
         match self {
             Self::Success => ExitCode::SUCCESS,
             Self::PartialSuccess => ExitCode::from(3),
+            Self::ReviewRequired => ExitCode::from(4),
         }
     }
 }

@@ -157,8 +157,8 @@ pub struct PlanArgs {
     pub path: PathBuf,
     #[arg(long, value_enum)]
     pub kind: MediaKindArg,
-    #[arg(long, value_enum, default_value_t = PlacementArg::InPlace)]
-    pub placement: PlacementArg,
+    #[arg(long, value_enum)]
+    pub placement: Option<PlacementArg>,
     #[arg(long)]
     pub json: bool,
 }
@@ -172,8 +172,8 @@ pub struct ScrapeArgs {
     pub dry_run: bool,
     #[arg(long, conflicts_with = "dry_run")]
     pub apply: bool,
-    #[arg(long, value_enum, default_value_t = PlacementArg::InPlace)]
-    pub placement: PlacementArg,
+    #[arg(long, value_enum)]
+    pub placement: Option<PlacementArg>,
     #[arg(long)]
     pub update_epub: bool,
 }
@@ -223,6 +223,25 @@ pub enum PlacementArg {
     Hardlink,
     Copy,
     Reflink,
+}
+
+impl From<crate::config::PlacementPolicy> for PlacementArg {
+    fn from(value: crate::config::PlacementPolicy) -> Self {
+        match value {
+            crate::config::PlacementPolicy::InPlace => Self::InPlace,
+            crate::config::PlacementPolicy::Symlink => Self::Symlink,
+            crate::config::PlacementPolicy::Hardlink => Self::Hardlink,
+            crate::config::PlacementPolicy::Copy => Self::Copy,
+            crate::config::PlacementPolicy::Reflink => Self::Reflink,
+        }
+    }
+}
+
+impl ScrapeArgs {
+    pub const fn placement(&self) -> PlacementArg {
+        self.placement
+            .expect("placement is resolved before media dispatch")
+    }
 }
 
 #[derive(Debug, Subcommand)]

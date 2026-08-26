@@ -1,7 +1,7 @@
 use crate::{
     AppError, AppResult, RunStatus,
     args::{MediaKindArg, PlacementArg, PlanArgs, ScrapeArgs},
-    config::Config,
+    config::{Config, ConflictPolicy},
     json::PlanDto,
     render,
 };
@@ -21,6 +21,26 @@ use std::path::{Path, PathBuf};
 enum OutputMode {
     Scrape,
     Plan { json: bool, kind: MediaKindArg },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConflictOutcome {
+    policy: ConflictPolicy,
+    count: usize,
+}
+
+impl ConflictOutcome {
+    const fn new(policy: ConflictPolicy, count: usize) -> Self {
+        Self { policy, count }
+    }
+
+    const fn requires_review(self) -> bool {
+        self.count > 0 && matches!(self.policy, ConflictPolicy::Review)
+    }
+
+    const fn rejects(self) -> bool {
+        self.count > 0 && matches!(self.policy, ConflictPolicy::Error)
+    }
 }
 
 pub async fn run(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
@@ -48,10 +68,12 @@ pub async fn plan(args: PlanArgs, config: &Config) -> AppResult<RunStatus> {
 }
 
 async fn run_with_mode(
-    args: ScrapeArgs,
+    mut args: ScrapeArgs,
     config: &Config,
     mode: OutputMode,
 ) -> AppResult<RunStatus> {
+    args.placement
+        .get_or_insert_with(|| config.placement.into());
     if !args.path.exists() {
         return Err(AppError::new(format!(
             "input path does not exist: {}",
@@ -73,7 +95,7 @@ async fn run_with_mode(
 }
 
 async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
-    if args.placement != PlacementArg::InPlace {
+    if args.placement() != PlacementArg::InPlace {
         return Err(AppError::new(
             "anime scrape currently supports only in-place placement",
         ));
@@ -100,14 +122,23 @@ async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
     let fixer = super::build_fixer(provider, config)?;
     let resolved = fixer.anime(title).resolve().await.map_err(AppError::new)?;
     let output_root = &result.roots[0];
+    let conflicts = resolved.conflicts.len();
     let plan = AnimeWriter
         .plan_resolved(&resolved, output_root)
         .map_err(AppError::new)?;
-    finish_plan(plan, &args, output_root, &result.warnings, None, mode)
+    finish_plan(
+        plan,
+        &args,
+        output_root,
+        &result.warnings,
+        None,
+        mode,
+        ConflictOutcome::new(config.conflict_policy, conflicts),
+    )
 }
 
 async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
-    if args.placement != PlacementArg::InPlace {
+    if args.placement() != PlacementArg::InPlace {
         return Err(AppError::new(
             "book scrape currently supports only in-place placement",
         ));
@@ -163,10 +194,19 @@ async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> App
         }
         writer = writer.with_epub_mutation_target(args.path.clone());
     }
+    let conflicts = resolved.conflicts.len();
     let plan = writer
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
-    finish_plan(plan, &args, &output_root, &warnings, None, mode)
+    finish_plan(
+        plan,
+        &args,
+        &output_root,
+        &warnings,
+        None,
+        mode,
+        ConflictOutcome::new(config.conflict_policy, conflicts),
+    )
 }
 
 async fn scrape_movie(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
@@ -190,15 +230,24 @@ async fn scrape_movie(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         query = query.year(year);
     }
     let resolved = query.resolve().await.map_err(AppError::new)?;
-    let output_root = movie_output_root(&args.path, args.placement, &resolved)?;
+    let output_root = movie_output_root(&args.path, args.placement(), &resolved)?;
+    let conflicts = resolved.conflicts.len();
     let plan = JsonWriter
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
-    finish_plan(plan, &args, &output_root, &result.warnings, None, mode)
+    finish_plan(
+        plan,
+        &args,
+        &output_root,
+        &result.warnings,
+        None,
+        mode,
+        ConflictOutcome::new(config.conflict_policy, conflicts),
+    )
 }
 
 async fn scrape_music(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
-    if args.placement != PlacementArg::InPlace {
+    if args.placement() != PlacementArg::InPlace {
         return Err(AppError::new(
             "music scrape currently supports only in-place placement",
         ));
@@ -225,10 +274,19 @@ async fn scrape_music(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
     let provider = LocalProvider::from_music_documents(result.documents).map_err(AppError::new)?;
     let fixer = super::build_fixer(provider, config)?;
     let resolved = fixer.music(title).resolve().await.map_err(AppError::new)?;
+    let conflicts = resolved.conflicts.len();
     let plan = MusicWriter::default()
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
-    finish_plan(plan, &args, &output_root, &warnings, None, mode)
+    finish_plan(
+        plan,
+        &args,
+        &output_root,
+        &warnings,
+        None,
+        mode,
+        ConflictOutcome::new(config.conflict_policy, conflicts),
+    )
 }
 
 async fn scrape_television(
@@ -266,7 +324,7 @@ async fn scrape_television(
         })
         .ok_or_else(|| AppError::new("local television series has no title"))?;
     let ordering = series.ordering;
-    let placement_target = (args.placement != PlacementArg::InPlace)
+    let placement_target = (args.placement() != PlacementArg::InPlace)
         .then(|| television_placement_target(&args.path, series, hint.as_ref()))
         .transpose()?;
     let (provider, warnings) = LocalProvider::from_scan(scan_root).map_err(AppError::new)?;
@@ -278,7 +336,8 @@ async fn scrape_television(
         }
     }
     let resolved = query.resolve().await.map_err(AppError::new)?;
-    let output_root = television_output_root(series_root, args.placement, &resolved)?;
+    let output_root = television_output_root(series_root, args.placement(), &resolved)?;
+    let conflicts = resolved.conflicts.len();
     let plan = TelevisionWriter
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
@@ -289,6 +348,7 @@ async fn scrape_television(
         &warnings,
         placement_target.as_deref(),
         mode,
+        ConflictOutcome::new(config.conflict_policy, conflicts),
     )
 }
 
@@ -299,8 +359,9 @@ fn finish_plan(
     warnings: &[ScanWarning],
     placement_target: Option<&Path>,
     mode: OutputMode,
+    conflicts: ConflictOutcome,
 ) -> AppResult<RunStatus> {
-    if args.placement != PlacementArg::InPlace {
+    if args.placement() != PlacementArg::InPlace {
         if !args.path.is_file() {
             return Err(AppError::new(
                 "non-in-place placement requires a media file path",
@@ -314,7 +375,7 @@ fn finish_plan(
                 &args.path,
                 output_root,
                 target,
-                placement_mode(args.placement),
+                placement_mode(args.placement()),
             )
             .map_err(AppError::new)?;
             for operation in placement.operations() {
@@ -322,6 +383,13 @@ fn finish_plan(
             }
         }
     }
+    if conflicts.rejects() {
+        return Err(AppError::new(format!(
+            "conflict policy rejected {} metadata conflict(s)",
+            conflicts.count
+        )));
+    }
+
     if let OutputMode::Plan { json, kind } = mode {
         if json {
             render::json(&PlanDto::new(kind.as_str(), output_root, &plan))?;
@@ -332,7 +400,16 @@ fn finish_plan(
                 output_root.display()
             );
         }
+        if conflicts.requires_review() {
+            eprintln!("review required: {} metadata conflict(s)", conflicts.count);
+            return Ok(RunStatus::ReviewRequired);
+        }
         return Ok(super::finish_with_warnings(warnings));
+    }
+
+    if conflicts.requires_review() {
+        eprintln!("review required: {} metadata conflict(s)", conflicts.count);
+        return Ok(RunStatus::ReviewRequired);
     }
 
     let dry_run = args.dry_run || !args.apply;
