@@ -19,6 +19,10 @@ pub fn secure_job_app(runtime: JobRuntime, auth_state: AuthState) -> Router {
         auth_state.clone(),
     ))
     .layer(axum::middleware::from_fn_with_state(
+        auth_state.clone(),
+        crate::auth::resolve_client_ip,
+    ))
+    .layer(axum::middleware::from_fn_with_state(
         auth_state,
         crate::auth::enforce_cors,
     ))

@@ -2,11 +2,15 @@ pub mod password;
 pub mod session;
 pub mod token;
 
-use std::{fmt, time::Duration};
+use std::{
+    fmt,
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 
 use axum::{
     body::Body,
-    extract::{Request, State},
+    extract::{Request, State, connect_info::ConnectInfo},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -14,7 +18,7 @@ use axum::{
 use thiserror::Error;
 use url::Url;
 
-use crate::{api::error::ApiError, store::SqliteJobStore};
+use crate::{TrustedProxyPolicy, api::error::ApiError, store::SqliteJobStore};
 
 pub use session::IssuedSession;
 pub use token::IssuedApiToken;
@@ -30,6 +34,7 @@ pub struct AuthState {
     secure_cookie: bool,
     session_lifetime: Duration,
     allowed_origins: Vec<String>,
+    trusted_proxy_policy: TrustedProxyPolicy,
 }
 
 impl AuthState {
@@ -39,6 +44,7 @@ impl AuthState {
             secure_cookie: false,
             session_lifetime: DEFAULT_SESSION_LIFETIME,
             allowed_origins: Vec::new(),
+            trusted_proxy_policy: TrustedProxyPolicy::disabled(),
         }
     }
 
@@ -60,14 +66,13 @@ impl AuthState {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let mut allowed = origins
-            .into_iter()
-            .map(|origin| validate_origin(origin.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        allowed.sort();
-        allowed.dedup();
-        self.allowed_origins = allowed;
+        self.allowed_origins = normalize_origins(origins)?;
         Ok(self)
+    }
+
+    pub fn with_trusted_proxy_policy(mut self, policy: TrustedProxyPolicy) -> Self {
+        self.trusted_proxy_policy = policy;
+        self
     }
 
     pub(crate) const fn store(&self) -> &SqliteJobStore {
@@ -90,6 +95,7 @@ impl fmt::Debug for AuthState {
             .field("secure_cookie", &self.secure_cookie)
             .field("session_lifetime", &self.session_lifetime)
             .field("allowed_origins", &self.allowed_origins)
+            .field("trusted_proxy_policy", &self.trusted_proxy_policy)
             .finish_non_exhaustive()
     }
 }
@@ -102,6 +108,35 @@ pub enum AuthConfigError {
         "CORS origin `{0}` must be an exact HTTP or HTTPS origin without credentials, path, query, fragment, or wildcard"
     )]
     InvalidOrigin(String),
+}
+
+/// Resolved request client identity. Forwarded identity is used only under an
+/// explicitly configured trusted-proxy policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientIp(IpAddr);
+
+impl ClientIp {
+    pub const fn get(self) -> IpAddr {
+        self.0
+    }
+}
+
+pub(crate) async fn resolve_client_ip(
+    State(state): State<AuthState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    if let Some(ConnectInfo(peer)) = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .copied()
+    {
+        let client_ip = state
+            .trusted_proxy_policy
+            .client_ip(peer, request.headers());
+        request.extensions_mut().insert(ClientIp(client_ip));
+    }
+    next.run(request).await
 }
 
 pub(crate) async fn require_auth(
@@ -247,6 +282,20 @@ fn is_state_changing(method: &Method) -> bool {
         *method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     )
+}
+
+pub(crate) fn normalize_origins<I, S>(origins: I) -> Result<Vec<String>, AuthConfigError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut allowed = origins
+        .into_iter()
+        .map(|origin| validate_origin(origin.as_ref()))
+        .collect::<Result<Vec<_>, _>>()?;
+    allowed.sort();
+    allowed.dedup();
+    Ok(allowed)
 }
 
 fn validate_origin(origin: &str) -> Result<String, AuthConfigError> {

@@ -63,3 +63,64 @@ fn bind_strings_are_validated_before_listener_creation() {
         "non-loopback binding requires authentication"
     );
 }
+
+#[test]
+fn authenticated_public_bind_configures_all_production_security_boundaries() {
+    let root = tempfile::tempdir().unwrap();
+    let bind = SocketAddr::from(([0, 0, 0, 0], 8443));
+    let config = ServerConfig::authenticated(bind, "production password")
+        .unwrap()
+        .with_media_roots([root.path()])
+        .unwrap()
+        .with_https_termination(true)
+        .with_allowed_origins(["https://fixer.example"])
+        .unwrap()
+        .with_trusted_proxy(["10.0.0.0/8"], "x-fixer-client-ip")
+        .unwrap();
+
+    assert_eq!(config.bind_addr(), bind);
+    assert_eq!(config.media_roots(), &[root.path().canonicalize().unwrap()]);
+    assert!(config.https_termination());
+    assert_eq!(config.allowed_origins(), &["https://fixer.example"]);
+    assert!(config.trusted_proxy_policy().is_enabled());
+    let debug = format!("{config:?}");
+    assert!(!debug.contains("production password"));
+    assert!(debug.contains("[REDACTED]"));
+}
+
+#[test]
+fn production_validation_requires_authentication_and_at_least_one_media_root() {
+    let root = tempfile::tempdir().unwrap();
+    let missing_auth = ServerConfig::default()
+        .with_media_roots([root.path()])
+        .unwrap();
+    assert_eq!(
+        missing_auth.validate_for_serve().unwrap_err().to_string(),
+        "server authentication password is required"
+    );
+
+    let missing_roots =
+        ServerConfig::authenticated(SocketAddr::from(([127, 0, 0, 1], 3000)), "password").unwrap();
+    assert_eq!(
+        missing_roots.validate_for_serve().unwrap_err().to_string(),
+        "at least one allowed media root is required"
+    );
+}
+
+#[test]
+fn invalid_auth_origin_and_proxy_configuration_fail_before_listener_creation() {
+    let loopback = SocketAddr::from(([127, 0, 0, 1], 3000));
+    assert!(ServerConfig::authenticated(loopback, "").is_err());
+    assert!(
+        ServerConfig::authenticated(loopback, "password")
+            .unwrap()
+            .with_allowed_origins(["*"])
+            .is_err()
+    );
+    assert!(
+        ServerConfig::authenticated(loopback, "password")
+            .unwrap()
+            .with_trusted_proxy(["not-a-cidr"], "x-client-ip")
+            .is_err()
+    );
+}
