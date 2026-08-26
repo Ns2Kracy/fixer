@@ -2,6 +2,8 @@
 
 #[path = "anime.rs"]
 pub mod anime;
+#[path = "book.rs"]
+pub mod book;
 #[path = "movie.rs"]
 pub mod movie;
 #[path = "music.rs"]

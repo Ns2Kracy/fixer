@@ -1,9 +1,9 @@
 //! Deterministic in-memory provider for tests, examples, and offline flows.
 
 use fixer_core::{
-    BoxFuture, Candidate, ExternalId, FetchRequest, HttpClient, MediaKind, MetadataDocument,
-    MovieCandidate, Provider, ProviderDescriptor, ProviderError, ProviderId, SearchRequest,
-    TelevisionCandidate,
+    BookCandidate, BoxFuture, Candidate, ExternalId, FetchRequest, HttpClient, MediaKind,
+    MetadataDocument, MovieCandidate, Provider, ProviderDescriptor, ProviderError, ProviderId,
+    SearchRequest, TelevisionCandidate,
 };
 use std::time::Duration;
 
@@ -105,6 +105,29 @@ impl Provider for FixtureProvider {
                         )
                         .ok()
                         .map(Candidate::Movie)
+                    })
+                    .collect::<Vec<_>>(),
+                SearchRequest::Book { title, year, .. } => self
+                    .documents
+                    .iter()
+                    .filter_map(|fixture| {
+                        let MetadataDocument::Book(book) = &fixture.document else {
+                            return None;
+                        };
+                        let candidate_title = book
+                            .titles
+                            .entries()
+                            .first()
+                            .map(|entry| entry.value().clone())
+                            .unwrap_or_else(|| title.clone());
+                        BookCandidate::new(
+                            self.descriptor.id().clone(),
+                            fixture.external_id.clone(),
+                            candidate_title,
+                            year,
+                        )
+                        .ok()
+                        .map(Candidate::Book)
                     })
                     .collect::<Vec<_>>(),
                 SearchRequest::Television { title, year, .. } => self

@@ -2,10 +2,10 @@
 
 use crate::{Fixer, SdkError};
 use fixer_core::{
-    AnimeDocument, AnimeMerger, AnimeSeries, Candidate, ExternalId, FetchRequest, MatchQuery,
-    Matcher, MediaKind, MergePolicy, MetadataDocument, MovieDocument, MovieMerger, OrderingScheme,
-    ProvenanceMap, ResolutionWarning, Resolved, SearchRequest, SeriesDocument, SeriesMerger,
-    SourceRef,
+    AnimeDocument, AnimeMerger, AnimeSeries, BookWork, Candidate, ExternalId, FetchRequest,
+    MatchQuery, Matcher, MediaKind, MergePolicy, MetadataDocument, MovieDocument, MovieMerger,
+    OrderingScheme, ProvenanceMap, ResolutionWarning, Resolved, SearchRequest, SeriesDocument,
+    SeriesMerger, SourceRef,
 };
 use futures_util::future::join_all;
 use std::time::SystemTime;
@@ -50,6 +50,24 @@ pub(crate) async fn search_anime(
         query = query.with_external_id(external_id.clone());
     }
     search_candidates(fixer, MediaKind::Anime, request, query).await
+}
+
+pub(crate) async fn search_book(
+    fixer: &Fixer,
+    title: &str,
+    year: Option<u16>,
+    external_id: Option<&ExternalId>,
+) -> Result<SearchOutcome, SdkError> {
+    let request =
+        SearchRequest::book(title, year)?.with_locales(fixer.preferred_languages.to_vec());
+    let mut query = MatchQuery::book(title)?;
+    if let Some(year) = year {
+        query = query.with_year(year);
+    }
+    if let Some(external_id) = external_id {
+        query = query.with_external_id(external_id.clone());
+    }
+    search_candidates(fixer, MediaKind::Book, request, query).await
 }
 
 pub(crate) async fn search_music(
@@ -197,6 +215,44 @@ pub(crate) async fn fetch_anime(
         .map_err(|error| SdkError::Merge(error.to_string()))?;
     resolved.warnings.extend(warnings);
     Ok(resolved)
+}
+
+pub(crate) async fn fetch_book(
+    fixer: &Fixer,
+    candidates: &[Candidate],
+    warnings: Vec<ResolutionWarning>,
+) -> Result<Resolved<BookWork>, SdkError> {
+    let candidate = candidates.first().ok_or(SdkError::NoCandidates)?;
+    let (mut documents, warnings) = fetch_metadata(
+        fixer,
+        MediaKind::Book,
+        std::slice::from_ref(candidate),
+        warnings,
+        &[],
+    )
+    .await?;
+    let metadata = documents.pop().ok_or(SdkError::NoCandidates)?;
+    let MetadataDocument::Book(work) = metadata.document else {
+        return Err(SdkError::UnexpectedDocument);
+    };
+    let mut provenance = ProvenanceMap::new();
+    for field in [
+        "book.work",
+        "book.titles",
+        "book.contributors",
+        "book.editions",
+        "book.publisher",
+        "book.assets",
+    ] {
+        provenance.add(field, metadata.source.clone())?;
+    }
+    Ok(Resolved {
+        value: work,
+        provenance,
+        conflicts: Vec::new(),
+        completeness: 1.0,
+        warnings,
+    })
 }
 
 pub(crate) async fn fetch_music(
