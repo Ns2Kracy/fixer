@@ -7,11 +7,15 @@ rust-version.workspace = true
 
 [dependencies]
 axum.workspace = true
+fs2.workspace = true
+same-file.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]
 http-body-util.workspace = true
-serde_json.workspace = true
+tempfile.workspace = true
 tower = { workspace = true, features = ["util"] }

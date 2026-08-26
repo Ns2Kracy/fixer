@@ -3,6 +3,7 @@
 pub mod api;
 mod app;
 pub mod jobs;
+pub mod store;
 
 use std::{env, net::SocketAddr};
 

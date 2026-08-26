@@ -29,3 +29,6 @@ zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 axum = "0.8.9"
 tower = "0.5.3"
 http-body-util = "0.1.5"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+fs2 = "0.4.3"
+same-file = "1.0.6"
