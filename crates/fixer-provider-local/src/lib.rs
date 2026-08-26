@@ -98,7 +98,7 @@ fn scan_directory(directory: &Path, result: &mut ScanResult) -> Result<(), Local
             .map_err(LocalError::from)
             .and_then(|input| match extension.as_deref() {
                 Some("json") => parse_json(&input).map(Some),
-                Some("nfo") if is_television_nfo(&input) => Ok(None),
+                Some("nfo") if is_non_movie_nfo(&input) => Ok(None),
                 Some("nfo") => parse_nfo(&input).map(Some),
                 _ => unreachable!("extension was filtered above"),
             }) {
@@ -113,16 +113,22 @@ fn scan_directory(directory: &Path, result: &mut ScanResult) -> Result<(), Local
     Ok(())
 }
 
-fn is_television_nfo(input: &str) -> bool {
+fn is_non_movie_nfo(input: &str) -> bool {
     let input = input.trim_start_matches('\u{feff}').trim_start();
     let root = input
         .strip_prefix("<?xml")
         .and_then(|rest| rest.split_once("?>").map(|(_, body)| body))
         .unwrap_or(input)
         .trim_start();
-    ["<tvshow", "<season", "<episodedetails"]
-        .iter()
-        .any(|tag| root.starts_with(tag))
+    [
+        "<tvshow",
+        "<season",
+        "<episodedetails",
+        "<anime",
+        "<courdetails",
+    ]
+    .iter()
+    .any(|tag| root.starts_with(tag))
 }
 
 /// Network-free local metadata provider.
@@ -170,8 +176,10 @@ impl LocalProvider {
     pub fn from_scan(root: &Path) -> Result<(Self, Vec<ScanWarning>), LocalError> {
         let movie_result = scan(root)?;
         let (television_records, television_warnings) = television::scan_television_records(root)?;
+        let anime_result = anime::scan_anime(root)?;
         let mut warnings = movie_result.warnings;
         warnings.extend(television_warnings);
+        warnings.extend(anime_result.warnings);
         let movie_documents = movie_result
             .documents
             .into_iter()
@@ -181,8 +189,13 @@ impl LocalProvider {
             .into_iter()
             .map(|record| (record.external_id, record.value))
             .collect();
+        let anime_documents = anime_result
+            .documents
+            .into_iter()
+            .map(|anime| ExternalId::new("local", anime.id.as_str()).map(|id| (id, anime)))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok((
-            Self::from_media_documents(movie_documents, television_documents, Vec::new())?,
+            Self::from_media_documents(movie_documents, television_documents, anime_documents)?,
             warnings,
         ))
     }
