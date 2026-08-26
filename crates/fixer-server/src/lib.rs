@@ -3,6 +3,7 @@
 pub mod api;
 mod app;
 pub mod auth;
+mod fs_policy;
 pub mod jobs;
 pub mod store;
 
@@ -14,6 +15,7 @@ use std::{
 };
 
 pub use app::{app, job_app};
+pub use fs_policy::{FsPolicy, FsPolicyError};
 pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
 pub use store::SqliteJobStore;
 use thiserror::Error;
