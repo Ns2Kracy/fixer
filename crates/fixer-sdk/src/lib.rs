@@ -11,10 +11,11 @@ pub mod query;
 pub use builder::FixerBuilder;
 pub use fixture::{FixtureDocument, FixtureProvider};
 pub use query::movie::{MovieQuery, MovieSearch, SelectedMovie};
+pub use query::television::{SelectedTelevision, TelevisionQuery, TelevisionSearch};
 
 use fixer_core::{
-    CoreError, HttpClient, HttpError, HttpRequest, HttpResponse, LanguageTag, Provider,
-    ProviderError, ProviderId,
+    CoreError, HttpClient, HttpError, HttpRequest, HttpResponse, LanguageTag, OrderingScheme,
+    Provider, ProviderError, ProviderId,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -39,9 +40,11 @@ pub enum SdkError {
     Provider(#[from] ProviderError),
     #[error("all provider operations failed: {0:?}")]
     AllProvidersFailed(Vec<String>),
-    #[error("provider returned a non-movie document")]
+    #[error("provider returned an unexpected metadata document")]
     UnexpectedDocument,
-    #[error("movie merge failed: {0}")]
+    #[error("requested television ordering {requested:?} is unavailable")]
+    OrderingUnavailable { requested: OrderingScheme },
+    #[error("metadata merge failed: {0}")]
     Merge(String),
     #[error("invalid HTTP configuration: {0}")]
     HttpConfig(String),
@@ -121,5 +124,10 @@ impl Fixer {
     /// ```
     pub fn movie(&self, title: impl Into<String>) -> MovieQuery {
         MovieQuery::new(self.clone(), title.into())
+    }
+
+    /// Starts an ergonomic typed television series query.
+    pub fn television(&self, title: impl Into<String>) -> TelevisionQuery {
+        TelevisionQuery::new(self.clone(), title.into())
     }
 }
