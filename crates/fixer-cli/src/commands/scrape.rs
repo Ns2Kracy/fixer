@@ -420,11 +420,7 @@ fn finish_plan(
         if json {
             render::json(&PlanDto::new(kind.as_str(), output_root, &plan))?;
         } else {
-            println!(
-                "planned {} operation(s) at {}",
-                plan.operations().len(),
-                output_root.display()
-            );
+            print_plan_text(&plan, output_root);
         }
         if policy.requires_review() {
             eprintln!("review required: {} metadata conflict(s)", policy.conflicts);
@@ -437,6 +433,7 @@ fn finish_plan(
     }
 
     if policy.requires_review() {
+        print_plan_text(&plan, output_root);
         eprintln!("review required: {} metadata conflict(s)", policy.conflicts);
         return Ok(RunStatus::ReviewRequired);
     }
@@ -458,6 +455,42 @@ fn finish_plan(
         diagnostics.scan,
         diagnostics.resolution,
     ))
+}
+
+fn print_plan_text(plan: &fixer_core::OutputPlan, output_root: &Path) {
+    println!(
+        "planned {} operation(s) at {}",
+        plan.operations().len(),
+        output_root.display()
+    );
+    for operation in plan.operations() {
+        let name = match operation {
+            fixer_core::OutputOperation::CreateDirectory { .. } => "create_directory",
+            fixer_core::OutputOperation::WriteBytes { .. } => "write_bytes",
+            fixer_core::OutputOperation::Copy { .. } => "copy",
+            fixer_core::OutputOperation::Symlink { .. } => "symlink",
+            fixer_core::OutputOperation::Hardlink { .. } => "hardlink",
+            fixer_core::OutputOperation::Reflink { .. } => "reflink",
+        };
+        if let Some(source) = operation.source() {
+            println!(
+                "{name} {} -> {}",
+                source.display(),
+                operation
+                    .target()
+                    .expect("output operations have targets")
+                    .display()
+            );
+        } else {
+            println!(
+                "{name} {}",
+                operation
+                    .target()
+                    .expect("output operations have targets")
+                    .display()
+            );
+        }
+    }
 }
 
 fn scan_root(path: &Path) -> AppResult<&Path> {

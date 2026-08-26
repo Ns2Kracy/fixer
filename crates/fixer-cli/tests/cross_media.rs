@@ -293,6 +293,9 @@ fn review_conflict_policy_returns_review_exit_and_blocks_apply() {
             .unwrap()
             .contains("review required")
     );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("planned 1 operation(s)"), "{stdout}");
+    assert!(stdout.contains("write_bytes movie.json"), "{stdout}");
     assert!(!library.join("movie.json").exists());
     assert!(!library.join("fixer-manifest.json").exists());
 }
