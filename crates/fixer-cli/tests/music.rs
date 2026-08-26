@@ -140,6 +140,6 @@ fn provider_list_advertises_musicbrainz_and_local_music() {
     let output = fixer().args(["providers", "list"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("local\tmovie,television,anime,music\toffline"));
+    assert!(stdout.contains("local\tmovie,television,anime,music,book\toffline"));
     assert!(stdout.contains("musicbrainz\tmusic\tnetwork"));
 }

@@ -25,11 +25,12 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
         Command::Providers {
             command: ProvidersCommand::List,
         } => {
-            println!("local\tmovie,television,anime,music\toffline");
+            println!("local\tmovie,television,anime,music,book\toffline");
             println!("tmdb\tmovie,television\tnetwork");
             println!("bangumi\tanime\tnetwork");
             println!("anilist\tanime\tnetwork,optional");
             println!("musicbrainz\tmusic\tnetwork");
+            println!("openlibrary\tbook\tnetwork");
             Ok(RunStatus::Success)
         }
     }
@@ -52,6 +53,7 @@ pub(crate) fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult
     }
     builder = builder.provider(config.bangumi_provider()?);
     builder = builder.provider(config.musicbrainz_provider()?);
+    builder = builder.provider(config.openlibrary_provider()?);
     if let Some(anilist) = config.anilist_provider()? {
         builder = builder.provider(anilist);
     }

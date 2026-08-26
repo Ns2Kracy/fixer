@@ -16,6 +16,7 @@ fixer-provider-anilist = { path = "../fixer-provider-anilist" }
 fixer-provider-bangumi = { path = "../fixer-provider-bangumi" }
 fixer-provider-local = { path = "../fixer-provider-local" }
 fixer-provider-musicbrainz = { path = "../fixer-provider-musicbrainz" }
+fixer-provider-openlibrary = { path = "../fixer-provider-openlibrary" }
 fixer-provider-tmdb = { path = "../fixer-provider-tmdb" }
 fixer-sdk = { path = "../fixer-sdk" }
 fixer-writer-local = { path = "../fixer-writer-local" }

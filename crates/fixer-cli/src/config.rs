@@ -32,6 +32,8 @@ pub struct Config {
     tmdb_base_url: Option<String>,
     bangumi_base_url: Option<String>,
     musicbrainz_base_url: Option<String>,
+    openlibrary_base_url: Option<String>,
+    openlibrary_cover_base_url: Option<String>,
     anilist_enabled: bool,
     anilist_endpoint: Option<String>,
     anilist_access_token: Option<String>,
@@ -53,6 +55,8 @@ struct FileConfig {
     tmdb_base_url: Option<String>,
     bangumi_base_url: Option<String>,
     musicbrainz_base_url: Option<String>,
+    openlibrary_base_url: Option<String>,
+    openlibrary_cover_base_url: Option<String>,
     anilist_enabled: Option<bool>,
     anilist_endpoint: Option<String>,
     anilist_access_token: Option<String>,
@@ -101,6 +105,12 @@ impl Config {
         let musicbrainz_base_url = env::var("MUSICBRAINZ_BASE_URL")
             .ok()
             .or(file.musicbrainz_base_url);
+        let openlibrary_base_url = env::var("OPENLIBRARY_BASE_URL")
+            .ok()
+            .or(file.openlibrary_base_url);
+        let openlibrary_cover_base_url = env::var("OPENLIBRARY_COVER_BASE_URL")
+            .ok()
+            .or(file.openlibrary_cover_base_url);
         let env_anilist_enabled = env::var("FIXER_ANILIST_ENABLED")
             .ok()
             .map(|value| parse_bool("FIXER_ANILIST_ENABLED", &value))
@@ -124,6 +134,8 @@ impl Config {
             tmdb_base_url,
             bangumi_base_url,
             musicbrainz_base_url,
+            openlibrary_base_url,
+            openlibrary_cover_base_url,
             anilist_enabled,
             anilist_endpoint,
             anilist_access_token,
@@ -167,6 +179,21 @@ impl Config {
         fixer_provider_musicbrainz::MusicBrainzProvider::new(config).map_err(AppError::new)
     }
 
+    pub fn openlibrary_provider(
+        &self,
+    ) -> AppResult<fixer_provider_openlibrary::OpenLibraryProvider> {
+        let mut config = fixer_provider_openlibrary::OpenLibraryConfig::default();
+        if let Some(base_url) = &self.openlibrary_base_url {
+            config = config.with_api_base_url(base_url).map_err(AppError::new)?;
+        }
+        if let Some(base_url) = &self.openlibrary_cover_base_url {
+            config = config
+                .with_cover_base_url(base_url)
+                .map_err(AppError::new)?;
+        }
+        fixer_provider_openlibrary::OpenLibraryProvider::new(config).map_err(AppError::new)
+    }
+
     pub fn anilist_provider(&self) -> AppResult<Option<fixer_provider_anilist::AniListProvider>> {
         if !self.anilist_enabled {
             return Ok(None);
@@ -187,7 +214,7 @@ impl Config {
 
     pub fn validation_summary(&self) -> String {
         format!(
-            "configuration valid\noffline: {} ({})\nproxy: {} ({})\nlocal_root: {} ({})\napi_key: {} ({})\nanilist: {} ({})\n",
+            "configuration valid\noffline: {} ({})\nproxy: {} ({})\nlocal_root: {} ({})\napi_key: {} ({})\nopenlibrary_api: {}\nopenlibrary_cover: {}\nanilist: {} ({})\n",
             self.offline,
             self.offline_source,
             configured(&self.proxy),
@@ -196,6 +223,8 @@ impl Config {
             self.local_root_source,
             configured(&self.api_key),
             self.api_key_source,
+            configured(&self.openlibrary_base_url),
+            configured(&self.openlibrary_cover_base_url),
             if self.anilist_enabled {
                 "enabled"
             } else {
@@ -217,6 +246,17 @@ impl fmt::Debug for Config {
             .field("tmdb_base_url", &self.tmdb_base_url)
             .field("bangumi_base_url", &self.bangumi_base_url)
             .field("musicbrainz_base_url", &self.musicbrainz_base_url)
+            .field(
+                "openlibrary_base_url",
+                &self.openlibrary_base_url.as_ref().map(|_| "[CONFIGURED]"),
+            )
+            .field(
+                "openlibrary_cover_base_url",
+                &self
+                    .openlibrary_cover_base_url
+                    .as_ref()
+                    .map(|_| "[CONFIGURED]"),
+            )
             .field("anilist_enabled", &self.anilist_enabled)
             .field(
                 "anilist_endpoint",

@@ -390,6 +390,7 @@ dependencies = [
  "fixer-provider-bangumi",
  "fixer-provider-local",
  "fixer-provider-musicbrainz",
+ "fixer-provider-openlibrary",
  "fixer-provider-tmdb",
  "fixer-sdk",
  "fixer-writer-local",
