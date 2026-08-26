@@ -11,7 +11,7 @@ mod nfo;
 mod television;
 
 pub use anime::{AnimeScanResult, scan_anime};
-pub use book::{BookMetadata, parse_epub, parse_opf};
+pub use book::{BookMetadata, BookScanResult, parse_epub, parse_opf, scan_books};
 pub use identify::{EvidenceKind, HintEvidence, MediaHint, identify_path};
 pub use json::parse_json;
 pub use music::{
@@ -24,10 +24,10 @@ pub use television::{
 };
 
 use fixer_core::{
-    AnimeCandidate, AnimeSeries, BoxFuture, Candidate, CoreError, ExternalId, FetchRequest,
-    HttpClient, MediaKind, MetadataDocument, Movie, MovieCandidate, MusicCandidate,
-    MusicReleaseGroup, Provider, ProviderDescriptor, ProviderError, ProviderId, SearchRequest,
-    Series, TelevisionCandidate,
+    AnimeCandidate, AnimeSeries, BookCandidate, BookWork, BoxFuture, Candidate, CoreError,
+    ExternalId, FetchRequest, HttpClient, MediaKind, MetadataDocument, Movie, MovieCandidate,
+    MusicCandidate, MusicReleaseGroup, Provider, ProviderDescriptor, ProviderError, ProviderId,
+    SearchRequest, Series, TelevisionCandidate,
 };
 use std::{
     fs,
@@ -148,6 +148,7 @@ pub struct LocalProvider {
     television_documents: Vec<(ExternalId, Series)>,
     anime_documents: Vec<(ExternalId, AnimeSeries)>,
     music_documents: Vec<(ExternalId, MusicReleaseGroup)>,
+    book_documents: Vec<(ExternalId, BookWork)>,
 }
 
 impl LocalProvider {
@@ -157,7 +158,13 @@ impl LocalProvider {
             .into_iter()
             .map(|movie| ExternalId::new("local", movie.id.as_str()).map(|id| (id, movie)))
             .collect::<Result<Vec<_>, _>>()?;
-        Self::from_media_documents(movie_documents, Vec::new(), Vec::new(), Vec::new())
+        Self::from_media_documents(
+            movie_documents,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     /// Constructs a provider from already parsed local television documents.
@@ -168,7 +175,13 @@ impl LocalProvider {
             .into_iter()
             .map(|series| ExternalId::new("local", series.id.as_str()).map(|id| (id, series)))
             .collect::<Result<Vec<_>, _>>()?;
-        Self::from_media_documents(Vec::new(), television_documents, Vec::new(), Vec::new())
+        Self::from_media_documents(
+            Vec::new(),
+            television_documents,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     /// Constructs a provider from already parsed local anime documents.
@@ -179,7 +192,13 @@ impl LocalProvider {
             .into_iter()
             .map(|anime| ExternalId::new("local", anime.id.as_str()).map(|id| (id, anime)))
             .collect::<Result<Vec<_>, _>>()?;
-        Self::from_media_documents(Vec::new(), Vec::new(), anime_documents, Vec::new())
+        Self::from_media_documents(
+            Vec::new(),
+            Vec::new(),
+            anime_documents,
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     /// Constructs a provider from already parsed local music documents.
@@ -190,7 +209,40 @@ impl LocalProvider {
             .into_iter()
             .map(|group| ExternalId::new("local", group.id.as_str()).map(|id| (id, group)))
             .collect::<Result<Vec<_>, _>>()?;
-        Self::from_media_documents(Vec::new(), Vec::new(), Vec::new(), music_documents)
+        Self::from_media_documents(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            music_documents,
+            Vec::new(),
+        )
+    }
+
+    /// Constructs a provider from already parsed local book works.
+    pub fn from_book_documents(
+        documents: impl IntoIterator<Item = BookWork>,
+    ) -> Result<Self, LocalError> {
+        let mut book_documents = Vec::new();
+        for book in documents {
+            if book.editions.is_empty() {
+                return Err(LocalError::InvalidMetadata(
+                    "local book has no edition".to_owned(),
+                ));
+            }
+            for edition in &book.editions {
+                book_documents.push((
+                    ExternalId::new("isbn", edition.isbn_13.as_str())?,
+                    book.clone(),
+                ));
+            }
+        }
+        Self::from_media_documents(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            book_documents,
+        )
     }
 
     /// Scans a root and constructs a provider plus scan warnings.
@@ -199,10 +251,12 @@ impl LocalProvider {
         let (television_records, television_warnings) = television::scan_television_records(root)?;
         let anime_result = anime::scan_anime(root)?;
         let music_result = music::scan_music(root)?;
+        let book_result = book::scan_books(root)?;
         let mut warnings = movie_result.warnings;
         warnings.extend(television_warnings);
         warnings.extend(anime_result.warnings);
         warnings.extend(music_result.warnings);
+        warnings.extend(book_result.warnings);
         let movie_documents = movie_result
             .documents
             .into_iter()
@@ -222,12 +276,14 @@ impl LocalProvider {
             .into_iter()
             .map(|group| ExternalId::new("local", group.id.as_str()).map(|id| (id, group)))
             .collect::<Result<Vec<_>, _>>()?;
+        let book_documents = book_result.records;
         Ok((
             Self::from_media_documents(
                 movie_documents,
                 television_documents,
                 anime_documents,
                 music_documents,
+                book_documents,
             )?,
             warnings,
         ))
@@ -238,12 +294,14 @@ impl LocalProvider {
         television_documents: Vec<(ExternalId, Series)>,
         anime_documents: Vec<(ExternalId, AnimeSeries)>,
         music_documents: Vec<(ExternalId, MusicReleaseGroup)>,
+        book_documents: Vec<(ExternalId, BookWork)>,
     ) -> Result<Self, LocalError> {
         let mut media_kinds = Vec::new();
         if !movie_documents.is_empty()
             || (television_documents.is_empty()
                 && anime_documents.is_empty()
-                && music_documents.is_empty())
+                && music_documents.is_empty()
+                && book_documents.is_empty())
         {
             media_kinds.push(MediaKind::Movie);
         }
@@ -256,6 +314,9 @@ impl LocalProvider {
         if !music_documents.is_empty() {
             media_kinds.push(MediaKind::Music);
         }
+        if !book_documents.is_empty() {
+            media_kinds.push(MediaKind::Book);
+        }
         let descriptor =
             ProviderDescriptor::new(ProviderId::new("local")?, "Local metadata", media_kinds)?
                 .with_network_requirement(false);
@@ -265,6 +326,7 @@ impl LocalProvider {
             television_documents,
             anime_documents,
             music_documents,
+            book_documents,
         })
     }
 }
@@ -328,6 +390,22 @@ impl Provider for LocalProvider {
                         .map_err(ProviderError::from)
                     })
                     .collect(),
+                SearchRequest::Book { title, year, .. } => self
+                    .book_documents
+                    .iter()
+                    .map(|(external_id, book)| {
+                        let title =
+                            matching_title(&book.titles, &title, "local book has no title")?;
+                        BookCandidate::new(
+                            self.descriptor.id().clone(),
+                            external_id.clone(),
+                            title,
+                            year,
+                        )
+                        .map(Candidate::Book)
+                        .map_err(ProviderError::from)
+                    })
+                    .collect(),
                 SearchRequest::Anime { title, year, .. } => self
                     .anime_documents
                     .iter()
@@ -344,10 +422,6 @@ impl Provider for LocalProvider {
                         .map_err(ProviderError::from)
                     })
                     .collect(),
-                _ => Err(ProviderError::UnsupportedMedia {
-                    provider: self.descriptor.id().clone(),
-                    media_kind,
-                }),
             }
         })
     }
@@ -383,10 +457,12 @@ impl Provider for LocalProvider {
                     .find(|(id, _)| id == &request.external_id)
                     .map(|(_, group)| MetadataDocument::Music(group.clone()))
                     .ok_or(ProviderError::NotFound),
-                media_kind => Err(ProviderError::UnsupportedMedia {
-                    provider: self.descriptor.id().clone(),
-                    media_kind,
-                }),
+                MediaKind::Book => self
+                    .book_documents
+                    .iter()
+                    .find(|(id, _)| id == &request.external_id)
+                    .map(|(_, book)| MetadataDocument::Book(book.clone()))
+                    .ok_or(ProviderError::NotFound),
             }
         })
     }

@@ -1,11 +1,16 @@
 //! Read-only EPUB container and OPF metadata parsing.
 
 use crate::LocalError;
-use fixer_core::{Isbn10, Isbn13};
+use fixer_core::{
+    Asset, AssetId, AssetKind, BookEdition, BookWork, Credit, CreditRole, ExternalId, Isbn10,
+    Isbn13, LocalizedValue, Person, PersonId, ReleaseId, SourcePath, WorkId,
+};
 use quick_xml::{Reader, XmlVersion, events::Event};
 use std::{
+    collections::BTreeMap,
+    fs,
     io::{Cursor, Read},
-    path::{Component, Path},
+    path::{Component, Path, PathBuf},
 };
 use zip::ZipArchive;
 
@@ -249,4 +254,200 @@ fn isbn10_from_isbn13(isbn: &Isbn13) -> Result<Isbn10, LocalError> {
 
 fn metadata_error(message: impl Into<String>) -> LocalError {
     LocalError::InvalidMetadata(message.into())
+}
+
+/// Documents, work roots, exact ISBN records, and warnings produced by a book scan.
+#[derive(Debug, Clone, Default)]
+pub struct BookScanResult {
+    pub documents: Vec<BookWork>,
+    pub roots: Vec<PathBuf>,
+    pub warnings: Vec<crate::ScanWarning>,
+    pub(crate) records: Vec<(ExternalId, BookWork)>,
+}
+
+#[derive(Debug)]
+struct WorkAggregate {
+    title: String,
+    authors: Vec<String>,
+    root: PathBuf,
+    editions: Vec<BookEdition>,
+}
+
+/// Recursively reads EPUB metadata without following symbolic links.
+pub fn scan_books(root: &Path) -> Result<BookScanResult, LocalError> {
+    if !root.is_dir() {
+        return Err(LocalError::InvalidPath(root.to_path_buf()));
+    }
+    let mut paths = Vec::new();
+    collect_epubs(root, &mut paths)?;
+    paths.sort();
+    let mut groups = BTreeMap::<String, WorkAggregate>::new();
+    let mut warnings = Vec::new();
+    for path in paths {
+        match fs::read(&path)
+            .map_err(LocalError::from)
+            .and_then(|bytes| parse_epub(&bytes))
+            .and_then(|metadata| add_edition(&mut groups, &path, metadata))
+        {
+            Ok(()) => {}
+            Err(error) => warnings.push(crate::ScanWarning {
+                path,
+                message: error.to_string(),
+            }),
+        }
+    }
+    let mut documents = Vec::with_capacity(groups.len());
+    let mut roots = Vec::with_capacity(groups.len());
+    let mut records = Vec::new();
+    for aggregate in groups.into_values() {
+        let edition_isbns = aggregate
+            .editions
+            .iter()
+            .map(|edition| edition.isbn_13.as_str().to_owned())
+            .collect::<Vec<_>>();
+        roots.push(aggregate.root.clone());
+        let document = build_work(aggregate)?;
+        for isbn in edition_isbns {
+            records.push((ExternalId::new("isbn", isbn)?, document.clone()));
+        }
+        documents.push(document);
+    }
+    Ok(BookScanResult {
+        documents,
+        roots,
+        warnings,
+        records,
+    })
+}
+
+fn add_edition(
+    groups: &mut BTreeMap<String, WorkAggregate>,
+    path: &Path,
+    metadata: BookMetadata,
+) -> Result<(), LocalError> {
+    let root = path
+        .parent()
+        .ok_or_else(|| LocalError::InvalidPath(path.to_path_buf()))?
+        .to_path_buf();
+    let isbn_10 = metadata
+        .isbn_10
+        .ok_or_else(|| metadata_error("EPUB has no canonical ISBN-10"))?;
+    let isbn_13 = metadata
+        .isbn_13
+        .ok_or_else(|| metadata_error("EPUB has no canonical ISBN-13"))?;
+    let isbn = isbn_13.as_str().to_owned();
+    let publisher = metadata
+        .publisher
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "Unknown publisher".to_owned());
+    let asset = Asset::new(
+        AssetId::new(format!("local-book-file-{isbn}"))?,
+        SourcePath::new(path.to_string_lossy().into_owned())?,
+        AssetKind::BookFile,
+    );
+    let edition = BookEdition::new(
+        ReleaseId::new(format!("local-book-edition-{isbn}"))?,
+        isbn_10,
+        isbn_13,
+        publisher,
+        vec![asset],
+    )?;
+    let key = format!(
+        "{}\0{}\0{}",
+        root.to_string_lossy(),
+        normalize(&metadata.title),
+        metadata
+            .authors
+            .iter()
+            .map(|author| normalize(author))
+            .collect::<Vec<_>>()
+            .join("\0")
+    );
+    let aggregate = groups.entry(key).or_insert_with(|| WorkAggregate {
+        title: metadata.title,
+        authors: metadata.authors,
+        root,
+        editions: Vec::new(),
+    });
+    if aggregate
+        .editions
+        .iter()
+        .any(|existing| existing.isbn_13.as_str() == isbn)
+    {
+        return Err(metadata_error(format!("duplicate EPUB ISBN `{isbn}`")));
+    }
+    aggregate.editions.push(edition);
+    Ok(())
+}
+
+fn build_work(mut aggregate: WorkAggregate) -> Result<BookWork, LocalError> {
+    aggregate
+        .editions
+        .sort_by(|left, right| left.isbn_13.as_str().cmp(right.isbn_13.as_str()));
+    let work_slug = slug(&format!(
+        "{}-{}",
+        aggregate.title,
+        aggregate.authors.join("-")
+    ));
+    let mut titles = LocalizedValue::new();
+    titles.insert("und", aggregate.title)?;
+    let contributors = aggregate
+        .authors
+        .into_iter()
+        .map(|author| {
+            let person = Person::new(
+                PersonId::new(format!("local-book-author-{}", slug(&author)))?,
+                author,
+            )?;
+            Ok(Credit::new(person, CreditRole::Author))
+        })
+        .collect::<Result<Vec<_>, LocalError>>()?;
+    Ok(BookWork::new(
+        WorkId::new(format!("local-book-work-{work_slug}"))?,
+        titles,
+        contributors,
+        aggregate.editions,
+    ))
+}
+
+fn collect_epubs(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), LocalError> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_epubs(&path, paths)?;
+        } else if path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("epub"))
+        {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn normalize(value: &str) -> String {
+    value.split_whitespace().collect::<String>().to_lowercase()
+}
+
+fn slug(value: &str) -> String {
+    let mut output = value
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    while output.contains("--") {
+        output = output.replace("--", "-");
+    }
+    output.trim_matches('-').to_owned()
 }
