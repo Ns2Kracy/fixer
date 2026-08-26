@@ -27,6 +27,9 @@ url = "2.5.8"
 wiremock = "0.6.5"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 axum = "0.8.9"
+argon2 = "0.5.3"
+base64 = "0.22.1"
+getrandom = "0.4.3"
 tower = "0.5.3"
 http-body-util = "0.1.5"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }

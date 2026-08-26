@@ -10,8 +10,11 @@ fixer-core = { path = "../fixer-core" }
 fixer-provider-local = { path = "../fixer-provider-local" }
 fixer-sdk = { path = "../fixer-sdk" }
 fixer-writer-local = { path = "../fixer-writer-local" }
+argon2.workspace = true
 axum.workspace = true
+base64.workspace = true
 futures-util.workspace = true
+getrandom.workspace = true
 fs2.workspace = true
 same-file.workspace = true
 serde.workspace = true

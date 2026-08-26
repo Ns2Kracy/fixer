@@ -2,6 +2,7 @@
 
 pub mod api;
 mod app;
+pub mod auth;
 pub mod jobs;
 pub mod store;
 

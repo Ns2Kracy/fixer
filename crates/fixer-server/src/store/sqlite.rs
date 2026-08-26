@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use sqlx::{
@@ -12,6 +12,12 @@ use sqlx::{
 };
 
 use crate::{
+    auth::{
+        IssuedApiToken, IssuedSession,
+        password::{PasswordHashValue, verify_password},
+        session::issue_session_secrets,
+        token::{digest, issue_secret},
+    },
     jobs::model::{JobInputDto, JobState, ProgressSummary},
     store::{ExecutionReservation, JobId, JobRecord, JobRecordParts, JobUpdate, StoreError},
 };
@@ -46,6 +52,143 @@ impl SqliteJobStore {
         };
         store.interrupt_active_jobs().await?;
         Ok(store)
+    }
+
+    pub async fn set_password_hash(
+        &self,
+        password_hash: &PasswordHashValue,
+    ) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO single_user_auth (id, password_hash, updated_at_ms) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET password_hash = excluded.password_hash, updated_at_ms = excluded.updated_at_ms",
+        )
+        .bind(password_hash.as_str())
+        .bind(timestamp_ms()?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn verify_single_user_password(&self, password: &str) -> Result<bool, StoreError> {
+        let Some(encoded) = sqlx::query_scalar::<_, String>(
+            "SELECT password_hash FROM single_user_auth WHERE id = 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(false);
+        };
+        let encoded = PasswordHashValue::parse(encoded)?;
+        let password = password.to_owned();
+        tokio::task::spawn_blocking(move || verify_password(&password, &encoded))
+            .await?
+            .map_err(Into::into)
+    }
+
+    pub async fn create_session(&self, lifetime: Duration) -> Result<IssuedSession, StoreError> {
+        let lifetime_ms =
+            i64::try_from(lifetime.as_millis()).map_err(|_| StoreError::TimestampOverflow)?;
+        if lifetime_ms <= 0 {
+            return Err(StoreError::CorruptRecord(
+                "session lifetime must be positive".to_owned(),
+            ));
+        }
+        let created_at_ms = timestamp_ms()?;
+        let expires_at_ms = created_at_ms
+            .checked_add(lifetime_ms)
+            .ok_or(StoreError::TimestampOverflow)?;
+        let secrets = issue_session_secrets()?;
+        sqlx::query(
+            "INSERT INTO auth_sessions (token_digest, csrf_digest, created_at_ms, expires_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .bind(secrets.token_digest.as_slice())
+        .bind(secrets.csrf_digest.as_slice())
+        .bind(created_at_ms)
+        .bind(expires_at_ms)
+        .execute(&self.pool)
+        .await?;
+        Ok(IssuedSession::new(
+            secrets.token,
+            secrets.csrf_token,
+            expires_at_ms,
+        ))
+    }
+
+    pub async fn authenticate_session(
+        &self,
+        token: &str,
+        csrf_token: Option<&str>,
+    ) -> Result<bool, StoreError> {
+        if !token.starts_with("fixer_session_") {
+            return Ok(false);
+        }
+        let csrf_digest = csrf_token.map(digest);
+        let authenticated: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM auth_sessions WHERE token_digest = ? AND expires_at_ms > ? AND (? IS NULL OR csrf_digest = ?))",
+        )
+        .bind(digest(token).as_slice())
+        .bind(timestamp_ms()?)
+        .bind(csrf_digest.as_ref().map(|value| value.as_slice()))
+        .bind(csrf_digest.as_ref().map(|value| value.as_slice()))
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(authenticated == 1)
+    }
+
+    pub async fn revoke_session(&self, token: &str) -> Result<bool, StoreError> {
+        if !token.starts_with("fixer_session_") {
+            return Ok(false);
+        }
+        let result = sqlx::query("DELETE FROM auth_sessions WHERE token_digest = ?")
+            .bind(digest(token).as_slice())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn issue_api_token(&self, name: &str) -> Result<IssuedApiToken, StoreError> {
+        let name = name.trim();
+        if name.is_empty() || name.len() > 100 {
+            return Err(StoreError::CorruptRecord(
+                "API token name must contain between 1 and 100 bytes".to_owned(),
+            ));
+        }
+        let token = issue_secret("fixer_pat_")?;
+        let result = sqlx::query(
+            "INSERT INTO api_tokens (name, token_digest, created_at_ms) VALUES (?, ?, ?)",
+        )
+        .bind(name)
+        .bind(digest(&token).as_slice())
+        .bind(timestamp_ms()?)
+        .execute(&self.pool)
+        .await?;
+        Ok(IssuedApiToken::new(result.last_insert_rowid(), token))
+    }
+
+    pub async fn authenticate_api_token(&self, token: &str) -> Result<Option<i64>, StoreError> {
+        if !token.starts_with("fixer_pat_") {
+            return Ok(None);
+        }
+        sqlx::query_scalar(
+            "SELECT id FROM api_tokens WHERE token_digest = ? AND revoked_at_ms IS NULL",
+        )
+        .bind(digest(token).as_slice())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn revoke_api_token(&self, id: i64) -> Result<bool, StoreError> {
+        if id <= 0 {
+            return Ok(false);
+        }
+        let result = sqlx::query(
+            "UPDATE api_tokens SET revoked_at_ms = ? WHERE id = ? AND revoked_at_ms IS NULL",
+        )
+        .bind(timestamp_ms()?)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     pub async fn create_job(&self, input: JobInputDto) -> Result<JobRecord, StoreError> {

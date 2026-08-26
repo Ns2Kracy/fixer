@@ -4,9 +4,12 @@ use std::{num::NonZeroI64, path::PathBuf};
 
 use thiserror::Error;
 
-use crate::jobs::model::{
-    ExecutionSummary, JobInputDto, JobState, PlanSummary, ProgressSummary, ReviewDecisionDto,
-    ReviewSummary,
+use crate::{
+    auth::{password::PasswordError, token::SecretError},
+    jobs::model::{
+        ExecutionSummary, JobInputDto, JobState, PlanSummary, ProgressSummary, ReviewDecisionDto,
+        ReviewSummary,
+    },
 };
 
 pub use sqlite::SqliteJobStore;
@@ -200,6 +203,12 @@ pub enum StoreError {
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error("SQLite job store failed: {0}")]
     Database(#[from] sqlx::Error),
+    #[error("password processing failed: {0}")]
+    Password(#[from] PasswordError),
+    #[error("authentication secret generation failed: {0}")]
+    Secret(#[from] SecretError),
+    #[error("authentication worker task failed: {0}")]
+    AuthenticationTask(#[from] tokio::task::JoinError),
     #[error("persistent job JSON is invalid: {0}")]
     Json(#[from] serde_json::Error),
 }
