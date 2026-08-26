@@ -1,0 +1,49 @@
+{
+  "total": 3,
+  "limit": 200,
+  "offset": 0,
+  "data": [
+    {
+      "id": 1200001,
+      "type": 0,
+      "name": "冒険の終わり",
+      "name_cn": "冒险的终点",
+      "sort": 1.0,
+      "ep": 1.0,
+      "airdate": "2023-09-29",
+      "comment": 0,
+      "duration": "00:24:00",
+      "desc": "",
+      "disc": 0,
+      "subject_id": 400602
+    },
+    {
+      "id": 1200002,
+      "type": 0,
+      "name": "別に魔法じゃなくたって…",
+      "name_cn": "不一定非得是魔法……",
+      "sort": 2.0,
+      "ep": 2.0,
+      "airdate": "2023-09-29",
+      "comment": 0,
+      "duration": "00:24:00",
+      "desc": "",
+      "disc": 0,
+      "subject_id": 400602
+    },
+    {
+      "id": 1200099,
+      "type": 1,
+      "name": "旅立ちの記録",
+      "name_cn": "启程记录",
+      "sort": 1.0,
+      "ep": 0.0,
+      "airdate": "2023-09-30",
+      "comment": 0,
+      "duration": "00:03:00",
+      "desc": "",
+      "disc": 0,
+      "subject_id": 400602
+    }
+  ]
+}

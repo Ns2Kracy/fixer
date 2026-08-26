@@ -1,0 +1,18 @@
+{
+  "total": 1,
+  "limit": 25,
+  "offset": 0,
+  "data": [
+    {
+      "id": 400602,
+      "type": 2,
+      "name": "葬送のフリーレン",
+      "name_cn": "葬送的芙莉莲",
+      "date": "2023-09-29",
+      "image": "https://lain.bgm.tv/pic/cover/c/example.jpg",
+      "tags": [],
+      "score": 9.2,
+      "rank": 1
+    }
+  ]
+}
