@@ -1,0 +1,27 @@
+{
+  "id": "1f2a3b4c-1111-2222-3333-444455556666",
+  "title": "Kind of Blue",
+  "primary-type": "Album",
+  "first-release-date": "1959-08-17",
+  "artist-credit": [
+    {
+      "name": "Miles Davis",
+      "artist": {
+        "id": "561d854a-6a28-4aa7-8c99-323e6ce46c2a",
+        "name": "Miles Davis"
+      }
+    }
+  ],
+  "releases": [
+    {
+      "id": "bbbbbbbb-1111-2222-3333-444455556666",
+      "title": "Kind of Blue",
+      "date": "1997-01-01"
+    },
+    {
+      "id": "aaaaaaaa-1111-2222-3333-444455556666",
+      "title": "Kind of Blue",
+      "date": "1959-08-17"
+    }
+  ]
+}

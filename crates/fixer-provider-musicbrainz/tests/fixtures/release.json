@@ -1,0 +1,57 @@
+{
+  "id": "aaaaaaaa-1111-2222-3333-444455556666",
+  "title": "Kind of Blue",
+  "date": "1959-08-17",
+  "media": [
+    {
+      "position": 1,
+      "format": "12\" Vinyl",
+      "track-count": 2,
+      "tracks": [
+        {
+          "id": "track-1",
+          "position": 1,
+          "number": "A1",
+          "title": "So What",
+          "length": 562000,
+          "recording": {
+            "id": "recording-1",
+            "title": "So What",
+            "length": 562000
+          }
+        },
+        {
+          "id": "track-2",
+          "position": 2,
+          "number": "A2",
+          "title": "Freddie Freeloader",
+          "length": 589500,
+          "recording": {
+            "id": "recording-2",
+            "title": "Freddie Freeloader",
+            "length": 589500
+          }
+        }
+      ]
+    },
+    {
+      "position": 2,
+      "format": "Bonus CD",
+      "track-count": 1,
+      "tracks": [
+        {
+          "id": "track-3",
+          "position": 1,
+          "number": "1",
+          "title": "Flamenco Sketches (Alternate Take)",
+          "length": 568001,
+          "recording": {
+            "id": "recording-3",
+            "title": "Flamenco Sketches (Alternate Take)",
+            "length": 568001
+          }
+        }
+      ]
+    }
+  ]
+}
