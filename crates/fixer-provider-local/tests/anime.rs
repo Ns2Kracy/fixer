@@ -61,7 +61,7 @@ fn pre_parsed_anime_searches_and_fetches_without_http() {
     let fixer_core::Candidate::Anime(candidate) = &candidates[0] else {
         panic!("expected anime candidate");
     };
-    assert_eq!(candidate.title, "葬送のフリーレン");
+    assert_eq!(candidate.title, "葬送的芙莉莲");
     assert_eq!(candidate.year, Some(2023));
     assert_eq!(candidate.external_id.namespace, "local");
 

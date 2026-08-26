@@ -272,11 +272,12 @@ impl Provider for LocalProvider {
                         .map_err(ProviderError::from)
                     })
                     .collect(),
-                SearchRequest::Anime { year, .. } => self
+                SearchRequest::Anime { title, year, .. } => self
                     .anime_documents
                     .iter()
                     .map(|(external_id, anime)| {
-                        let title = first_title(&anime.titles, "local anime has no title")?;
+                        let title =
+                            matching_title(&anime.titles, &title, "local anime has no title")?;
                         AnimeCandidate::new(
                             self.descriptor.id().clone(),
                             external_id.clone(),
@@ -327,6 +328,28 @@ impl Provider for LocalProvider {
             }
         })
     }
+}
+
+fn matching_title(
+    titles: &fixer_core::LocalizedValue<String>,
+    query: &str,
+    error: &str,
+) -> Result<String, ProviderError> {
+    let normalized_query = query.split_whitespace().collect::<String>().to_lowercase();
+    titles
+        .entries()
+        .iter()
+        .find(|entry| {
+            entry
+                .value()
+                .split_whitespace()
+                .collect::<String>()
+                .to_lowercase()
+                == normalized_query
+        })
+        .map(|entry| entry.value().clone())
+        .map(Ok)
+        .unwrap_or_else(|| first_title(titles, error))
 }
 
 fn first_title(
