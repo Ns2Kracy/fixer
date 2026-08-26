@@ -5,12 +5,14 @@
 mod anime;
 mod identify;
 mod json;
+mod music;
 mod nfo;
 mod television;
 
 pub use anime::{AnimeScanResult, scan_anime};
 pub use identify::{EvidenceKind, HintEvidence, MediaHint, identify_path};
 pub use json::parse_json;
+pub use music::{CueFile, CueSheet, CueTrack, Id3v1Tags, parse_cue, parse_id3v1};
 pub use nfo::parse_nfo;
 pub use television::{
     EpisodeHint, MatroskaEpisodeTags, TelevisionScanResult, episode_series_root,
