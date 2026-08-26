@@ -12,6 +12,7 @@ pub use builder::FixerBuilder;
 pub use fixture::{FixtureDocument, FixtureProvider};
 pub use query::anime::{AnimeQuery, AnimeSearch, SelectedAnime};
 pub use query::movie::{MovieQuery, MovieSearch, SelectedMovie};
+pub use query::music::{MusicQuery, MusicSearch, SelectedMusic};
 pub use query::television::{SelectedTelevision, TelevisionQuery, TelevisionSearch};
 
 use fixer_core::{
@@ -135,5 +136,10 @@ impl Fixer {
     /// Starts an ergonomic typed anime series query.
     pub fn anime(&self, title: impl Into<String>) -> AnimeQuery {
         AnimeQuery::new(self.clone(), title.into())
+    }
+
+    /// Starts an ergonomic typed music release-group query.
+    pub fn music(&self, title: impl Into<String>) -> MusicQuery {
+        MusicQuery::new(self.clone(), title.into())
     }
 }

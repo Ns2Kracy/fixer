@@ -17,7 +17,9 @@ tokio.workspace = true
 fixer-provider-anilist = { path = "../fixer-provider-anilist" }
 fixer-provider-bangumi = { path = "../fixer-provider-bangumi" }
 fixer-provider-local = { path = "../fixer-provider-local" }
+fixer-provider-musicbrainz = { path = "../fixer-provider-musicbrainz" }
 fixer-provider-tmdb = { path = "../fixer-provider-tmdb" }
+fixer-writer-local = { path = "../fixer-writer-local" }
 wiremock.workspace = true
 trybuild.workspace = true
 serde_json.workspace = true

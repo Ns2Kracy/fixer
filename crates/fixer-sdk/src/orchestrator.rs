@@ -4,7 +4,8 @@ use crate::{Fixer, SdkError};
 use fixer_core::{
     AnimeDocument, AnimeMerger, AnimeSeries, Candidate, ExternalId, FetchRequest, MatchQuery,
     Matcher, MediaKind, MergePolicy, MetadataDocument, MovieDocument, MovieMerger, OrderingScheme,
-    ResolutionWarning, Resolved, SearchRequest, SeriesDocument, SeriesMerger, SourceRef,
+    ProvenanceMap, ResolutionWarning, Resolved, SearchRequest, SeriesDocument, SeriesMerger,
+    SourceRef,
 };
 use futures_util::future::join_all;
 use std::time::SystemTime;
@@ -49,6 +50,20 @@ pub(crate) async fn search_anime(
         query = query.with_external_id(external_id.clone());
     }
     search_candidates(fixer, MediaKind::Anime, request, query).await
+}
+
+pub(crate) async fn search_music(
+    fixer: &Fixer,
+    title: &str,
+    year: Option<u16>,
+) -> Result<SearchOutcome, SdkError> {
+    let request =
+        SearchRequest::music(title, year)?.with_locales(fixer.preferred_languages.to_vec());
+    let mut query = MatchQuery::music(title)?;
+    if let Some(year) = year {
+        query = query.with_year(year);
+    }
+    search_candidates(fixer, MediaKind::Music, request, query).await
 }
 
 pub(crate) async fn search_television(
@@ -182,6 +197,44 @@ pub(crate) async fn fetch_anime(
         .map_err(|error| SdkError::Merge(error.to_string()))?;
     resolved.warnings.extend(warnings);
     Ok(resolved)
+}
+
+pub(crate) async fn fetch_music(
+    fixer: &Fixer,
+    candidates: &[Candidate],
+    warnings: Vec<ResolutionWarning>,
+) -> Result<Resolved<fixer_core::MusicReleaseGroup>, SdkError> {
+    let candidate = candidates.first().ok_or(SdkError::NoCandidates)?;
+    let (mut documents, warnings) = fetch_metadata(
+        fixer,
+        MediaKind::Music,
+        std::slice::from_ref(candidate),
+        warnings,
+        &[],
+    )
+    .await?;
+    let metadata = documents.pop().ok_or(SdkError::NoCandidates)?;
+    let MetadataDocument::Music(group) = metadata.document else {
+        return Err(SdkError::UnexpectedDocument);
+    };
+    let mut provenance = ProvenanceMap::new();
+    for field in [
+        "music.release_group",
+        "music.titles",
+        "music.artist",
+        "music.releases",
+        "music.discs",
+        "music.tracks",
+    ] {
+        provenance.add(field, metadata.source.clone())?;
+    }
+    Ok(Resolved {
+        value: group,
+        provenance,
+        conflicts: Vec::new(),
+        completeness: 1.0,
+        warnings,
+    })
 }
 
 pub(crate) async fn fetch_series(
