@@ -346,6 +346,56 @@ impl Config {
         })
     }
 
+    pub fn validate(&self) -> AppResult<()> {
+        if let Some(base_url) = &self.tmdb_base_url {
+            fixer_provider_tmdb::TmdbConfig::new("configuration-validation-token")
+                .and_then(|config| config.with_base_url(base_url))
+                .map_err(AppError::new)?;
+        }
+        if let Some(base_url) = &self.bangumi_base_url {
+            fixer_provider_bangumi::BangumiConfig::default()
+                .with_base_url(base_url)
+                .map_err(AppError::new)?;
+        }
+        if let Some(base_url) = &self.musicbrainz_base_url {
+            fixer_provider_musicbrainz::MusicBrainzConfig::default()
+                .with_base_url(base_url)
+                .map_err(AppError::new)?;
+        }
+        if let Some(base_url) = &self.openlibrary_base_url {
+            fixer_provider_openlibrary::OpenLibraryConfig::default()
+                .with_api_base_url(base_url)
+                .map_err(AppError::new)?;
+        }
+        if let Some(base_url) = &self.openlibrary_cover_base_url {
+            fixer_provider_openlibrary::OpenLibraryConfig::default()
+                .with_cover_base_url(base_url)
+                .map_err(AppError::new)?;
+        }
+        if let Some(endpoint) = &self.anilist_endpoint {
+            fixer_provider_anilist::AniListConfig::default()
+                .with_endpoint(endpoint)
+                .map_err(AppError::new)?;
+        }
+
+        if let Some(proxy) = &self.proxy {
+            let provider = fixer_provider_local::LocalProvider::from_documents(Vec::<
+                fixer_core::Movie,
+            >::new(
+            ))
+            .map_err(AppError::new)?;
+            fixer_sdk::Fixer::builder()
+                .provider(provider)
+                .preferred_languages(self.preferred_locales.iter().map(ToString::to_string))
+                .map_err(AppError::new)?
+                .proxy(proxy.clone())
+                .timeout(self.timeout)
+                .build()
+                .map_err(AppError::new)?;
+        }
+        Ok(())
+    }
+
     pub fn provider_enabled(&self, provider: &str) -> bool {
         contains_provider(&self.enabled_providers, provider)
     }

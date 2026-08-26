@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) fn run(args: ScanArgs) -> AppResult<RunStatus> {
     if !args.path.exists() {
-        return Err(AppError::new(format!(
+        return Err(AppError::invalid_input(format!(
             "input path does not exist: {}",
             args.path.display()
         )));
@@ -54,7 +54,7 @@ fn canonical_scan_root(path: &Path) -> AppResult<PathBuf> {
         path
     } else {
         path.parent()
-            .ok_or_else(|| AppError::new("input path has no parent directory"))?
+            .ok_or_else(|| AppError::invalid_input("input path has no parent directory"))?
     };
     root.canonicalize().map_err(AppError::new)
 }

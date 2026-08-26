@@ -84,13 +84,13 @@ async fn run_with_mode(
     args.placement
         .get_or_insert_with(|| config.placement.into());
     if !args.path.exists() {
-        return Err(AppError::new(format!(
+        return Err(AppError::invalid_input(format!(
             "input path does not exist: {}",
             args.path.display()
         )));
     }
     if args.update_epub && args.kind != MediaKindArg::Book {
-        return Err(AppError::new(
+        return Err(AppError::invalid_input(
             "--update-epub is supported only for book scrape",
         ));
     }
@@ -105,17 +105,17 @@ async fn run_with_mode(
 
 async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
     if args.placement() != PlacementArg::InPlace {
-        return Err(AppError::new(
+        return Err(AppError::invalid_input(
             "anime scrape currently supports only in-place placement",
         ));
     }
     let scan_root = scan_root(&args.path)?;
     let result = scan_anime(scan_root).map_err(AppError::new)?;
     if result.documents.is_empty() {
-        return Err(AppError::new("no local anime metadata was found"));
+        return Err(AppError::invalid_input("no local anime metadata was found"));
     }
     if result.documents.len() != 1 {
-        return Err(AppError::new(format!(
+        return Err(AppError::invalid_input(format!(
             "ambiguous anime input: found {} series; scrape one series at a time",
             result.documents.len()
         )));
@@ -126,7 +126,7 @@ async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         .entries()
         .first()
         .map(|entry| entry.value().clone())
-        .ok_or_else(|| AppError::new("local anime series has no title"))?;
+        .ok_or_else(|| AppError::invalid_input("local anime series has no title"))?;
     let provider = LocalProvider::from_anime_documents(result.documents).map_err(AppError::new)?;
     let fixer = super::build_fixer(provider, config)?;
     let resolved = fixer.anime(title).resolve().await.map_err(AppError::new)?;
@@ -148,17 +148,17 @@ async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
 
 async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
     if args.placement() != PlacementArg::InPlace {
-        return Err(AppError::new(
+        return Err(AppError::invalid_input(
             "book scrape currently supports only in-place placement",
         ));
     }
     let scan_root = scan_root(&args.path)?;
     let result = scan_books(scan_root).map_err(AppError::new)?;
     if result.documents.is_empty() {
-        return Err(AppError::new("no local EPUB metadata was found"));
+        return Err(AppError::invalid_input("no local EPUB metadata was found"));
     }
     if result.documents.len() != 1 {
-        return Err(AppError::new(format!(
+        return Err(AppError::invalid_input(format!(
             "ambiguous book input: found {} works; scrape one work at a time",
             result.documents.len()
         )));
@@ -174,18 +174,18 @@ async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> App
     } else if work.editions.len() == 1 {
         work.editions.first()
     } else {
-        return Err(AppError::new(
+        return Err(AppError::invalid_input(
             "book directory contains multiple editions; pass one EPUB path",
         ));
     }
-    .ok_or_else(|| AppError::new("input EPUB does not match a scanned edition"))?;
+    .ok_or_else(|| AppError::invalid_input("input EPUB does not match a scanned edition"))?;
     let isbn = selected_edition.isbn_13.clone();
     let title = work
         .titles
         .entries()
         .first()
         .map(|entry| entry.value().clone())
-        .ok_or_else(|| AppError::new("local book work has no title"))?;
+        .ok_or_else(|| AppError::invalid_input("local book work has no title"))?;
     let output_root = result.roots[0].clone();
     let warnings = result.warnings;
     let provider = LocalProvider::from_book_documents(result.documents).map_err(AppError::new)?;
@@ -199,7 +199,9 @@ async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> App
     let mut writer = BookWriter::for_isbn(isbn);
     if args.update_epub {
         if !args.path.is_file() {
-            return Err(AppError::new("--update-epub requires one EPUB file path"));
+            return Err(AppError::invalid_input(
+                "--update-epub requires one EPUB file path",
+            ));
         }
         writer = writer.with_epub_mutation_target(args.path.clone());
     }
@@ -226,9 +228,9 @@ async fn scrape_movie(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         .sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
     let hint = identify_path(&args.path).ok();
     if result.documents.is_empty() {
-        let hint = hint
-            .clone()
-            .ok_or_else(|| AppError::new("no local movie metadata or filename hint was found"))?;
+        let hint = hint.clone().ok_or_else(|| {
+            AppError::invalid_input("no local movie metadata or filename hint was found")
+        })?;
         result.documents.push(movie_from_hint(hint)?);
     }
     let (query_title, query_year) = movie_query_for(&args.path, hint.as_ref(), &result.documents)?;
@@ -257,17 +259,17 @@ async fn scrape_movie(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
 
 async fn scrape_music(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
     if args.placement() != PlacementArg::InPlace {
-        return Err(AppError::new(
+        return Err(AppError::invalid_input(
             "music scrape currently supports only in-place placement",
         ));
     }
     let scan_root = scan_root(&args.path)?;
     let result = scan_music(scan_root).map_err(AppError::new)?;
     if result.documents.is_empty() {
-        return Err(AppError::new("no local music metadata was found"));
+        return Err(AppError::invalid_input("no local music metadata was found"));
     }
     if result.documents.len() != 1 {
-        return Err(AppError::new(format!(
+        return Err(AppError::invalid_input(format!(
             "ambiguous music input: found {} albums; scrape one album at a time",
             result.documents.len()
         )));
@@ -277,7 +279,7 @@ async fn scrape_music(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         .entries()
         .first()
         .map(|entry| entry.value().clone())
-        .ok_or_else(|| AppError::new("local music album has no title"))?;
+        .ok_or_else(|| AppError::invalid_input("local music album has no title"))?;
     let output_root = result.roots[0].clone();
     let warnings = result.warnings;
     let provider = LocalProvider::from_music_documents(result.documents).map_err(AppError::new)?;
@@ -306,10 +308,12 @@ async fn scrape_television(
     let scan_root = scan_root(&args.path)?;
     let result = scan_television(scan_root).map_err(AppError::new)?;
     if result.documents.is_empty() {
-        return Err(AppError::new("no local television episodes were found"));
+        return Err(AppError::invalid_input(
+            "no local television episodes were found",
+        ));
     }
     if result.documents.len() != 1 {
-        return Err(AppError::new(format!(
+        return Err(AppError::invalid_input(format!(
             "ambiguous television input: found {} series; scrape one series at a time",
             result.documents.len()
         )));
@@ -331,7 +335,7 @@ async fn scrape_television(
                 .first()
                 .map(|entry| entry.value().clone())
         })
-        .ok_or_else(|| AppError::new("local television series has no title"))?;
+        .ok_or_else(|| AppError::invalid_input("local television series has no title"))?;
     let ordering = series.ordering;
     let placement_target = (args.placement() != PlacementArg::InPlace)
         .then(|| television_placement_target(&args.path, series, hint.as_ref()))
@@ -373,7 +377,7 @@ fn finish_plan(
     plan = apply_output_preset(plan, policy.output_preset)?;
     if args.placement() != PlacementArg::InPlace {
         if !args.path.is_file() {
-            return Err(AppError::new(
+            return Err(AppError::invalid_input(
                 "non-in-place placement requires a media file path",
             ));
         }
@@ -443,7 +447,7 @@ fn scan_root(path: &Path) -> AppResult<&Path> {
         Ok(path)
     } else {
         path.parent()
-            .ok_or_else(|| AppError::new("input path has no parent directory"))
+            .ok_or_else(|| AppError::invalid_input("input path has no parent directory"))
     }
 }
 
@@ -459,13 +463,13 @@ fn movie_query_for(
     }
     let movie = documents
         .first()
-        .ok_or_else(|| AppError::new("no local movie document was found"))?;
+        .ok_or_else(|| AppError::invalid_input("no local movie document was found"))?;
     let title = movie
         .titles
         .entries()
         .first()
         .map(|entry| entry.value().clone())
-        .ok_or_else(|| AppError::new("local movie has no title"))?;
+        .ok_or_else(|| AppError::invalid_input("local movie has no title"))?;
     Ok((title, movie.release_year()))
 }
 
@@ -508,7 +512,7 @@ fn television_placement_target(
 ) -> AppResult<PathBuf> {
     let file_name = path
         .file_name()
-        .ok_or_else(|| AppError::new("media path has no file name"))?;
+        .ok_or_else(|| AppError::invalid_input("media path has no file name"))?;
     let season = if series.ordering == fixer_core::OrderingScheme::Absolute {
         series.seasons.first().map(|season| season.number)
     } else {

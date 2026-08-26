@@ -47,7 +47,7 @@ async fn resolve_book(args: ResolveBookArgs, config: &Config) -> AppResult<RunSt
         query = query.year(year);
     }
     if let Some(isbn) = args.query.isbn {
-        query = query.isbn(fixer_core::Isbn13::new(isbn).map_err(AppError::new)?);
+        query = query.isbn(fixer_core::Isbn13::new(isbn).map_err(AppError::invalid_input)?);
     }
     let resolved = query.resolve().await.map_err(AppError::new)?;
     if args.json {

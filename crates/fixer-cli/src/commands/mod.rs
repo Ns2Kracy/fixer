@@ -41,7 +41,9 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
 
 pub(crate) fn local_fixer(config: &Config) -> AppResult<(Fixer, Vec<ScanWarning>)> {
     let root = config.local_root.as_ref().ok_or_else(|| {
-        AppError::new("local metadata root is required; pass --local-root or set FIXER_LOCAL_ROOT")
+        AppError::invalid_input(
+            "local metadata root is required; pass --local-root or set FIXER_LOCAL_ROOT",
+        )
     })?;
     let (provider, warnings) = LocalProvider::from_scan(root).map_err(AppError::new)?;
     Ok((build_fixer(provider, config)?, warnings))
@@ -87,11 +89,11 @@ pub(crate) fn parse_external_ids(values: &[String]) -> AppResult<Vec<ExternalId>
         .iter()
         .map(|value| {
             let (namespace, id) = value.split_once(':').ok_or_else(|| {
-                AppError::new(format!(
+                AppError::invalid_input(format!(
                     "external ID `{value}` must use namespace:id syntax"
                 ))
             })?;
-            ExternalId::new(namespace, id).map_err(AppError::new)
+            ExternalId::new(namespace, id).map_err(AppError::invalid_input)
         })
         .collect()
 }

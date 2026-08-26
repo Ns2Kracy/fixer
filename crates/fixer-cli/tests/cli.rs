@@ -280,7 +280,7 @@ fn television_scrape_rejects_roots_with_multiple_series() {
         .arg(root.path())
         .args(["--kind", "television", "--dry-run"]));
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()

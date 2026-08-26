@@ -67,6 +67,11 @@ fn config_validates_and_reports_the_cross_media_policy_schema() {
 fn invalid_cross_media_policy_values_fail_during_config_validation() {
     for (config, expected) in [
         (r#"{"preferred_locales":["not_a_tag"]}"#, "BCP 47"),
+        (
+            r#"{"enabled_providers":["bangumi"],"bangumi_base_url":"not a URL"}"#,
+            "URL",
+        ),
+        (r#"{"proxy":"not a proxy URL"}"#, "proxy"),
         (r#"{"timeout_seconds":0}"#, "timeout_seconds"),
         (
             r#"{"auto_accept_confidence":0.5,"review_confidence":0.8}"#,
@@ -330,6 +335,29 @@ fn conflict_policy_can_prefer_first_or_fail() {
             .unwrap()
             .contains("conflict policy rejected 1 metadata conflict")
     );
+}
+
+#[test]
+fn semantic_invalid_input_returns_usage_exit_code() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("missing");
+    let scan = fixer()
+        .arg("scan")
+        .arg(&missing)
+        .args(["--kind", "movie"])
+        .output()
+        .unwrap();
+    assert_eq!(scan.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&scan.stderr).contains("does not exist"));
+
+    let invalid_kind_option = fixer()
+        .arg("scrape")
+        .arg(root.path())
+        .args(["--kind", "movie", "--update-epub"])
+        .output()
+        .unwrap();
+    assert_eq!(invalid_kind_option.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&invalid_kind_option.stderr).contains("only for book"));
 }
 
 #[test]

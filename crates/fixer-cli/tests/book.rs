@@ -211,7 +211,7 @@ fn book_scrape_rejects_media_relocation() {
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
@@ -236,7 +236,7 @@ fn invalid_book_isbn_is_rejected_before_provider_search() {
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()

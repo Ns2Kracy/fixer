@@ -40,7 +40,7 @@ async fn search_book(args: BookQueryArgs, config: &Config) -> AppResult<RunStatu
         query = query.year(year);
     }
     if let Some(isbn) = args.isbn {
-        query = query.isbn(fixer_core::Isbn13::new(isbn).map_err(AppError::new)?);
+        query = query.isbn(fixer_core::Isbn13::new(isbn).map_err(AppError::invalid_input)?);
     }
     let results = query.search().await.map_err(AppError::new)?;
     render::search_text(results.candidates());

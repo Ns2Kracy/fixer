@@ -127,7 +127,7 @@ fn music_scrape_plans_and_applies_metadata_without_mutating_audio() {
         .args(["--kind", "music", "--placement", "hardlink"])
         .output()
         .unwrap();
-    assert_eq!(placement.status.code(), Some(1));
+    assert_eq!(placement.status.code(), Some(2));
     assert!(
         String::from_utf8(placement.stderr)
             .unwrap()

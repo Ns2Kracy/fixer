@@ -10,16 +10,42 @@ use std::{fmt, process::ExitCode};
 
 pub(crate) type AppResult<T> = Result<T, AppError>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppErrorKind {
+    InvalidInput,
+    Execution,
+}
+
 #[derive(Debug)]
-pub(crate) struct AppError(String);
+pub(crate) struct AppError {
+    message: String,
+    kind: AppErrorKind,
+}
 impl AppError {
     pub(crate) fn new(error: impl fmt::Display) -> Self {
-        Self(error.to_string())
+        Self {
+            message: error.to_string(),
+            kind: AppErrorKind::Execution,
+        }
+    }
+
+    pub(crate) fn invalid_input(error: impl fmt::Display) -> Self {
+        Self {
+            message: error.to_string(),
+            kind: AppErrorKind::InvalidInput,
+        }
+    }
+
+    fn exit_code(&self) -> ExitCode {
+        match self.kind {
+            AppErrorKind::InvalidInput => ExitCode::from(2),
+            AppErrorKind::Execution => ExitCode::FAILURE,
+        }
     }
 }
 impl fmt::Display for AppError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(&self.message)
     }
 }
 impl std::error::Error for AppError {}
@@ -43,7 +69,10 @@ impl RunStatus {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    let config = match config::Config::load(&cli) {
+    let config = match config::Config::load(&cli).and_then(|config| {
+        config.validate()?;
+        Ok(config)
+    }) {
         Ok(config) => config,
         Err(error) => {
             eprintln!("error: {error}");
@@ -54,7 +83,7 @@ async fn main() -> ExitCode {
         Ok(status) => status.exit_code(),
         Err(error) => {
             eprintln!("error: {error}");
-            ExitCode::FAILURE
+            error.exit_code()
         }
     }
 }
