@@ -1,0 +1,23 @@
+{
+  "id": 3625,
+  "name": "Season 1",
+  "season_number": 1,
+  "poster_path": "/season-1-poster.jpg",
+  "episodes": [
+    {
+      "id": 63057,
+      "name": "The Kingsroad",
+      "overview": "The royal family arrives at Winterfell.",
+      "season_number": 1,
+      "episode_number": 2,
+      "runtime": 55,
+      "still_path": "/episode-1-2-still.jpg",
+      "guest_stars": [
+        {"id": 101, "name": "Guest Actor", "character": "A Visitor"}
+      ],
+      "crew": [
+        {"id": 202, "name": "Episode Director", "job": "Director"}
+      ]
+    }
+  ]
+}

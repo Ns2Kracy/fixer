@@ -1,0 +1,19 @@
+{
+  "id": 3624,
+  "name": "Specials",
+  "season_number": 0,
+  "poster_path": "/season-0-poster.jpg",
+  "episodes": [
+    {
+      "id": 63056,
+      "name": "Inside the Night's Watch",
+      "overview": "A short special.",
+      "season_number": 0,
+      "episode_number": 1,
+      "runtime": 10,
+      "still_path": "/special-still.jpg",
+      "guest_stars": [],
+      "crew": []
+    }
+  ]
+}

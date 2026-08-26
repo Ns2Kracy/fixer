@@ -1,0 +1,29 @@
+{
+  "id": 1399,
+  "name": "权力的游戏",
+  "original_name": "Game of Thrones",
+  "original_language": "en",
+  "overview": "Nine noble families fight for control over the lands of Westeros.",
+  "poster_path": "/series-poster.jpg",
+  "backdrop_path": "/series-backdrop.jpg",
+  "seasons": [
+    {
+      "id": 3624,
+      "name": "Specials",
+      "season_number": 0,
+      "episode_count": 1,
+      "poster_path": "/season-0-poster.jpg"
+    },
+    {
+      "id": 3625,
+      "name": "Season 1",
+      "season_number": 1,
+      "episode_count": 1,
+      "poster_path": "/season-1-poster.jpg"
+    }
+  ],
+  "images": {
+    "posters": [{"file_path": "/series-poster-alt.jpg"}],
+    "backdrops": [{"file_path": "/series-backdrop-alt.jpg"}]
+  }
+}
