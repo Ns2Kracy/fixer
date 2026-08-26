@@ -14,6 +14,7 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+fixer-provider-bangumi = { path = "../fixer-provider-bangumi" }
 fixer-provider-local = { path = "../fixer-provider-local" }
 fixer-provider-tmdb = { path = "../fixer-provider-tmdb" }
 wiremock.workspace = true

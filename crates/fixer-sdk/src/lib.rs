@@ -10,6 +10,7 @@ pub mod query;
 
 pub use builder::FixerBuilder;
 pub use fixture::{FixtureDocument, FixtureProvider};
+pub use query::anime::{AnimeQuery, AnimeSearch, SelectedAnime};
 pub use query::movie::{MovieQuery, MovieSearch, SelectedMovie};
 pub use query::television::{SelectedTelevision, TelevisionQuery, TelevisionSearch};
 
@@ -129,5 +130,10 @@ impl Fixer {
     /// Starts an ergonomic typed television series query.
     pub fn television(&self, title: impl Into<String>) -> TelevisionQuery {
         TelevisionQuery::new(self.clone(), title.into())
+    }
+
+    /// Starts an ergonomic typed anime series query.
+    pub fn anime(&self, title: impl Into<String>) -> AnimeQuery {
+        AnimeQuery::new(self.clone(), title.into())
     }
 }

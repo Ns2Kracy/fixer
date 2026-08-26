@@ -425,6 +425,7 @@ version = "0.1.0"
 dependencies = [
  "fixer-core",
  "fixer-http",
+ "fixer-provider-bangumi",
  "fixer-provider-local",
  "fixer-provider-tmdb",
  "futures-util",
