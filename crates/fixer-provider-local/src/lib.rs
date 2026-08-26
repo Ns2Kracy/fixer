@@ -2,11 +2,13 @@
 
 #![forbid(unsafe_code)]
 
+mod anime;
 mod identify;
 mod json;
 mod nfo;
 mod television;
 
+pub use anime::{AnimeScanResult, scan_anime};
 pub use identify::{EvidenceKind, HintEvidence, MediaHint, identify_path};
 pub use json::parse_json;
 pub use nfo::parse_nfo;
