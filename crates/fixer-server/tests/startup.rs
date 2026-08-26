@@ -1,4 +1,7 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::Path,
+};
 
 use fixer_server::ServerConfig;
 
@@ -9,6 +12,7 @@ fn server_defaults_to_ipv4_loopback_port_3000() {
         config.bind_addr(),
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3000)
     );
+    assert_eq!(config.database_path(), Path::new("fixer.sqlite3"));
 }
 
 #[test]
@@ -33,6 +37,15 @@ fn unauthenticated_non_loopback_binds_are_rejected_before_startup() {
             "non-loopback binding requires authentication"
         );
     }
+}
+
+#[test]
+fn database_paths_are_explicit_and_non_empty() {
+    let config = ServerConfig::default()
+        .with_database_path("state/jobs.sqlite")
+        .unwrap();
+    assert_eq!(config.database_path(), Path::new("state/jobs.sqlite"));
+    assert!(ServerConfig::default().with_database_path("").is_err());
 }
 
 #[test]

@@ -5,22 +5,32 @@ mod app;
 pub mod jobs;
 pub mod store;
 
-use std::{env, net::SocketAddr};
+use std::{
+    env,
+    net::SocketAddr,
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+};
 
-pub use app::app;
+pub use app::{app, job_app};
+pub use jobs::JobRuntime;
+pub use store::SqliteJobStore;
 use thiserror::Error;
 
 const DEFAULT_BIND_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 3000);
+const DEFAULT_DATABASE_PATH: &str = "fixer.sqlite3";
+const DEFAULT_EVENT_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 
-/// Validated network configuration for the HTTP service.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Validated network and persistence configuration for the HTTP service.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     bind_addr: SocketAddr,
+    database_path: PathBuf,
 }
 
 impl ServerConfig {
-    /// Validates an explicit bind address.
+    /// Validates an explicit bind address and uses the default database path.
     ///
     /// Authentication is not implemented yet, so this server version accepts
     /// only loopback listeners.
@@ -28,7 +38,10 @@ impl ServerConfig {
         if !bind_addr.ip().is_loopback() {
             return Err(ServerConfigError::AuthenticationRequired);
         }
-        Ok(Self { bind_addr })
+        Ok(Self {
+            bind_addr,
+            database_path: PathBuf::from(DEFAULT_DATABASE_PATH),
+        })
     }
 
     /// Parses and validates a bind address before listener creation.
@@ -42,18 +55,42 @@ impl ServerConfig {
         Self::new(bind_addr)
     }
 
-    /// Loads `FIXER_SERVER_BIND`, falling back to `127.0.0.1:3000`.
-    pub fn from_env() -> Result<Self, ServerConfigError> {
-        match env::var("FIXER_SERVER_BIND") {
-            Ok(value) => Self::parse(&value),
-            Err(env::VarError::NotPresent) => Ok(Self::default()),
-            Err(source) => Err(ServerConfigError::InvalidEnvironment(source)),
+    /// Overrides the SQLite database path used during startup.
+    pub fn with_database_path(
+        mut self,
+        path: impl Into<PathBuf>,
+    ) -> Result<Self, ServerConfigError> {
+        let path = path.into();
+        if path.as_os_str().is_empty() {
+            return Err(ServerConfigError::EmptyDatabasePath);
         }
+        self.database_path = path;
+        Ok(self)
+    }
+
+    /// Loads `FIXER_SERVER_BIND` and `FIXER_SERVER_DATABASE`.
+    pub fn from_env() -> Result<Self, ServerConfigError> {
+        let mut config = match env::var("FIXER_SERVER_BIND") {
+            Ok(value) => Self::parse(&value)?,
+            Err(env::VarError::NotPresent) => Self::default(),
+            Err(source) => return Err(ServerConfigError::InvalidBindEnvironment(source)),
+        };
+        match env::var("FIXER_SERVER_DATABASE") {
+            Ok(path) => config = config.with_database_path(path)?,
+            Err(env::VarError::NotPresent) => {}
+            Err(source) => return Err(ServerConfigError::InvalidDatabaseEnvironment(source)),
+        }
+        Ok(config)
     }
 
     /// Returns the validated listener address.
     pub const fn bind_addr(&self) -> SocketAddr {
         self.bind_addr
+    }
+
+    /// Returns the SQLite database path opened before listener creation.
+    pub fn database_path(&self) -> &Path {
+        &self.database_path
     }
 }
 
@@ -61,6 +98,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind_addr: DEFAULT_BIND_ADDR,
+            database_path: PathBuf::from(DEFAULT_DATABASE_PATH),
         }
     }
 }
@@ -76,11 +114,27 @@ pub enum ServerConfigError {
         source: std::net::AddrParseError,
     },
     #[error("FIXER_SERVER_BIND is not valid Unicode: {0}")]
-    InvalidEnvironment(env::VarError),
+    InvalidBindEnvironment(env::VarError),
+    #[error("FIXER_SERVER_DATABASE is not valid Unicode: {0}")]
+    InvalidDatabaseEnvironment(env::VarError),
+    #[error("SQLite database path must not be empty")]
+    EmptyDatabasePath,
 }
 
-/// Binds and serves the application using validated configuration.
-pub async fn serve(config: ServerConfig) -> std::io::Result<()> {
+/// Production startup failure.
+#[derive(Debug, Error)]
+pub enum ServeError {
+    #[error("failed to open persistent job store: {0}")]
+    Store(#[from] store::StoreError),
+    #[error("server I/O failed: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Opens persistent services, binds, and serves the complete application.
+pub async fn serve(config: ServerConfig) -> Result<(), ServeError> {
+    let store = SqliteJobStore::open(config.database_path()).await?;
+    let runtime = JobRuntime::new(store, DEFAULT_EVENT_CAPACITY);
     let listener = tokio::net::TcpListener::bind(config.bind_addr()).await?;
-    axum::serve(listener, app()).await
+    axum::serve(listener, job_app(runtime)).await?;
+    Ok(())
 }
