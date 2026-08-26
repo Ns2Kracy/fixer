@@ -36,7 +36,7 @@ pub use output::{
 };
 pub use provenance::{ProvenanceMap, SourceRef, Sourced};
 pub use provider::{
-    AnimeCandidate, BoxFuture, Candidate, FetchRequest, MediaKind, MetadataDocument,
+    AnimeCandidate, BookCandidate, BoxFuture, Candidate, FetchRequest, MediaKind, MetadataDocument,
     MovieCandidate, MusicCandidate, Provider, ProviderDescriptor, ProviderError, SearchRequest,
     TelevisionCandidate,
 };

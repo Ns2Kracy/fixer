@@ -1,8 +1,8 @@
 use fixer_core::{
-    BoxFuture, Candidate, ExternalId, FetchRequest, Header, HttpClient, HttpError, HttpMethod,
-    HttpRequest, HttpResponse, MediaKind, MetadataDocument, Movie, MovieCandidate, OutputOperation,
-    OutputPlan, PlannedContent, PlanningError, Provider, ProviderDescriptor, ProviderError,
-    ProviderId, SearchRequest, WorkId, WriteRequest, Writer,
+    BookCandidate, BoxFuture, Candidate, ExternalId, FetchRequest, Header, HttpClient, HttpError,
+    HttpMethod, HttpRequest, HttpResponse, MatchQuery, Matcher, MediaKind, MetadataDocument, Movie,
+    MovieCandidate, OutputOperation, OutputPlan, PlannedContent, PlanningError, Provider,
+    ProviderDescriptor, ProviderError, ProviderId, SearchRequest, WorkId, WriteRequest, Writer,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -179,6 +179,53 @@ fn music_search_requests_are_typed() {
     assert_eq!(request.media_kind(), MediaKind::Music);
     assert_eq!(request.title(), Some("Kind of Blue"));
     assert_eq!(request.year(), Some(1959));
+}
+
+#[test]
+fn book_search_requests_and_candidates_are_typed() {
+    let request = SearchRequest::book("The Left Hand of Darkness", Some(1969)).unwrap();
+    assert_eq!(request.media_kind(), MediaKind::Book);
+    assert_eq!(request.title(), Some("The Left Hand of Darkness"));
+    assert_eq!(request.year(), Some(1969));
+
+    let candidate = BookCandidate::new(
+        ProviderId::new("openlibrary").unwrap(),
+        ExternalId::new("isbn", "9780441478125").unwrap(),
+        "The Left Hand of Darkness",
+        Some(1969),
+    )
+    .unwrap();
+    assert_eq!(candidate.external_id.namespace, "isbn");
+}
+
+#[test]
+fn book_exact_isbn_identity_outranks_an_exact_title_without_identity() {
+    let exact_isbn = Candidate::Book(
+        BookCandidate::new(
+            ProviderId::new("openlibrary").unwrap(),
+            ExternalId::new("isbn", "9780441478125").unwrap(),
+            "A Different Display Title",
+            Some(1969),
+        )
+        .unwrap(),
+    );
+    let exact_title = Candidate::Book(
+        BookCandidate::new(
+            ProviderId::new("fixture").unwrap(),
+            ExternalId::new("fixture", "edition-1").unwrap(),
+            "The Left Hand of Darkness",
+            Some(1969),
+        )
+        .unwrap(),
+    );
+    let query = MatchQuery::book("The Left Hand of Darkness")
+        .unwrap()
+        .with_external_id(ExternalId::new("isbn", "9780441478125").unwrap());
+
+    let ranked = Matcher.rank(&query, vec![exact_title, exact_isbn]).unwrap();
+
+    assert_eq!(ranked[0].candidate.external_id().namespace, "isbn");
+    assert!(ranked[0].score.total > ranked[1].score.total);
 }
 
 #[test]
