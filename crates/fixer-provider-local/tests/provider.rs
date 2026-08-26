@@ -33,6 +33,30 @@ fn parses_sanitized_local_json() {
 }
 
 #[test]
+fn movie_scan_ignores_television_nfos() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("tvshow.nfo"),
+        "<tvshow><title>Show</title></tvshow>",
+    )
+    .unwrap();
+    std::fs::write(
+        root.path().join("season.nfo"),
+        "<season><title>Season 1</title></season>",
+    )
+    .unwrap();
+    std::fs::write(
+        root.path().join("S01E01.nfo"),
+        "<episodedetails><title>Episode</title></episodedetails>",
+    )
+    .unwrap();
+
+    let result = scan(root.path()).unwrap();
+    assert!(result.documents.is_empty());
+    assert!(result.warnings.is_empty());
+}
+
+#[test]
 fn malformed_files_become_path_warnings() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("broken.json"), "{not-json").unwrap();
