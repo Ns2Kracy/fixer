@@ -1,5 +1,6 @@
 //! Deterministic Kodi/Jellyfin-compatible movie NFO writer.
 
+use crate::television;
 use fixer_core::{
     MetadataDocument, Movie, OutputOperation, OutputPlan, PlannedContent, PlanningError, Resolved,
     WriteRequest, Writer,
@@ -64,11 +65,14 @@ impl Writer for NfoWriter {
     fn plan(&self, request: WriteRequest) -> Result<OutputPlan, PlanningError> {
         match request.document {
             MetadataDocument::Movie(movie) => self.plan_movie(&movie, &request.output_root),
+            MetadataDocument::Television(series) => {
+                television::plan_series(&series, &request.output_root)
+            }
             _ => Err(PlanningError::UnsupportedDocument),
         }
     }
 }
-fn element(output: &mut String, name: &str, value: &str) {
+pub(crate) fn element(output: &mut String, name: &str, value: &str) {
     output.push_str("  <");
     output.push_str(name);
     output.push('>');
@@ -77,7 +81,7 @@ fn element(output: &mut String, name: &str, value: &str) {
     output.push_str(name);
     output.push_str(">\n");
 }
-fn escape_xml(value: &str) -> String {
+pub(crate) fn escape_xml(value: &str) -> String {
     value
         .chars()
         .flat_map(|character| match character {

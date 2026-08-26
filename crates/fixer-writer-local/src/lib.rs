@@ -7,9 +7,11 @@ mod json;
 mod manifest;
 mod nfo;
 mod path_template;
+mod television;
 
 pub use content_template::ContentTemplate;
 pub use json::JsonWriter;
 pub use manifest::ManifestWriter;
 pub use nfo::NfoWriter;
 pub use path_template::{PathTemplate, TemplateContext, TemplateError};
+pub use television::TelevisionWriter;
