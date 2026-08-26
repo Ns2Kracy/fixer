@@ -1,0 +1,11 @@
+[package]
+name = "fixer-provider-anilist"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fixer-core = { path = "../fixer-core" }
+thiserror.workspace = true
+url.workspace = true

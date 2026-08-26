@@ -380,6 +380,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixer-provider-anilist"
+version = "0.1.0"
+dependencies = [
+ "fixer-core",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "fixer-provider-bangumi"
 version = "0.1.0"
 dependencies = [
