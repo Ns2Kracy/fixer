@@ -1,15 +1,20 @@
 use crate::{
     AppError, AppResult, RunStatus,
     args::{
-        ResolveAnimeArgs, ResolveCommand, ResolveMovieArgs, ResolveMusicArgs, ResolveTelevisionArgs,
+        ResolveAnimeArgs, ResolveBookArgs, ResolveCommand, ResolveMovieArgs, ResolveMusicArgs,
+        ResolveTelevisionArgs,
     },
     config::Config,
-    render::{self, ResolvedAnimeDto, ResolvedMovieDto, ResolvedMusicDto, ResolvedTelevisionDto},
+    render::{
+        self, ResolvedAnimeDto, ResolvedBookDto, ResolvedMovieDto, ResolvedMusicDto,
+        ResolvedTelevisionDto,
+    },
 };
 
 pub async fn run(command: ResolveCommand, config: &Config) -> AppResult<RunStatus> {
     match command {
         ResolveCommand::Anime(args) => resolve_anime(args, config).await,
+        ResolveCommand::Book(args) => resolve_book(args, config).await,
         ResolveCommand::Movie(args) => resolve_movie(args, config).await,
         ResolveCommand::Music(args) => resolve_music(args, config).await,
         ResolveCommand::Television(args) => resolve_television(args, config).await,
@@ -31,6 +36,24 @@ async fn resolve_anime(args: ResolveAnimeArgs, config: &Config) -> AppResult<Run
         render::json(&ResolvedAnimeDto::from_resolved(&resolved))?;
     } else {
         render::resolved_anime_text(&resolved);
+    }
+    Ok(super::finish_with_warnings(&warnings))
+}
+
+async fn resolve_book(args: ResolveBookArgs, config: &Config) -> AppResult<RunStatus> {
+    let (fixer, warnings) = super::local_fixer(config)?;
+    let mut query = fixer.book(args.query.title);
+    if let Some(year) = args.query.year {
+        query = query.year(year);
+    }
+    if let Some(isbn) = args.query.isbn {
+        query = query.isbn(fixer_core::Isbn13::new(isbn).map_err(AppError::new)?);
+    }
+    let resolved = query.resolve().await.map_err(AppError::new)?;
+    if args.json {
+        render::json(&ResolvedBookDto::from_resolved(&resolved))?;
+    } else {
+        render::resolved_book_text(&resolved);
     }
     Ok(super::finish_with_warnings(&warnings))
 }

@@ -1,7 +1,7 @@
 use crate::{AppError, AppResult};
 use fixer_core::{
-    AnimeSeries, AnimeSeriesRelation, Candidate, LocalizedValue, Movie, MusicReleaseGroup,
-    OrderingScheme, Resolved, Series,
+    AnimeSeries, AnimeSeriesRelation, BookWork, Candidate, CreditRole, LocalizedValue, Movie,
+    MusicReleaseGroup, OrderingScheme, Resolved, Series,
 };
 use serde::Serialize;
 
@@ -18,6 +18,35 @@ pub struct ResolvedAnimeDto {
     completeness: f32,
     conflicts: usize,
     warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ResolvedBookDto {
+    schema_version: u8,
+    kind: &'static str,
+    id: String,
+    title: String,
+    contributors: Vec<BookContributorDto>,
+    editions: Vec<BookEditionDto>,
+    completeness: f32,
+    conflicts: usize,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct BookContributorDto {
+    id: String,
+    name: String,
+    role: CreditRole,
+}
+
+#[derive(Serialize)]
+struct BookEditionDto {
+    id: String,
+    isbn_10: String,
+    isbn_13: String,
+    publisher: String,
+    assets: usize,
 }
 
 #[derive(Serialize)]
@@ -104,6 +133,42 @@ impl ResolvedAnimeDto {
                 .map(|cour| cour.episodes.len())
                 .sum(),
             titles: title_dtos(&resolved.value.titles),
+            completeness: resolved.completeness,
+            conflicts: resolved.conflicts.len(),
+            warnings: warning_messages(resolved),
+        }
+    }
+}
+
+impl ResolvedBookDto {
+    pub fn from_resolved(resolved: &Resolved<BookWork>) -> Self {
+        Self {
+            schema_version: 1,
+            kind: "book",
+            id: resolved.value.id.as_str().to_owned(),
+            title: preferred_title(&resolved.value.titles).to_owned(),
+            contributors: resolved
+                .value
+                .contributors
+                .iter()
+                .map(|credit| BookContributorDto {
+                    id: credit.person.id.as_str().to_owned(),
+                    name: credit.person.name.clone(),
+                    role: credit.role.clone(),
+                })
+                .collect(),
+            editions: resolved
+                .value
+                .editions
+                .iter()
+                .map(|edition| BookEditionDto {
+                    id: edition.id.as_str().to_owned(),
+                    isbn_10: edition.isbn_10.as_str().to_owned(),
+                    isbn_13: edition.isbn_13.as_str().to_owned(),
+                    publisher: edition.publisher.clone(),
+                    assets: edition.assets.len(),
+                })
+                .collect(),
             completeness: resolved.completeness,
             conflicts: resolved.conflicts.len(),
             warnings: warning_messages(resolved),
@@ -214,6 +279,18 @@ pub fn resolved_anime_text(resolved: &Resolved<AnimeSeries>) {
     );
 }
 
+pub fn resolved_book_text(resolved: &Resolved<BookWork>) {
+    let title = preferred_title(&resolved.value.titles);
+    let editions = resolved.value.editions.len();
+    let isbn = resolved
+        .value
+        .editions
+        .first()
+        .map(|edition| edition.isbn_13.as_str())
+        .unwrap_or("no-isbn");
+    println!("{title}\\t{editions} edition(s)\\t{isbn}");
+}
+
 pub fn resolved_movie_text(resolved: &Resolved<Movie>) {
     let title = preferred_title(&resolved.value.titles);
     match resolved.value.release_year() {
@@ -301,7 +378,28 @@ pub fn search_text(candidates: &[Candidate]) {
             Candidate::Television(value) => (&value.title, value.year, &value.provider),
             Candidate::Anime(value) => (&value.title, value.year, &value.provider),
             Candidate::Music(value) => (&value.title, value.year, &value.provider),
-            Candidate::Book(_) => continue,
+            Candidate::Book(value) => {
+                match value.year {
+                    Some(year) => println!(
+                        "{}\t{} ({})\t{}\t{}:{}",
+                        index + 1,
+                        value.title,
+                        year,
+                        value.provider.as_str(),
+                        value.external_id.namespace,
+                        value.external_id.value
+                    ),
+                    None => println!(
+                        "{}\t{}\t{}\t{}:{}",
+                        index + 1,
+                        value.title,
+                        value.provider.as_str(),
+                        value.external_id.namespace,
+                        value.external_id.value
+                    ),
+                }
+                continue;
+            }
         };
         match year {
             Some(year) => println!("{}\t{} ({})\t{}", index + 1, title, year, provider.as_str()),

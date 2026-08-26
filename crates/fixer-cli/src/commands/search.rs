@@ -1,6 +1,9 @@
 use crate::{
     AppError, AppResult, RunStatus,
-    args::{AnimeQueryArgs, MovieQueryArgs, MusicQueryArgs, SearchCommand, TelevisionQueryArgs},
+    args::{
+        AnimeQueryArgs, BookQueryArgs, MovieQueryArgs, MusicQueryArgs, SearchCommand,
+        TelevisionQueryArgs,
+    },
     config::Config,
     render,
 };
@@ -8,6 +11,7 @@ use crate::{
 pub async fn run(command: SearchCommand, config: &Config) -> AppResult<RunStatus> {
     match command {
         SearchCommand::Anime(args) => search_anime(args, config).await,
+        SearchCommand::Book(args) => search_book(args, config).await,
         SearchCommand::Movie(args) => search_movie(args, config).await,
         SearchCommand::Music(args) => search_music(args, config).await,
         SearchCommand::Television(args) => search_television(args, config).await,
@@ -23,6 +27,20 @@ async fn search_anime(args: AnimeQueryArgs, config: &Config) -> AppResult<RunSta
     }
     for external_id in external_ids {
         query = query.external_id(external_id);
+    }
+    let results = query.search().await.map_err(AppError::new)?;
+    render::search_text(results.candidates());
+    Ok(super::finish_with_warnings(&warnings))
+}
+
+async fn search_book(args: BookQueryArgs, config: &Config) -> AppResult<RunStatus> {
+    let (fixer, warnings) = super::local_fixer(config)?;
+    let mut query = fixer.book(args.title);
+    if let Some(year) = args.year {
+        query = query.year(year);
+    }
+    if let Some(isbn) = args.isbn {
+        query = query.isbn(fixer_core::Isbn13::new(isbn).map_err(AppError::new)?);
     }
     let results = query.search().await.map_err(AppError::new)?;
     render::search_text(results.candidates());

@@ -44,6 +44,7 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum SearchCommand {
     Anime(AnimeQueryArgs),
+    Book(BookQueryArgs),
     Movie(MovieQueryArgs),
     Music(MusicQueryArgs),
     Television(TelevisionQueryArgs),
@@ -51,6 +52,7 @@ pub enum SearchCommand {
 #[derive(Debug, Subcommand)]
 pub enum ResolveCommand {
     Anime(ResolveAnimeArgs),
+    Book(ResolveBookArgs),
     Movie(ResolveMovieArgs),
     Music(ResolveMusicArgs),
     Television(ResolveTelevisionArgs),
@@ -63,6 +65,15 @@ pub struct AnimeQueryArgs {
     pub year: Option<u16>,
     #[arg(long = "external-id", value_name = "NAMESPACE:ID")]
     pub external_ids: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct BookQueryArgs {
+    pub title: String,
+    #[arg(long)]
+    pub year: Option<u16>,
+    #[arg(long, value_name = "ISBN-13")]
+    pub isbn: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -94,6 +105,14 @@ pub struct TelevisionQueryArgs {
 pub struct ResolveAnimeArgs {
     #[command(flatten)]
     pub query: AnimeQueryArgs,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ResolveBookArgs {
+    #[command(flatten)]
+    pub query: BookQueryArgs,
     #[arg(long)]
     pub json: bool,
 }
