@@ -1,0 +1,9 @@
+{
+  "key": "/books/OL5071201M",
+  "title": "The Left Hand of Darkness",
+  "publishers": ["Ace Books"],
+  "isbn_10": ["0441478123"],
+  "isbn_13": ["9780441478125"],
+  "works": [{"key": "/works/OL27448W"}],
+  "covers": [8231856]
+}
