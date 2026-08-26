@@ -70,8 +70,9 @@ fn anime_search_and_resolve_work_offline() {
             "2023",
             "--json",
         ]));
-    assert!(
-        resolve.status.success(),
+    assert_eq!(
+        resolve.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&resolve.stderr)
     );

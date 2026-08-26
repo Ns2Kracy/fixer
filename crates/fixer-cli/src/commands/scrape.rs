@@ -24,6 +24,18 @@ enum OutputMode {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct PlanDiagnostics<'a> {
+    scan: &'a [ScanWarning],
+    resolution: &'a [fixer_core::ResolutionWarning],
+}
+
+impl<'a> PlanDiagnostics<'a> {
+    const fn new(scan: &'a [ScanWarning], resolution: &'a [fixer_core::ResolutionWarning]) -> Self {
+        Self { scan, resolution }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 struct FinalizationPolicy {
     output_preset: OutputPreset,
     conflict_policy: ConflictPolicy,
@@ -139,7 +151,7 @@ async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         plan,
         &args,
         output_root,
-        &result.warnings,
+        PlanDiagnostics::new(&result.warnings, &resolved.warnings),
         None,
         mode,
         FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
@@ -213,7 +225,7 @@ async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> App
         plan,
         &args,
         &output_root,
-        &warnings,
+        PlanDiagnostics::new(&warnings, &resolved.warnings),
         None,
         mode,
         FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
@@ -250,7 +262,7 @@ async fn scrape_movie(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         plan,
         &args,
         &output_root,
-        &result.warnings,
+        PlanDiagnostics::new(&result.warnings, &resolved.warnings),
         None,
         mode,
         FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
@@ -293,7 +305,7 @@ async fn scrape_music(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         plan,
         &args,
         &output_root,
-        &warnings,
+        PlanDiagnostics::new(&warnings, &resolved.warnings),
         None,
         mode,
         FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
@@ -358,7 +370,7 @@ async fn scrape_television(
         plan,
         &args,
         &output_root,
-        &warnings,
+        PlanDiagnostics::new(&warnings, &resolved.warnings),
         placement_target.as_deref(),
         mode,
         FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
@@ -369,7 +381,7 @@ fn finish_plan(
     mut plan: fixer_core::OutputPlan,
     args: &ScrapeArgs,
     output_root: &Path,
-    warnings: &[ScanWarning],
+    diagnostics: PlanDiagnostics<'_>,
     placement_target: Option<&Path>,
     mode: OutputMode,
     policy: FinalizationPolicy,
@@ -418,7 +430,10 @@ fn finish_plan(
             eprintln!("review required: {} metadata conflict(s)", policy.conflicts);
             return Ok(RunStatus::ReviewRequired);
         }
-        return Ok(super::finish_with_warnings(warnings));
+        return Ok(super::finish_with_resolution_warnings(
+            diagnostics.scan,
+            diagnostics.resolution,
+        ));
     }
 
     if policy.requires_review() {
@@ -439,7 +454,10 @@ fn finish_plan(
         report.operations().len(),
         output_root.display()
     );
-    Ok(super::finish_with_warnings(warnings))
+    Ok(super::finish_with_resolution_warnings(
+        diagnostics.scan,
+        diagnostics.resolution,
+    ))
 }
 
 fn scan_root(path: &Path) -> AppResult<&Path> {

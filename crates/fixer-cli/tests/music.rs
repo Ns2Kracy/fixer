@@ -58,8 +58,9 @@ fn music_search_and_resolve_preserve_album_hierarchy_offline() {
         ])
         .output()
         .unwrap();
-    assert!(
-        resolve.status.success(),
+    assert_eq!(
+        resolve.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&resolve.stderr)
     );
@@ -91,8 +92,9 @@ fn music_scrape_plans_and_applies_metadata_without_mutating_audio() {
         .args(["--kind", "music", "--dry-run"])
         .output()
         .unwrap();
-    assert!(
-        dry_run.status.success(),
+    assert_eq!(
+        dry_run.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&dry_run.stderr)
     );
@@ -110,8 +112,9 @@ fn music_scrape_plans_and_applies_metadata_without_mutating_audio() {
         .args(["--kind", "music", "--apply"])
         .output()
         .unwrap();
-    assert!(
-        apply.status.success(),
+    assert_eq!(
+        apply.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&apply.stderr)
     );

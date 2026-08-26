@@ -37,7 +37,10 @@ async fn resolve_anime(args: ResolveAnimeArgs, config: &Config) -> AppResult<Run
     } else {
         render::resolved_anime_text(&resolved);
     }
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        &resolved.warnings,
+    ))
 }
 
 async fn resolve_book(args: ResolveBookArgs, config: &Config) -> AppResult<RunStatus> {
@@ -55,7 +58,10 @@ async fn resolve_book(args: ResolveBookArgs, config: &Config) -> AppResult<RunSt
     } else {
         render::resolved_book_text(&resolved);
     }
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        &resolved.warnings,
+    ))
 }
 
 async fn resolve_movie(args: ResolveMovieArgs, config: &Config) -> AppResult<RunStatus> {
@@ -70,7 +76,10 @@ async fn resolve_movie(args: ResolveMovieArgs, config: &Config) -> AppResult<Run
     } else {
         render::resolved_movie_text(&resolved);
     }
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        &resolved.warnings,
+    ))
 }
 
 async fn resolve_music(args: ResolveMusicArgs, config: &Config) -> AppResult<RunStatus> {
@@ -85,7 +94,10 @@ async fn resolve_music(args: ResolveMusicArgs, config: &Config) -> AppResult<Run
     } else {
         render::resolved_music_text(&resolved);
     }
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        &resolved.warnings,
+    ))
 }
 
 async fn resolve_television(args: ResolveTelevisionArgs, config: &Config) -> AppResult<RunStatus> {
@@ -107,5 +119,8 @@ async fn resolve_television(args: ResolveTelevisionArgs, config: &Config) -> App
     } else {
         render::resolved_television_text(&resolved);
     }
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        &resolved.warnings,
+    ))
 }

@@ -52,8 +52,9 @@ fn resolve_json_uses_a_stable_dto() {
         "2000",
         "--json",
     ]));
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -169,8 +170,9 @@ fn television_search_resolve_and_scrape_work_offline() {
             "aired",
             "--json",
         ]));
-    assert!(
-        resolve.status.success(),
+    assert_eq!(
+        resolve.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&resolve.stderr)
     );
@@ -187,8 +189,9 @@ fn television_search_resolve_and_scrape_work_offline() {
         .arg("scrape")
         .arg(root.path())
         .args(["--kind", "television", "--dry-run"]));
-    assert!(
-        scrape.status.success(),
+    assert_eq!(
+        scrape.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&scrape.stderr)
     );
@@ -203,8 +206,9 @@ fn television_search_resolve_and_scrape_work_offline() {
         .arg("scrape")
         .arg(&episode_path)
         .args(["--kind", "television", "--apply"]));
-    assert!(
-        apply.status.success(),
+    assert_eq!(
+        apply.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&apply.stderr)
     );
@@ -240,8 +244,9 @@ fn television_copy_placement_keeps_media_in_its_season_directory() {
         "--apply",
     ]));
 
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

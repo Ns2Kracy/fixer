@@ -99,10 +99,20 @@ pub(crate) fn parse_external_ids(values: &[String]) -> AppResult<Vec<ExternalId>
 }
 
 pub(crate) fn finish_with_warnings(warnings: &[ScanWarning]) -> RunStatus {
-    for warning in warnings {
+    finish_with_resolution_warnings(warnings, &[])
+}
+
+pub(crate) fn finish_with_resolution_warnings(
+    scan_warnings: &[ScanWarning],
+    resolution_warnings: &[fixer_core::ResolutionWarning],
+) -> RunStatus {
+    for warning in scan_warnings {
         eprintln!("warning: {}: {}", warning.path.display(), warning.message);
     }
-    if warnings.is_empty() {
+    for warning in resolution_warnings {
+        eprintln!("warning: {}: {}", warning.code, warning.message);
+    }
+    if scan_warnings.is_empty() && resolution_warnings.is_empty() {
         RunStatus::Success
     } else {
         RunStatus::PartialSuccess

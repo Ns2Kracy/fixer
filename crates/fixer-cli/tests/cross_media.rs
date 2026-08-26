@@ -200,8 +200,9 @@ fn plan_emits_a_stable_operation_summary_without_mutating_targets() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -311,8 +312,9 @@ fn conflict_policy_can_prefer_first_or_fail() {
         .args(["--kind", "movie", "--json"])
         .output()
         .unwrap();
-    assert!(
-        preferred.status.success(),
+    assert_eq!(
+        preferred.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&preferred.stderr)
     );
@@ -380,8 +382,9 @@ fn configured_placement_is_used_when_the_cli_flag_is_absent() {
         .args(["--kind", "movie", "--json"])
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

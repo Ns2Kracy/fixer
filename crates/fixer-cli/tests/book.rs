@@ -104,8 +104,9 @@ fn book_search_and_exact_isbn_resolve_work_offline() {
         ])
         .output()
         .unwrap();
-    assert!(
-        resolve.status.success(),
+    assert_eq!(
+        resolve.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&resolve.stderr)
     );
@@ -137,8 +138,9 @@ fn book_scrape_plans_and_applies_sidecars_without_altering_epub() {
         .args(["--kind", "book", "--dry-run"])
         .output()
         .unwrap();
-    assert!(
-        dry_run.status.success(),
+    assert_eq!(
+        dry_run.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&dry_run.stderr)
     );
@@ -157,8 +159,9 @@ fn book_scrape_plans_and_applies_sidecars_without_altering_epub() {
         .args(["--kind", "book", "--apply"])
         .output()
         .unwrap();
-    assert!(
-        apply.status.success(),
+    assert_eq!(
+        apply.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&apply.stderr)
     );
@@ -186,8 +189,9 @@ fn epub_update_opt_in_writes_confirmation_intent_but_never_targets_archive() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

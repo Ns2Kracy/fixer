@@ -34,8 +34,9 @@ fn anime_scrape_previews_cour_hierarchy_in_place() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(3),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
