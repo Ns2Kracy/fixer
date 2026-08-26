@@ -14,7 +14,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use app::{app, job_app};
+pub use app::{app, job_app, secure_job_app};
+pub use auth::{AuthConfigError, AuthState};
 pub use fs_policy::{FsPolicy, FsPolicyError};
 pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
 pub use store::SqliteJobStore;

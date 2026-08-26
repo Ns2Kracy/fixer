@@ -780,6 +780,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tower",
+ "url",
 ]
 
 [[package]]
