@@ -28,7 +28,8 @@ pub use matching::{
 };
 pub use media::*;
 pub use merge::{
-    FieldPath, MergeError, MergePolicy, MovieDocument, MovieMerger, SeriesDocument, SeriesMerger,
+    AnimeDocument, AnimeMerger, FieldPath, MergeError, MergePolicy, MovieDocument, MovieMerger,
+    SeriesDocument, SeriesMerger,
 };
 pub use output::{
     OutputOperation, OutputPlan, PlannedContent, PlanningError, WriteRequest, Writer,

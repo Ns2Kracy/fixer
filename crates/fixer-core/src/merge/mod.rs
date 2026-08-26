@@ -1,8 +1,10 @@
 //! Metadata merge policies and typed merge entry points.
 
+mod anime;
 mod policy;
 mod television;
 
+pub use anime::{AnimeDocument, AnimeMerger};
 pub use policy::{FieldPath, MergePolicy};
 pub use television::{SeriesDocument, SeriesMerger};
 
