@@ -145,12 +145,14 @@ impl ReviewDecisionDto {
 }
 
 /// Versioned output-plan counts persisted without operation bytes or Core snapshots.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanSummary {
     schema_version: SchemaVersion,
     operation_count: u64,
     requires_confirmation: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fingerprint: Option<String>,
 }
 
 impl PlanSummary {
@@ -159,7 +161,21 @@ impl PlanSummary {
             schema_version: SchemaVersion,
             operation_count,
             requires_confirmation,
+            fingerprint: None,
         }
+    }
+
+    pub fn with_fingerprint(mut self, fingerprint: String) -> Self {
+        self.fingerprint = Some(fingerprint);
+        self
+    }
+
+    pub fn fingerprint(&self) -> Option<&str> {
+        self.fingerprint.as_deref()
+    }
+
+    pub const fn operation_count(&self) -> u64 {
+        self.operation_count
     }
 }
 
@@ -179,6 +195,10 @@ impl ExecutionSummary {
             completed_operations,
             failed_operations,
         }
+    }
+
+    pub const fn completed_operations(self) -> u64 {
+        self.completed_operations
     }
 }
 
@@ -231,7 +251,7 @@ impl JobState {
                 )
                 | (AwaitingConfirmation, Planning | Failed | Cancelled)
                 | (Planning, Writing | Failed | Cancelled | Interrupted)
-                | (Writing, Completed | Failed | Cancelled | Interrupted)
+                | (Writing, Completed | Failed | Interrupted)
                 | (Interrupted, Queued)
         )
     }

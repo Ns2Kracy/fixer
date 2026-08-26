@@ -59,7 +59,7 @@ fn job_input_and_summaries_are_stable_server_owned_dtos() {
 
     let plan = PlanSummary::new(5, true);
     assert_eq!(
-        serde_json::to_value(plan).unwrap(),
+        serde_json::to_value(&plan).unwrap(),
         json!({"schema_version": 1, "operation_count": 5, "requires_confirmation": true})
     );
     assert_round_trip(plan);
@@ -137,7 +137,6 @@ fn job_state_transitions_follow_the_persistent_worker_lifecycle() {
         (Resolving, Cancelled),
         (AwaitingConfirmation, Cancelled),
         (Planning, Cancelled),
-        (Writing, Cancelled),
         (Scanning, Interrupted),
         (Searching, Interrupted),
         (Resolving, Interrupted),

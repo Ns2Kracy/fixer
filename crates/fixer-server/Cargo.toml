@@ -9,12 +9,14 @@ rust-version.workspace = true
 fixer-core = { path = "../fixer-core" }
 fixer-provider-local = { path = "../fixer-provider-local" }
 fixer-sdk = { path = "../fixer-sdk" }
+fixer-writer-local = { path = "../fixer-writer-local" }
 axum.workspace = true
 futures-util.workspace = true
 fs2.workspace = true
 same-file.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "sync"] }

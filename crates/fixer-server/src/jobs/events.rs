@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
 use crate::{
-    jobs::model::{JobState, ProgressSummary},
+    jobs::model::{ExecutionSummary, JobState, ProgressSummary},
     store::JobId,
 };
 
@@ -123,6 +123,22 @@ impl JobEventHub {
                 "schema_version": 1,
                 "job_id": job_id.get(),
                 "progress": progress,
+            }),
+        ))
+    }
+
+    pub(crate) fn publish_completion(
+        &self,
+        job_id: JobId,
+        execution: &ExecutionSummary,
+    ) -> Result<(), SubscribeError> {
+        self.publish(JobEvent::new(
+            job_id,
+            "completion",
+            json!({
+                "schema_version": 1,
+                "job_id": job_id.get(),
+                "execution": execution,
             }),
         ))
     }

@@ -18,7 +18,7 @@ use crate::{
         JobRuntime, RuntimeError,
         model::{
             ExecutionSummary, JobInputDto, JobMediaKind, JobState, PlanSummary, ProgressSummary,
-            ReviewSummary,
+            ReviewDecisionDto, ReviewSummary,
         },
     },
     store::{JobId, JobRecord, StoreError},
@@ -31,6 +31,8 @@ pub(crate) fn router(runtime: JobRuntime) -> Router {
         .route("/jobs", post(create).fallback(post_only))
         .route("/jobs/{id}", get(get_job).fallback(get_only))
         .route("/jobs/{id}/cancel", post(cancel).fallback(post_only))
+        .route("/jobs/{id}/review", post(review).fallback(post_only))
+        .route("/jobs/{id}/execute", post(execute).fallback(post_only))
         .route("/jobs/{id}/events", get(events).fallback(get_only))
         .with_state(runtime)
 }
@@ -41,6 +43,19 @@ struct CreateJobRequest {
     media_kind: JobMediaKind,
     input_path: String,
     apply: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewRequest {
+    candidate_index: u64,
+    accepted_conflict_indexes: Vec<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecuteRequest {
+    approved: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -58,6 +73,8 @@ struct JobDto {
     progress: Option<ProgressSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     review: Option<ReviewSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_decision: Option<ReviewDecisionDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     plan: Option<PlanSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,6 +111,54 @@ async fn cancel(
 ) -> Result<Json<JobEnvelope>, ApiError> {
     let id = extract_id(path)?;
     let job = runtime.cancel(id).await.map_err(map_runtime_error)?;
+    Ok(Json(envelope(job)))
+}
+
+async fn review(
+    State(runtime): State<JobRuntime>,
+    path: Result<Path<i64>, PathRejection>,
+    request: Result<Json<ReviewRequest>, JsonRejection>,
+) -> Result<Json<JobEnvelope>, ApiError> {
+    let id = extract_id(path)?;
+    let Json(request) = request.map_err(map_json_rejection)?;
+    if request.accepted_conflict_indexes.len() > 4096 {
+        return Err(invalid_input(
+            "accepted_conflict_indexes",
+            "must contain no more than 4096 entries",
+        ));
+    }
+    if !request
+        .accepted_conflict_indexes
+        .windows(2)
+        .all(|indexes| indexes[0] < indexes[1])
+    {
+        return Err(invalid_input(
+            "accepted_conflict_indexes",
+            "must be strictly increasing without duplicates",
+        ));
+    }
+    let decision =
+        ReviewDecisionDto::new(request.candidate_index, request.accepted_conflict_indexes);
+    let job = runtime
+        .review(id, decision)
+        .await
+        .map_err(map_runtime_error)?;
+    Ok(Json(envelope(job)))
+}
+
+async fn execute(
+    State(runtime): State<JobRuntime>,
+    path: Result<Path<i64>, PathRejection>,
+    headers: HeaderMap,
+    request: Result<Json<ExecuteRequest>, JsonRejection>,
+) -> Result<Json<JobEnvelope>, ApiError> {
+    let id = extract_id(path)?;
+    let Json(request) = request.map_err(map_json_rejection)?;
+    if !request.approved {
+        return Err(invalid_input("approved", "must be true"));
+    }
+    let key = idempotency_key(&headers)?;
+    let job = runtime.execute(id, key).await.map_err(map_runtime_error)?;
     Ok(Json(envelope(job)))
 }
 
@@ -147,6 +212,24 @@ fn parse_id(value: i64) -> Result<JobId, ApiError> {
         .ok_or_else(|| not_found(value))
 }
 
+fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
+    let value = headers
+        .get("idempotency-key")
+        .ok_or_else(|| invalid_input("idempotency-key", "header is required"))?
+        .to_str()
+        .map_err(|_| invalid_input("idempotency-key", "must be valid visible ASCII"))?;
+    if value.is_empty()
+        || value.len() > 256
+        || !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+    {
+        return Err(invalid_input(
+            "idempotency-key",
+            "must contain 1 to 256 visible ASCII characters",
+        ));
+    }
+    Ok(value)
+}
+
 fn event_cursor(headers: &HeaderMap) -> Result<Option<&str>, ApiError> {
     headers
         .get("last-event-id")
@@ -167,7 +250,8 @@ fn envelope(job: JobRecord) -> JobEnvelope {
             state: job.state(),
             progress: job.progress().cloned(),
             review: job.review().copied(),
-            plan: job.plan().copied(),
+            review_decision: job.review_decision().cloned(),
+            plan: job.plan().cloned(),
             execution: job.execution().copied(),
             created_at_ms: job.created_at_ms(),
             updated_at_ms: job.updated_at_ms(),
@@ -187,6 +271,54 @@ fn map_runtime_error(error: RuntimeError) -> ApiError {
             "job_state_conflict",
             "Job cannot be cancelled in its current state",
             Some(BTreeMap::from([("state".to_owned(), state.to_string())])),
+        ),
+        RuntimeError::ReviewConflict(state) => ApiError::new(
+            StatusCode::CONFLICT,
+            "job_state_conflict",
+            "Job cannot be reviewed in its current state",
+            Some(BTreeMap::from([("state".to_owned(), state.to_string())])),
+        ),
+        RuntimeError::ExecutionConflict(state) => ApiError::new(
+            StatusCode::CONFLICT,
+            "job_state_conflict",
+            "Job cannot be executed in its current state",
+            Some(BTreeMap::from([("state".to_owned(), state.to_string())])),
+        ),
+        RuntimeError::ConflictAcknowledgementMismatch { expected } => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_input",
+            "Request fields are invalid",
+            Some(BTreeMap::from([(
+                "accepted_conflict_indexes".to_owned(),
+                if expected == 0 {
+                    "must be empty when the selected candidate has no conflicts".to_owned()
+                } else {
+                    format!("must acknowledge indexes 0 through {}", expected - 1)
+                },
+            )])),
+        ),
+        RuntimeError::ApprovalNotEnabled => {
+            invalid_input("approved", "job input must enable apply before execution")
+        }
+        RuntimeError::StalePlan => ApiError::new(
+            StatusCode::CONFLICT,
+            "stale_plan",
+            "Reviewed output plan is no longer current",
+            None,
+        ),
+        RuntimeError::Flow(
+            crate::jobs::JobFlowError::Sdk(fixer_sdk::SdkError::CandidateOutOfBounds { .. })
+            | crate::jobs::JobFlowError::IndexOverflow,
+        ) => invalid_input("candidate_index", "must identify an available candidate"),
+        RuntimeError::WorkerFlowUnavailable
+        | RuntimeError::ExecutionTaskClosed
+        | RuntimeError::ExecutionShuttingDown
+        | RuntimeError::CountOverflow
+        | RuntimeError::Flow(_) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "job_execution_error",
+            "Job review or execution failed",
+            None,
         ),
         RuntimeError::EventHistoryExpired => ApiError::new(
             StatusCode::CONFLICT,
@@ -210,7 +342,16 @@ fn map_runtime_error(error: RuntimeError) -> ApiError {
 fn map_store_error(error: StoreError) -> ApiError {
     match error {
         StoreError::NotFound { id } => not_found(id),
-        StoreError::InvalidTransition { .. } | StoreError::StateConflict { .. } => ApiError::new(
+        StoreError::IdempotencyConflict { .. } => ApiError::new(
+            StatusCode::CONFLICT,
+            "idempotency_conflict",
+            "Idempotency key does not match the existing execution request",
+            None,
+        ),
+        StoreError::InvalidTransition { .. }
+        | StoreError::StateConflict { .. }
+        | StoreError::ExecutionReservationRequired { .. }
+        | StoreError::ReservedExecutionRetry { .. } => ApiError::new(
             StatusCode::CONFLICT,
             "job_state_conflict",
             "Job state changed before the request could be applied",

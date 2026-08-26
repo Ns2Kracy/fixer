@@ -5,17 +5,23 @@ use std::{
 };
 
 use fixer_core::{
-    AssetKind, Isbn13, LocalizedValue, Movie, MovieRelease, ReleaseDate, ReleaseId, WorkId,
+    AnimeSeries, AssetKind, BookWork, Isbn13, LocalizedValue, Movie, MovieRelease,
+    MusicReleaseGroup, OutputPlan, ReleaseDate, ReleaseId, Resolved, Series, WorkId,
 };
 use fixer_provider_local::{
     LocalProvider, identify_path, parse_json, parse_nfo, scan, scan_anime, scan_books, scan_music,
     scan_television,
 };
 use fixer_sdk::{AnimeSearch, BookSearch, Fixer, MovieSearch, MusicSearch, TelevisionSearch};
+use fixer_writer_local::{AnimeWriter, BookWriter, JsonWriter, MusicWriter, TelevisionWriter};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::{sync::watch, task::JoinHandle};
 
-use crate::jobs::model::{JobInputDto, JobMediaKind};
+use crate::jobs::{
+    ExecutionTaskRegistry,
+    model::{JobInputDto, JobMediaKind, ReviewDecisionDto},
+};
 
 /// Bounded result retained after SDK resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,28 +67,59 @@ pub(crate) struct ScannedJob {
     media_kind: JobMediaKind,
     title: String,
     isbn: Option<Isbn13>,
+    output_root: PathBuf,
 }
 
 pub(crate) enum SearchArtifact {
     Anime {
         search: AnimeSearch,
         count: u64,
+        output_root: PathBuf,
     },
     Book {
         search: BookSearch,
         count: u64,
+        isbn: Option<Isbn13>,
+        output_root: PathBuf,
     },
     Movie {
         search: MovieSearch,
         count: u64,
+        output_root: PathBuf,
     },
     Music {
         search: MusicSearch,
         count: u64,
+        output_root: PathBuf,
     },
     Television {
         search: TelevisionSearch,
         count: u64,
+        output_root: PathBuf,
+    },
+}
+
+pub(crate) enum ResolvedArtifact {
+    Anime {
+        resolved: Resolved<AnimeSeries>,
+        output_root: PathBuf,
+    },
+    Book {
+        resolved: Resolved<BookWork>,
+        isbn: Option<Isbn13>,
+        output_root: PathBuf,
+    },
+    Movie {
+        resolved: Resolved<Movie>,
+        output_root: PathBuf,
+    },
+    Music {
+        resolved: Resolved<MusicReleaseGroup>,
+        output_root: PathBuf,
+    },
+    Television {
+        resolved: Resolved<Series>,
+        output_root: PathBuf,
     },
 }
 
@@ -94,6 +131,7 @@ impl WorkerFlow {
                 media_kind: input.media_kind(),
                 title: path_query_title(Path::new(input.input_path()))?,
                 isbn: None,
+                output_root: scan_root(Path::new(input.input_path()))?,
             }),
             Self::Local => {
                 let input = input.clone();
@@ -107,44 +145,57 @@ impl WorkerFlow {
 
 impl ScannedJob {
     pub(crate) async fn search(self) -> Result<SearchArtifact, JobFlowError> {
-        let artifact = match self.media_kind {
+        let Self {
+            fixer,
+            media_kind,
+            title,
+            isbn,
+            output_root,
+        } = self;
+        let artifact = match media_kind {
             JobMediaKind::Anime => {
-                let search = self.fixer.anime(self.title).search().await?;
+                let search = fixer.anime(title).search().await?;
                 SearchArtifact::Anime {
                     count: count(search.candidates().len())?,
                     search,
+                    output_root,
                 }
             }
             JobMediaKind::Book => {
-                let mut query = self.fixer.book(self.title);
-                if let Some(isbn) = self.isbn {
+                let mut query = fixer.book(title);
+                if let Some(isbn) = isbn.clone() {
                     query = query.isbn(isbn);
                 }
                 let search = query.search().await?;
                 SearchArtifact::Book {
                     count: count(search.candidates().len())?,
                     search,
+                    isbn,
+                    output_root,
                 }
             }
             JobMediaKind::Movie => {
-                let search = self.fixer.movie(self.title).search().await?;
+                let search = fixer.movie(title).search().await?;
                 SearchArtifact::Movie {
                     count: count(search.candidates().len())?,
                     search,
+                    output_root,
                 }
             }
             JobMediaKind::Music => {
-                let search = self.fixer.music(self.title).search().await?;
+                let search = fixer.music(title).search().await?;
                 SearchArtifact::Music {
                     count: count(search.candidates().len())?,
                     search,
+                    output_root,
                 }
             }
             JobMediaKind::Television => {
-                let search = self.fixer.television(self.title).search().await?;
+                let search = fixer.television(title).search().await?;
                 SearchArtifact::Television {
                     count: count(search.candidates().len())?,
                     search,
+                    output_root,
                 }
             }
         };
@@ -154,81 +205,274 @@ impl ScannedJob {
 
 impl SearchArtifact {
     pub(crate) async fn resolve(self) -> Result<SearchSummary, JobFlowError> {
-        let (candidate_count, conflict_count) = match self {
+        let candidate_count = self.candidate_count();
+        let resolved = self.resolve_selected(0).await?;
+        Ok(SearchSummary::new(
+            candidate_count,
+            resolved.conflict_count()?,
+        ))
+    }
+
+    pub(crate) const fn candidate_count(&self) -> u64 {
+        match self {
+            Self::Anime { count, .. }
+            | Self::Book { count, .. }
+            | Self::Movie { count, .. }
+            | Self::Music { count, .. }
+            | Self::Television { count, .. } => *count,
+        }
+    }
+
+    pub(crate) async fn resolve_selected(
+        self,
+        candidate_index: u64,
+    ) -> Result<ResolvedArtifact, JobFlowError> {
+        let index = usize::try_from(candidate_index).map_err(|_| JobFlowError::IndexOverflow)?;
+        Ok(match self {
             Self::Anime {
                 search,
-                count: candidate_count,
-            } => (
-                candidate_count,
-                count(search.select(0)?.fetch_selected().await?.conflicts.len())?,
-            ),
+                output_root,
+                ..
+            } => ResolvedArtifact::Anime {
+                resolved: search.select(index)?.fetch_selected().await?,
+                output_root,
+            },
             Self::Book {
                 search,
-                count: candidate_count,
-            } => (
-                candidate_count,
-                count(search.select(0)?.fetch_selected().await?.conflicts.len())?,
-            ),
+                isbn,
+                output_root,
+                ..
+            } => ResolvedArtifact::Book {
+                resolved: search.select(index)?.fetch_selected().await?,
+                isbn,
+                output_root,
+            },
             Self::Movie {
                 search,
-                count: candidate_count,
-            } => (
-                candidate_count,
-                count(search.select(0)?.fetch_selected().await?.conflicts.len())?,
-            ),
+                output_root,
+                ..
+            } => ResolvedArtifact::Movie {
+                resolved: search.select(index)?.fetch_selected().await?,
+                output_root,
+            },
             Self::Music {
                 search,
-                count: candidate_count,
-            } => (
-                candidate_count,
-                count(search.select(0)?.fetch_selected().await?.conflicts.len())?,
-            ),
+                output_root,
+                ..
+            } => ResolvedArtifact::Music {
+                resolved: search.select(index)?.fetch_selected().await?,
+                output_root,
+            },
             Self::Television {
                 search,
-                count: candidate_count,
-            } => (
-                candidate_count,
-                count(search.select(0)?.fetch_selected().await?.conflicts.len())?,
-            ),
-        };
-        Ok(SearchSummary::new(candidate_count, conflict_count))
+                output_root,
+                ..
+            } => ResolvedArtifact::Television {
+                resolved: search.select(index)?.fetch_selected().await?,
+                output_root,
+            },
+        })
     }
+}
+
+impl ResolvedArtifact {
+    pub(crate) fn conflict_count(&self) -> Result<u64, JobFlowError> {
+        count(match self {
+            Self::Anime { resolved, .. } => resolved.conflicts.len(),
+            Self::Book { resolved, .. } => resolved.conflicts.len(),
+            Self::Movie { resolved, .. } => resolved.conflicts.len(),
+            Self::Music { resolved, .. } => resolved.conflicts.len(),
+            Self::Television { resolved, .. } => resolved.conflicts.len(),
+        })
+    }
+
+    pub(crate) fn plan(&self) -> Result<OutputPlan, JobFlowError> {
+        let plan = match self {
+            Self::Anime {
+                resolved,
+                output_root,
+            } => AnimeWriter
+                .plan_resolved(resolved, output_root)
+                .map_err(planning_error)?,
+            Self::Book {
+                resolved,
+                isbn,
+                output_root,
+            } => {
+                let isbn = isbn.clone().or_else(|| {
+                    let [edition] = resolved.value.editions.as_slice() else {
+                        return None;
+                    };
+                    Some(edition.isbn_13.clone())
+                });
+                BookWriter::for_isbn(isbn.ok_or(JobFlowError::MissingBookIsbn)?)
+                    .plan_resolved(resolved, output_root)
+                    .map_err(planning_error)?
+            }
+            Self::Movie {
+                resolved,
+                output_root,
+            } => JsonWriter
+                .plan_resolved(resolved, output_root)
+                .map_err(planning_error)?,
+            Self::Music {
+                resolved,
+                output_root,
+            } => MusicWriter::default()
+                .plan_resolved(resolved, output_root)
+                .map_err(planning_error)?,
+            Self::Television {
+                resolved,
+                output_root,
+            } => TelevisionWriter
+                .plan_resolved(resolved, output_root)
+                .map_err(planning_error)?,
+        };
+        Ok(plan)
+    }
+
+    pub(crate) fn plan_fingerprint(
+        &self,
+        decision: &ReviewDecisionDto,
+        plan: &OutputPlan,
+    ) -> Result<String, JobFlowError> {
+        let (media_kind, resolved) = match self {
+            Self::Anime { resolved, .. } => ("anime", serde_json::to_value(resolved)),
+            Self::Book { resolved, .. } => ("book", serde_json::to_value(resolved)),
+            Self::Movie { resolved, .. } => ("movie", serde_json::to_value(resolved)),
+            Self::Music { resolved, .. } => ("music", serde_json::to_value(resolved)),
+            Self::Television { resolved, .. } => ("television", serde_json::to_value(resolved)),
+        };
+        let mut resolved = resolved.map_err(fingerprint_error)?;
+        scrub_observation_times(&mut resolved);
+        let mut hasher = Sha256::new();
+        hash_frame(&mut hasher, media_kind.as_bytes());
+        hash_frame(
+            &mut hasher,
+            &serde_json::to_vec(decision).map_err(fingerprint_error)?,
+        );
+        hash_frame(
+            &mut hasher,
+            &serde_json::to_vec(&resolved).map_err(fingerprint_error)?,
+        );
+        hash_frame(&mut hasher, plan.output_root.to_string_lossy().as_bytes());
+        for operation in plan.operations() {
+            match operation {
+                fixer_core::OutputOperation::CreateDirectory { target } => {
+                    hash_frame(&mut hasher, b"create_directory");
+                    hash_path(&mut hasher, target);
+                }
+                fixer_core::OutputOperation::WriteBytes { target, content } => {
+                    hash_frame(&mut hasher, b"write_bytes");
+                    hash_path(&mut hasher, target);
+                    match serde_json::from_slice::<serde_json::Value>(content.as_bytes()) {
+                        Ok(mut json) => {
+                            scrub_observation_times(&mut json);
+                            hash_frame(
+                                &mut hasher,
+                                &serde_json::to_vec(&json).map_err(fingerprint_error)?,
+                            );
+                        }
+                        Err(_) => hash_frame(&mut hasher, content.as_bytes()),
+                    }
+                }
+                fixer_core::OutputOperation::Copy { source, target } => {
+                    hash_frame(&mut hasher, b"copy");
+                    hash_path(&mut hasher, source);
+                    hash_path(&mut hasher, target);
+                }
+                fixer_core::OutputOperation::Symlink { source, target } => {
+                    hash_frame(&mut hasher, b"symlink");
+                    hash_path(&mut hasher, source);
+                    hash_path(&mut hasher, target);
+                }
+                fixer_core::OutputOperation::Hardlink { source, target } => {
+                    hash_frame(&mut hasher, b"hardlink");
+                    hash_path(&mut hasher, source);
+                    hash_path(&mut hasher, target);
+                }
+                fixer_core::OutputOperation::Reflink { source, target } => {
+                    hash_frame(&mut hasher, b"reflink");
+                    hash_path(&mut hasher, source);
+                    hash_path(&mut hasher, target);
+                }
+            }
+        }
+        let digest = hasher.finalize();
+        Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+    }
+}
+
+fn scrub_observation_times(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("observed_at_unix_ms");
+            for value in map.values_mut() {
+                scrub_observation_times(value);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                scrub_observation_times(value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn hash_frame(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update(u64::try_from(bytes.len()).unwrap_or(u64::MAX).to_be_bytes());
+    hasher.update(bytes);
+}
+
+fn hash_path(hasher: &mut Sha256, path: &Path) {
+    hash_frame(hasher, path.to_string_lossy().as_bytes());
+}
+
+fn fingerprint_error(error: impl ToString) -> JobFlowError {
+    JobFlowError::Fingerprint(error.to_string())
 }
 
 fn scan_local(input: &JobInputDto) -> Result<ScannedJob, JobFlowError> {
     let input_path = PathBuf::from(input.input_path());
     let root = scan_root(&input_path)?;
-    let (provider, title, isbn) = match input.media_kind() {
+    let (provider, title, isbn, output_root) = match input.media_kind() {
         JobMediaKind::Anime => {
             let result = scan_anime(&root).map_err(local_error)?;
-            let document = select_rooted(result.documents, result.roots, &input_path)?;
+            let (document, output_root) =
+                select_rooted(result.documents, result.roots, &input_path)?;
             let title = title_of(&document.titles)?;
             (
                 LocalProvider::from_anime_documents([document]).map_err(local_error)?,
                 title,
                 None,
+                output_root,
             )
         }
         JobMediaKind::Book => select_book(&input_path, &root)?,
         JobMediaKind::Movie => select_movie(&input_path, &root)?,
         JobMediaKind::Music => {
             let result = scan_music(&root).map_err(local_error)?;
-            let document = select_rooted(result.documents, result.roots, &input_path)?;
+            let (document, output_root) =
+                select_rooted(result.documents, result.roots, &input_path)?;
             let title = title_of(&document.titles)?;
             (
                 LocalProvider::from_music_documents([document]).map_err(local_error)?,
                 title,
                 None,
+                output_root,
             )
         }
         JobMediaKind::Television => {
             let result = scan_television(&root).map_err(local_error)?;
-            let document = select_rooted(result.documents, result.roots, &input_path)?;
+            let (document, output_root) =
+                select_rooted(result.documents, result.roots, &input_path)?;
             let title = title_of(&document.titles)?;
             (
                 LocalProvider::from_television_documents([document]).map_err(local_error)?,
                 title,
                 None,
+                output_root,
             )
         }
     };
@@ -238,17 +482,28 @@ fn scan_local(input: &JobInputDto) -> Result<ScannedJob, JobFlowError> {
         media_kind: input.media_kind(),
         title,
         isbn,
+        output_root,
     })
 }
 
 fn select_book(
     input_path: &Path,
     root: &Path,
-) -> Result<(LocalProvider, String, Option<Isbn13>), JobFlowError> {
+) -> Result<(LocalProvider, String, Option<Isbn13>, PathBuf), JobFlowError> {
     let result = scan_books(root).map_err(local_error)?;
-    let (work, isbn) = if input_path.is_file() {
+    if result.documents.len() != result.roots.len() {
+        return Err(JobFlowError::InvalidInput(
+            "book scan returned mismatched documents and roots".to_owned(),
+        ));
+    }
+    let mut pairs = result
+        .documents
+        .into_iter()
+        .zip(result.roots)
+        .collect::<Vec<_>>();
+    let (work, isbn, output_root) = if input_path.is_file() {
         let input = input_path.to_string_lossy();
-        let mut matches = result.documents.into_iter().filter_map(|work| {
+        let mut matches = pairs.into_iter().filter_map(|(work, output_root)| {
             let isbn = work.editions.iter().find_map(|edition| {
                 edition
                     .assets
@@ -258,7 +513,7 @@ fn select_book(
                     })
                     .then(|| edition.isbn_13.clone())
             })?;
-            Some((work, isbn))
+            Some((work, isbn, output_root))
         });
         let selected = matches.next().ok_or_else(|| {
             JobFlowError::InvalidInput("input EPUB does not match a scanned edition".to_owned())
@@ -270,26 +525,29 @@ fn select_book(
         }
         selected
     } else {
-        let [work] = result.documents.as_slice() else {
-            return Err(ambiguous("book works", result.documents.len()));
-        };
+        if pairs.len() != 1 {
+            return Err(ambiguous("book works", pairs.len()));
+        }
+        let (work, output_root) = pairs.pop().expect("one book work was checked");
         let [edition] = work.editions.as_slice() else {
             return Err(ambiguous("book editions", work.editions.len()));
         };
-        (work.clone(), edition.isbn_13.clone())
+        let isbn = edition.isbn_13.clone();
+        (work, isbn, output_root)
     };
     let title = title_of(&work.titles)?;
     Ok((
         LocalProvider::from_book_documents([work]).map_err(local_error)?,
         title,
         Some(isbn),
+        output_root,
     ))
 }
 
 fn select_movie(
     input_path: &Path,
     root: &Path,
-) -> Result<(LocalProvider, String, Option<Isbn13>), JobFlowError> {
+) -> Result<(LocalProvider, String, Option<Isbn13>, PathBuf), JobFlowError> {
     let movie = if input_path.is_file() {
         let json = input_path.with_extension("json");
         let nfo = input_path.with_extension("nfo");
@@ -312,6 +570,7 @@ fn select_movie(
         LocalProvider::from_documents([movie]).map_err(local_error)?,
         title,
         None,
+        root.to_owned(),
     ))
 }
 
@@ -351,20 +610,25 @@ fn select_rooted<T>(
     documents: Vec<T>,
     roots: Vec<PathBuf>,
     input_path: &Path,
-) -> Result<T, JobFlowError> {
+) -> Result<(T, PathBuf), JobFlowError> {
+    if documents.len() != roots.len() {
+        return Err(JobFlowError::InvalidInput(
+            "media scan returned mismatched documents and roots".to_owned(),
+        ));
+    }
+    let pairs = documents.into_iter().zip(roots).collect::<Vec<_>>();
     if input_path.is_dir() {
-        let count = documents.len();
+        let count = pairs.len();
         if count != 1 {
             return Err(ambiguous("media documents", count));
         }
-        return documents
+        return pairs
             .into_iter()
             .next()
             .ok_or_else(|| ambiguous("media documents", 0));
     }
-    let mut matches = documents
+    let mut matches = pairs
         .into_iter()
-        .zip(roots)
         .filter(|(_, root)| input_path.starts_with(root))
         .collect::<Vec<_>>();
     let deepest = matches
@@ -379,13 +643,13 @@ fn select_rooted<T>(
     let mut deepest_matches = matches
         .drain(..)
         .filter(|(_, root)| root.components().count() == deepest);
-    let (document, _) = deepest_matches.next().expect("deepest match exists");
+    let (document, root) = deepest_matches.next().expect("deepest match exists");
     if deepest_matches.next().is_some() {
         return Err(JobFlowError::InvalidInput(
             "input path belongs to multiple scanned media roots".to_owned(),
         ));
     }
-    Ok(document)
+    Ok((document, root))
 }
 
 fn title_of(titles: &fixer_core::Titles) -> Result<String, JobFlowError> {
@@ -432,6 +696,9 @@ fn count(value: usize) -> Result<u64, JobFlowError> {
 fn local_error(error: impl ToString) -> JobFlowError {
     JobFlowError::Local(error.to_string())
 }
+fn planning_error(error: impl ToString) -> JobFlowError {
+    JobFlowError::Planning(error.to_string())
+}
 
 #[derive(Debug, Error)]
 pub enum JobFlowError {
@@ -443,6 +710,14 @@ pub enum JobFlowError {
     Sdk(#[from] fixer_sdk::SdkError),
     #[error("blocking scan task failed: {0}")]
     BlockingTask(String),
+    #[error("candidate or conflict index exceeds this platform's addressable range")]
+    IndexOverflow,
+    #[error("book planning requires an ISBN-13 selected during scan")]
+    MissingBookIsbn,
+    #[error("output planning failed: {0}")]
+    Planning(String),
+    #[error("reviewed-plan fingerprint failed: {0}")]
+    Fingerprint(String),
     #[error("candidate count exceeds the persistent summary range")]
     CountOverflow,
 }
@@ -452,11 +727,20 @@ pub enum JobFlowError {
 pub struct WorkerPool {
     shutdown: watch::Sender<bool>,
     handles: Vec<JoinHandle<()>>,
+    execution_tasks: Arc<ExecutionTaskRegistry>,
 }
 
 impl WorkerPool {
-    pub(crate) fn new(shutdown: watch::Sender<bool>, handles: Vec<JoinHandle<()>>) -> Self {
-        Self { shutdown, handles }
+    pub(crate) fn new(
+        shutdown: watch::Sender<bool>,
+        handles: Vec<JoinHandle<()>>,
+        execution_tasks: Arc<ExecutionTaskRegistry>,
+    ) -> Self {
+        Self {
+            shutdown,
+            handles,
+            execution_tasks,
+        }
     }
     pub fn worker_count(&self) -> usize {
         self.handles.len()
@@ -466,6 +750,7 @@ impl WorkerPool {
         for handle in self.handles.drain(..) {
             let _ = handle.await;
         }
+        self.execution_tasks.close_and_wait().await;
     }
 }
 

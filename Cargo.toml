@@ -32,3 +32,4 @@ http-body-util = "0.1.5"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 fs2 = "0.4.3"
 same-file = "1.0.6"
+sha2 = "0.10.9"

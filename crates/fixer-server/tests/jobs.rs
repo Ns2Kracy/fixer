@@ -109,6 +109,289 @@ fn cursor_with_sequence(cursor: &str, sequence: u64) -> String {
 }
 
 #[tokio::test]
+async fn review_and_idempotent_approval_execute_one_fixture_plan() {
+    let directory = tempfile::tempdir().unwrap();
+    let media = directory.path().join("fixture.mkv");
+    std::fs::write(&media, b"fixture").unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/jobs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "media_kind": "movie",
+                    "input_path": media,
+                    "apply": true
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/jobs/1/review")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"candidate_index": 0, "accepted_conflict_indexes": []}).to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let reviewed = response_json(response).await;
+    assert_eq!(reviewed["job"]["state"], "planning");
+    assert_eq!(reviewed["job"]["review_decision"]["candidate_index"], 0);
+    assert_eq!(reviewed["job"]["plan"]["operation_count"], 1);
+
+    for request in [
+        Request::post("/api/v1/jobs/1/execute")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"approved": true}).to_string()))
+            .unwrap(),
+        Request::post("/api/v1/jobs/1/execute")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("idempotency-key", "fixture-write")
+            .body(Body::from(json!({"approved": false}).to_string()))
+            .unwrap(),
+    ] {
+        let response = send(&router, request).await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await["error"]["code"],
+            "invalid_input"
+        );
+    }
+
+    let execute = || {
+        Request::post("/api/v1/jobs/1/execute")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("idempotency-key", "fixture-write")
+            .body(Body::from(json!({"approved": true}).to_string()))
+            .unwrap()
+    };
+    let response = send(&router, execute()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let completed = response_json(response).await;
+    assert_eq!(completed["job"]["state"], "completed");
+    assert_eq!(completed["job"]["execution"]["completed_operations"], 1);
+    assert_eq!(completed["job"]["execution"]["failed_operations"], 0);
+    assert!(directory.path().join("movie.json").is_file());
+
+    let replay = send(&router, execute()).await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(response_json(replay).await["job"]["state"], "completed");
+
+    let conflict = send(
+        &router,
+        Request::post("/api/v1/jobs/1/execute")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("idempotency-key", "different-write")
+            .body(Body::from(json!({"approved": true}).to_string()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(conflict).await["error"]["code"],
+        "idempotency_conflict"
+    );
+
+    workers.shutdown().await;
+}
+
+#[tokio::test]
+async fn review_rejects_wrong_candidate_or_conflict_acknowledgements() {
+    let directory = tempfile::tempdir().unwrap();
+    let media = directory.path().join("review.mkv");
+    std::fs::write(&media, b"fixture").unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+    create_apply_job(&router, &media).await;
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+
+    for (body, field) in [
+        (
+            json!({"candidate_index": 0, "accepted_conflict_indexes": [0]}),
+            "accepted_conflict_indexes",
+        ),
+        (
+            json!({"candidate_index": 9, "accepted_conflict_indexes": []}),
+            "candidate_index",
+        ),
+    ] {
+        let response = send(
+            &router,
+            Request::post("/api/v1/jobs/1/review")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let error = response_json(response).await;
+        assert_eq!(error["error"]["code"], "invalid_input");
+        assert!(error["error"]["details"][field].is_string());
+    }
+    assert_eq!(
+        get_job(&router, 1).await["job"]["state"],
+        "awaiting_confirmation"
+    );
+    workers.shutdown().await;
+}
+
+#[tokio::test]
+async fn failed_execution_is_terminal_truthful_and_replayable() {
+    let directory = tempfile::tempdir().unwrap();
+    let media = directory.path().join("failure.mkv");
+    std::fs::write(&media, b"fixture").unwrap();
+    std::fs::write(directory.path().join("movie.json"), b"existing").unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(64));
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+    create_apply_job(&router, &media).await;
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+    review_job(&router, 1).await;
+
+    let response = send(&router, execute_job(1, "failure-key")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let failed = response_json(response).await;
+    assert_eq!(failed["job"]["state"], "failed");
+    assert_eq!(failed["job"]["execution"]["completed_operations"], 0);
+    assert_eq!(failed["job"]["execution"]["failed_operations"], 1);
+    assert_eq!(failed["job"]["progress"]["completed_items"], 0);
+    assert_eq!(failed["job"]["progress"]["total_items"], 1);
+    assert_eq!(
+        std::fs::read(directory.path().join("movie.json")).unwrap(),
+        b"existing"
+    );
+
+    let replay = send(&router, execute_job(1, "failure-key")).await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(response_json(replay).await["job"]["state"], "failed");
+    let cancel = send(
+        &router,
+        Request::post("/api/v1/jobs/1/cancel")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(cancel.status(), StatusCode::CONFLICT);
+
+    let events = send(
+        &router,
+        Request::get("/api/v1/jobs/1/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let mut body = events.into_body();
+    let mut saw_completion = false;
+    for _ in 0..24 {
+        let frame = next_sse_frame(&mut body).await;
+        saw_completion |=
+            frame.contains("event: completion") && frame.contains(r#""failed_operations":1"#);
+        if saw_completion {
+            break;
+        }
+    }
+    assert!(saw_completion, "failed execution omitted completion SSE");
+    workers.shutdown().await;
+}
+
+#[tokio::test]
+async fn aborting_the_execute_caller_does_not_abort_durable_finalization() {
+    let directory = tempfile::tempdir().unwrap();
+    let media = directory.path().join("abort.mkv");
+    std::fs::write(&media, b"fixture").unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(64));
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime.clone());
+    create_apply_job(&router, &media).await;
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+    review_job(&router, 1).await;
+    let executing = tokio::spawn({
+        let router = router.clone();
+        async move { send(&router, execute_job(1, "abort-key")).await }
+    });
+    timeout(Duration::from_secs(2), async {
+        loop {
+            if get_job(&router, 1).await["job"]["state"] == "writing" {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    executing.abort();
+    workers.shutdown().await;
+
+    assert_eq!(get_job(&router, 1).await["job"]["state"], "completed");
+    assert!(directory.path().join("movie.json").is_file());
+}
+
+async fn create_apply_job(router: &Router, path: &std::path::Path) {
+    let response = send(
+        router,
+        Request::post("/api/v1/jobs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"media_kind": "movie", "input_path": path, "apply": true}).to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+async fn review_job(router: &Router, id: i64) {
+    let response = send(
+        router,
+        Request::post(format!("/api/v1/jobs/{id}/review"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"candidate_index": 0, "accepted_conflict_indexes": []}).to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+fn execute_job(id: i64, key: &str) -> Request<Body> {
+    Request::post(format!("/api/v1/jobs/{id}/execute"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("idempotency-key", key)
+        .body(Body::from(json!({"approved": true}).to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
 async fn one_worker_calls_the_sdk_and_processes_persistent_jobs_serially() {
     let directory = tempfile::tempdir().unwrap();
     let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
