@@ -4,6 +4,9 @@
 
 mod config;
 mod error;
+mod graphql;
+mod provider;
 
 pub use config::AniListConfig;
 pub use error::AniListError;
+pub use provider::AniListProvider;
