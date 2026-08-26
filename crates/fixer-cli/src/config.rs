@@ -30,6 +30,7 @@ pub struct Config {
     pub local_root: Option<PathBuf>,
     api_key: Option<String>,
     tmdb_base_url: Option<String>,
+    bangumi_base_url: Option<String>,
     offline_source: ConfigSource,
     proxy_source: ConfigSource,
     local_root_source: ConfigSource,
@@ -45,6 +46,7 @@ struct FileConfig {
     #[serde(alias = "tmdb_api_token")]
     api_key: Option<String>,
     tmdb_base_url: Option<String>,
+    bangumi_base_url: Option<String>,
 }
 
 impl Config {
@@ -86,12 +88,14 @@ impl Config {
             file.api_key,
         );
         let tmdb_base_url = env::var("TMDB_BASE_URL").ok().or(file.tmdb_base_url);
+        let bangumi_base_url = env::var("BANGUMI_BASE_URL").ok().or(file.bangumi_base_url);
         Ok(Self {
             offline,
             proxy,
             local_root,
             api_key,
             tmdb_base_url,
+            bangumi_base_url,
             offline_source,
             proxy_source,
             local_root_source,
@@ -111,6 +115,14 @@ impl Config {
         fixer_provider_tmdb::TmdbProvider::new(config)
             .map(Some)
             .map_err(AppError::new)
+    }
+
+    pub fn bangumi_provider(&self) -> AppResult<fixer_provider_bangumi::BangumiProvider> {
+        let mut config = fixer_provider_bangumi::BangumiConfig::default();
+        if let Some(base_url) = &self.bangumi_base_url {
+            config = config.with_base_url(base_url).map_err(AppError::new)?;
+        }
+        fixer_provider_bangumi::BangumiProvider::new(config).map_err(AppError::new)
     }
 
     pub fn validation_summary(&self) -> String {
@@ -137,6 +149,7 @@ impl fmt::Debug for Config {
             .field("local_root", &self.local_root)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("tmdb_base_url", &self.tmdb_base_url)
+            .field("bangumi_base_url", &self.bangumi_base_url)
             .finish()
     }
 }

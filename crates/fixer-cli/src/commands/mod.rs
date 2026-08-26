@@ -25,8 +25,9 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
         Command::Providers {
             command: ProvidersCommand::List,
         } => {
-            println!("local\tmovie,television\toffline");
+            println!("local\tmovie,television,anime\toffline");
             println!("tmdb\tmovie,television\tnetwork");
+            println!("bangumi\tanime\tnetwork");
             Ok(RunStatus::Success)
         }
     }
@@ -42,11 +43,12 @@ pub(crate) fn local_fixer(config: &Config) -> AppResult<(Fixer, Vec<ScanWarning>
 pub(crate) fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult<Fixer> {
     let mut builder = Fixer::builder()
         .provider(provider)
-        .preferred_languages(["zh-CN", "en", "und"])
+        .preferred_languages(["zh-Hans", "zh-Hant", "ja", "en", "und"])
         .map_err(AppError::new)?;
     if let Some(tmdb) = config.tmdb_provider()? {
         builder = builder.provider(tmdb);
     }
+    builder = builder.provider(config.bangumi_provider()?);
     if let Some(proxy) = &config.proxy {
         builder = builder.proxy(proxy.clone());
     }

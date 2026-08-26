@@ -345,6 +345,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "fixer-core",
+ "fixer-provider-bangumi",
  "fixer-provider-local",
  "fixer-provider-tmdb",
  "fixer-sdk",

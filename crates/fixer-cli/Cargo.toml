@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 fixer-core = { path = "../fixer-core" }
+fixer-provider-bangumi = { path = "../fixer-provider-bangumi" }
 fixer-provider-local = { path = "../fixer-provider-local" }
 fixer-provider-tmdb = { path = "../fixer-provider-tmdb" }
 fixer-sdk = { path = "../fixer-sdk" }
