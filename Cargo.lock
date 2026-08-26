@@ -379,6 +379,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixer-provider-bangumi"
+version = "0.1.0"
+dependencies = [
+ "fixer-core",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "fixer-provider-local"
 version = "0.1.0"
 dependencies = [

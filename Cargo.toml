@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-cli", "crates/fixer-provider-tmdb"]
+members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-cli", "crates/fixer-provider-tmdb", "crates/fixer-provider-bangumi"]
 resolver = "3"
 
 [workspace.package]
