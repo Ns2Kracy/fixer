@@ -1,7 +1,7 @@
 use crate::{
     AppError, AppResult, RunStatus,
     args::{MediaKindArg, PlacementArg, PlanArgs, ScrapeArgs},
-    config::{Config, ConflictPolicy},
+    config::{Config, ConflictPolicy, OutputPreset},
     json::PlanDto,
     render,
 };
@@ -24,22 +24,31 @@ enum OutputMode {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ConflictOutcome {
-    policy: ConflictPolicy,
-    count: usize,
+struct FinalizationPolicy {
+    output_preset: OutputPreset,
+    conflict_policy: ConflictPolicy,
+    conflicts: usize,
 }
 
-impl ConflictOutcome {
-    const fn new(policy: ConflictPolicy, count: usize) -> Self {
-        Self { policy, count }
+impl FinalizationPolicy {
+    const fn new(
+        output_preset: OutputPreset,
+        conflict_policy: ConflictPolicy,
+        conflicts: usize,
+    ) -> Self {
+        Self {
+            output_preset,
+            conflict_policy,
+            conflicts,
+        }
     }
 
     const fn requires_review(self) -> bool {
-        self.count > 0 && matches!(self.policy, ConflictPolicy::Review)
+        self.conflicts > 0 && matches!(self.conflict_policy, ConflictPolicy::Review)
     }
 
     const fn rejects(self) -> bool {
-        self.count > 0 && matches!(self.policy, ConflictPolicy::Error)
+        self.conflicts > 0 && matches!(self.conflict_policy, ConflictPolicy::Error)
     }
 }
 
@@ -133,7 +142,7 @@ async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         &result.warnings,
         None,
         mode,
-        ConflictOutcome::new(config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
     )
 }
 
@@ -205,7 +214,7 @@ async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> App
         &warnings,
         None,
         mode,
-        ConflictOutcome::new(config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
     )
 }
 
@@ -242,7 +251,7 @@ async fn scrape_movie(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         &result.warnings,
         None,
         mode,
-        ConflictOutcome::new(config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
     )
 }
 
@@ -285,7 +294,7 @@ async fn scrape_music(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         &warnings,
         None,
         mode,
-        ConflictOutcome::new(config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
     )
 }
 
@@ -348,7 +357,7 @@ async fn scrape_television(
         &warnings,
         placement_target.as_deref(),
         mode,
-        ConflictOutcome::new(config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
     )
 }
 
@@ -359,8 +368,9 @@ fn finish_plan(
     warnings: &[ScanWarning],
     placement_target: Option<&Path>,
     mode: OutputMode,
-    conflicts: ConflictOutcome,
+    policy: FinalizationPolicy,
 ) -> AppResult<RunStatus> {
+    plan = apply_output_preset(plan, policy.output_preset);
     if args.placement() != PlacementArg::InPlace {
         if !args.path.is_file() {
             return Err(AppError::new(
@@ -383,10 +393,10 @@ fn finish_plan(
             }
         }
     }
-    if conflicts.rejects() {
+    if policy.rejects() {
         return Err(AppError::new(format!(
             "conflict policy rejected {} metadata conflict(s)",
-            conflicts.count
+            policy.conflicts
         )));
     }
 
@@ -400,15 +410,15 @@ fn finish_plan(
                 output_root.display()
             );
         }
-        if conflicts.requires_review() {
-            eprintln!("review required: {} metadata conflict(s)", conflicts.count);
+        if policy.requires_review() {
+            eprintln!("review required: {} metadata conflict(s)", policy.conflicts);
             return Ok(RunStatus::ReviewRequired);
         }
         return Ok(super::finish_with_warnings(warnings));
     }
 
-    if conflicts.requires_review() {
-        eprintln!("review required: {} metadata conflict(s)", conflicts.count);
+    if policy.requires_review() {
+        eprintln!("review required: {} metadata conflict(s)", policy.conflicts);
         return Ok(RunStatus::ReviewRequired);
     }
 
@@ -583,6 +593,26 @@ fn safe_folder_name(value: &str) -> String {
     }
 }
 
+fn apply_output_preset(
+    plan: fixer_core::OutputPlan,
+    preset: OutputPreset,
+) -> fixer_core::OutputPlan {
+    if preset == OutputPreset::Full {
+        return plan;
+    }
+    let mut filtered = fixer_core::OutputPlan::new(plan.output_root.clone());
+    for operation in plan.operations() {
+        if matches!(
+            operation,
+            fixer_core::OutputOperation::CreateDirectory { .. }
+                | fixer_core::OutputOperation::WriteBytes { .. }
+        ) {
+            filtered.push(operation.clone());
+        }
+    }
+    filtered
+}
+
 const fn placement_mode(placement: PlacementArg) -> PlacementMode {
     match placement {
         PlacementArg::InPlace => PlacementMode::InPlace,
@@ -590,5 +620,37 @@ const fn placement_mode(placement: PlacementArg) -> PlacementMode {
         PlacementArg::Hardlink => PlacementMode::Hardlink,
         PlacementArg::Copy => PlacementMode::Copy,
         PlacementArg::Reflink => PlacementMode::Reflink,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fixer_core::{OutputOperation, OutputPlan, PlannedContent};
+
+    #[test]
+    fn output_preset_filters_writer_asset_transfers() {
+        let mut plan = OutputPlan::new("library");
+        plan.push(OutputOperation::create_directory("metadata").unwrap());
+        plan.push(
+            OutputOperation::write_bytes("metadata/item.json", PlannedContent::new(b"{}")).unwrap(),
+        );
+        plan.push(OutputOperation::copy("source.jpg", "cover.jpg").unwrap());
+        plan.push(OutputOperation::symlink("source.mkv", "movie.mkv").unwrap());
+        plan.push(OutputOperation::hardlink("source.flac", "track.flac").unwrap());
+        plan.push(OutputOperation::reflink("source.epub", "book.epub").unwrap());
+
+        let metadata = apply_output_preset(plan.clone(), OutputPreset::Metadata);
+        assert_eq!(metadata.operations().len(), 2);
+        assert!(matches!(
+            metadata.operations(),
+            [
+                OutputOperation::CreateDirectory { .. },
+                OutputOperation::WriteBytes { .. }
+            ]
+        ));
+
+        let full = apply_output_preset(plan.clone(), OutputPreset::Full);
+        assert_eq!(full, plan);
     }
 }
