@@ -22,6 +22,7 @@ pub enum AnimeSeriesRelation {
 pub enum AnimeEpisodeClass {
     Regular,
     Ova,
+    Ona,
     Special,
 }
 

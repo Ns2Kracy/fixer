@@ -75,6 +75,21 @@ fn anime_round_trips_cour_classification_and_numbering() {
 }
 
 #[test]
+fn anime_preserves_ona_as_a_distinct_episode_class() {
+    let episode = AnimeEpisode::new(
+        WorkId::new("anime-ona-1").unwrap(),
+        titles("ONA"),
+        AnimeEpisodeClass::Ona,
+        Some(1),
+        Some(1),
+    )
+    .unwrap();
+
+    let encoded = serde_json::to_value(episode).unwrap();
+    assert_eq!(encoded["class"], "ona");
+}
+
+#[test]
 fn music_round_trips_release_group_release_disc_and_track() {
     let artist = MusicArtist::new(WorkId::new("artist-1").unwrap(), "Example Artist").unwrap();
     let track = Track::new(

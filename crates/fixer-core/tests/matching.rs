@@ -1,5 +1,6 @@
 use fixer_core::{
-    Candidate, ExternalId, MatchEvidenceKind, MatchQuery, Matcher, MovieCandidate, ProviderId,
+    AnimeCandidate, Candidate, ExternalId, MatchEvidenceKind, MatchQuery, Matcher, MovieCandidate,
+    ProviderId,
 };
 
 fn candidate(id: &str, title: &str, year: Option<u16>) -> Candidate {
@@ -85,6 +86,23 @@ fn matcher_exposes_positive_and_negative_evidence() {
             })
         );
     }
+}
+
+#[test]
+fn anime_queries_score_typed_anime_candidates() {
+    let query = MatchQuery::anime("葬送のフリーレン").unwrap();
+    let candidate = Candidate::Anime(
+        AnimeCandidate::new(
+            ProviderId::new("bangumi").unwrap(),
+            ExternalId::new("bangumi", "400602").unwrap(),
+            "葬送のフリーレン",
+            Some(2023),
+        )
+        .unwrap(),
+    );
+
+    let score = Matcher.score(&query, &candidate).unwrap();
+    assert!(score.total > 0);
 }
 
 #[test]
