@@ -44,10 +44,12 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum SearchCommand {
     Movie(MovieQueryArgs),
+    Television(TelevisionQueryArgs),
 }
 #[derive(Debug, Subcommand)]
 pub enum ResolveCommand {
     Movie(ResolveMovieArgs),
+    Television(ResolveTelevisionArgs),
 }
 
 #[derive(Debug, Args)]
@@ -58,9 +60,28 @@ pub struct MovieQueryArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct TelevisionQueryArgs {
+    pub title: String,
+    #[arg(long)]
+    pub year: Option<u16>,
+    #[arg(long = "external-id", value_name = "NAMESPACE:ID")]
+    pub external_ids: Vec<String>,
+    #[arg(long, value_enum)]
+    pub ordering: Option<OrderingArg>,
+}
+
+#[derive(Debug, Args)]
 pub struct ResolveMovieArgs {
     #[command(flatten)]
     pub query: MovieQueryArgs,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ResolveTelevisionArgs {
+    #[command(flatten)]
+    pub query: TelevisionQueryArgs,
     #[arg(long)]
     pub json: bool,
 }
@@ -81,6 +102,24 @@ pub struct ScrapeArgs {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum MediaKindArg {
     Movie,
+    Television,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum OrderingArg {
+    Aired,
+    Dvd,
+    Absolute,
+}
+
+impl From<OrderingArg> for fixer_core::OrderingScheme {
+    fn from(value: OrderingArg) -> Self {
+        match value {
+            OrderingArg::Aired => Self::Aired,
+            OrderingArg::Dvd => Self::Dvd,
+            OrderingArg::Absolute => Self::Absolute,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

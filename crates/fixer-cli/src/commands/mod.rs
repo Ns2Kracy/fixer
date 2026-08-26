@@ -7,6 +7,7 @@ use crate::{
     args::{Command, ConfigCommand, ProvidersCommand},
     config::Config,
 };
+use fixer_core::ExternalId;
 use fixer_provider_local::{LocalProvider, ScanWarning};
 use fixer_sdk::Fixer;
 
@@ -24,7 +25,8 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
         Command::Providers {
             command: ProvidersCommand::List,
         } => {
-            println!("local\tmovie\toffline");
+            println!("local\tmovie,television\toffline");
+            println!("tmdb\tmovie,television\tnetwork");
             Ok(RunStatus::Success)
         }
     }
@@ -53,6 +55,20 @@ pub(crate) fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult
     }
     builder.build().map_err(AppError::new)
 }
+pub(crate) fn parse_external_ids(values: &[String]) -> AppResult<Vec<ExternalId>> {
+    values
+        .iter()
+        .map(|value| {
+            let (namespace, id) = value.split_once(':').ok_or_else(|| {
+                AppError::new(format!(
+                    "external ID `{value}` must use namespace:id syntax"
+                ))
+            })?;
+            ExternalId::new(namespace, id).map_err(AppError::new)
+        })
+        .collect()
+}
+
 pub(crate) fn finish_with_warnings(warnings: &[ScanWarning]) -> RunStatus {
     for warning in warnings {
         eprintln!("warning: {}: {}", warning.path.display(), warning.message);

@@ -1,14 +1,17 @@
 use crate::{
     AppError, AppResult, RunStatus,
-    args::{ResolveCommand, ResolveMovieArgs},
+    args::{ResolveCommand, ResolveMovieArgs, ResolveTelevisionArgs},
     config::Config,
-    render::{self, ResolvedMovieDto},
+    render::{self, ResolvedMovieDto, ResolvedTelevisionDto},
 };
 
 pub async fn run(command: ResolveCommand, config: &Config) -> AppResult<RunStatus> {
-    let ResolveCommand::Movie(args) = command;
-    resolve_movie(args, config).await
+    match command {
+        ResolveCommand::Movie(args) => resolve_movie(args, config).await,
+        ResolveCommand::Television(args) => resolve_television(args, config).await,
+    }
 }
+
 async fn resolve_movie(args: ResolveMovieArgs, config: &Config) -> AppResult<RunStatus> {
     let (fixer, warnings) = super::local_fixer(config)?;
     let mut query = fixer.movie(args.query.title);
@@ -19,7 +22,29 @@ async fn resolve_movie(args: ResolveMovieArgs, config: &Config) -> AppResult<Run
     if args.json {
         render::json(&ResolvedMovieDto::from_resolved(&resolved))?;
     } else {
-        render::resolved_text(&resolved);
+        render::resolved_movie_text(&resolved);
+    }
+    Ok(super::finish_with_warnings(&warnings))
+}
+
+async fn resolve_television(args: ResolveTelevisionArgs, config: &Config) -> AppResult<RunStatus> {
+    let (fixer, warnings) = super::local_fixer(config)?;
+    let external_ids = super::parse_external_ids(&args.query.external_ids)?;
+    let mut query = fixer.television(args.query.title);
+    if let Some(year) = args.query.year {
+        query = query.year(year);
+    }
+    if let Some(ordering) = args.query.ordering {
+        query = query.ordering(ordering.into());
+    }
+    for external_id in external_ids {
+        query = query.external_id(external_id);
+    }
+    let resolved = query.resolve().await.map_err(AppError::new)?;
+    if args.json {
+        render::json(&ResolvedTelevisionDto::from_resolved(&resolved))?;
+    } else {
+        render::resolved_television_text(&resolved);
     }
     Ok(super::finish_with_warnings(&warnings))
 }
