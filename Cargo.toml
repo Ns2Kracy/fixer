@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-cli", "crates/fixer-provider-tmdb", "crates/fixer-provider-bangumi", "crates/fixer-provider-anilist", "crates/fixer-provider-musicbrainz", "crates/fixer-provider-openlibrary"]
+members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-cli", "crates/fixer-provider-tmdb", "crates/fixer-provider-bangumi", "crates/fixer-provider-anilist", "crates/fixer-provider-musicbrainz", "crates/fixer-provider-openlibrary", "crates/fixer-server"]
 resolver = "3"
 
 [workspace.package]
@@ -26,3 +26,6 @@ clap = { version = "4.6.6", features = ["derive"] }
 url = "2.5.8"
 wiremock = "0.6.5"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
+axum = "0.8.9"
+tower = "0.5.3"
+http-body-util = "0.1.5"
