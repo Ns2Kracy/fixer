@@ -1,7 +1,7 @@
 use crate::{AppError, AppResult};
 use fixer_core::{
-    AnimeSeries, AnimeSeriesRelation, Candidate, LocalizedValue, Movie, OrderingScheme, Resolved,
-    Series,
+    AnimeSeries, AnimeSeriesRelation, Candidate, LocalizedValue, Movie, MusicReleaseGroup,
+    OrderingScheme, Resolved, Series,
 };
 use serde::Serialize;
 
@@ -31,6 +31,40 @@ pub struct ResolvedMovieDto {
     completeness: f32,
     conflicts: usize,
     warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ResolvedMusicDto {
+    schema_version: u8,
+    kind: &'static str,
+    id: String,
+    title: String,
+    artist: String,
+    releases: Vec<MusicReleaseDto>,
+    completeness: f32,
+    conflicts: usize,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct MusicReleaseDto {
+    id: String,
+    discs: Vec<MusicDiscDto>,
+}
+
+#[derive(Serialize)]
+struct MusicDiscDto {
+    number: u32,
+    tracks: Vec<MusicTrackDto>,
+}
+
+#[derive(Serialize)]
+struct MusicTrackDto {
+    id: String,
+    title: String,
+    disc: u32,
+    track: u32,
+    duration_seconds: u64,
 }
 
 #[derive(Serialize)]
@@ -93,6 +127,47 @@ impl ResolvedMovieDto {
     }
 }
 
+impl ResolvedMusicDto {
+    pub fn from_resolved(resolved: &Resolved<MusicReleaseGroup>) -> Self {
+        Self {
+            schema_version: 1,
+            kind: "music",
+            id: resolved.value.id.as_str().to_owned(),
+            title: preferred_title(&resolved.value.titles).to_owned(),
+            artist: resolved.value.artist.name.clone(),
+            releases: resolved
+                .value
+                .releases
+                .iter()
+                .map(|release| MusicReleaseDto {
+                    id: release.id.as_str().to_owned(),
+                    discs: release
+                        .discs
+                        .iter()
+                        .map(|disc| MusicDiscDto {
+                            number: disc.number,
+                            tracks: disc
+                                .tracks
+                                .iter()
+                                .map(|track| MusicTrackDto {
+                                    id: track.id.as_str().to_owned(),
+                                    title: preferred_title(&track.titles).to_owned(),
+                                    disc: track.sequence.disc,
+                                    track: track.sequence.track,
+                                    duration_seconds: track.duration.as_seconds(),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            completeness: resolved.completeness,
+            conflicts: resolved.conflicts.len(),
+            warnings: warning_messages(resolved),
+        }
+    }
+}
+
 impl ResolvedTelevisionDto {
     pub fn from_resolved(resolved: &Resolved<Series>) -> Self {
         Self {
@@ -145,6 +220,27 @@ pub fn resolved_movie_text(resolved: &Resolved<Movie>) {
         Some(year) => println!("{title} ({year})"),
         None => println!("{title}"),
     }
+}
+
+pub fn resolved_music_text(resolved: &Resolved<MusicReleaseGroup>) {
+    let title = preferred_title(&resolved.value.titles);
+    let discs = resolved
+        .value
+        .releases
+        .iter()
+        .map(|release| release.discs.len())
+        .sum::<usize>();
+    let tracks = resolved
+        .value
+        .releases
+        .iter()
+        .flat_map(|release| &release.discs)
+        .map(|disc| disc.tracks.len())
+        .sum::<usize>();
+    println!(
+        "{} — {title}\t{discs} disc(s)\t{tracks} track(s)",
+        resolved.value.artist.name
+    );
 }
 
 pub fn resolved_television_text(resolved: &Resolved<Series>) {
@@ -204,7 +300,8 @@ pub fn search_text(candidates: &[Candidate]) {
             Candidate::Movie(value) => (&value.title, value.year, &value.provider),
             Candidate::Television(value) => (&value.title, value.year, &value.provider),
             Candidate::Anime(value) => (&value.title, value.year, &value.provider),
-            _ => continue,
+            Candidate::Music(value) => (&value.title, value.year, &value.provider),
+            Candidate::Book(_) => continue,
         };
         match year {
             Some(year) => println!("{}\t{} ({})\t{}", index + 1, title, year, provider.as_str()),

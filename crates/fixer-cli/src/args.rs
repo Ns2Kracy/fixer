@@ -45,12 +45,14 @@ pub enum Command {
 pub enum SearchCommand {
     Anime(AnimeQueryArgs),
     Movie(MovieQueryArgs),
+    Music(MusicQueryArgs),
     Television(TelevisionQueryArgs),
 }
 #[derive(Debug, Subcommand)]
 pub enum ResolveCommand {
     Anime(ResolveAnimeArgs),
     Movie(ResolveMovieArgs),
+    Music(ResolveMusicArgs),
     Television(ResolveTelevisionArgs),
 }
 
@@ -65,6 +67,13 @@ pub struct AnimeQueryArgs {
 
 #[derive(Debug, Args)]
 pub struct MovieQueryArgs {
+    pub title: String,
+    #[arg(long)]
+    pub year: Option<u16>,
+}
+
+#[derive(Debug, Args)]
+pub struct MusicQueryArgs {
     pub title: String,
     #[arg(long)]
     pub year: Option<u16>,
@@ -93,6 +102,14 @@ pub struct ResolveAnimeArgs {
 pub struct ResolveMovieArgs {
     #[command(flatten)]
     pub query: MovieQueryArgs,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ResolveMusicArgs {
+    #[command(flatten)]
+    pub query: MusicQueryArgs,
     #[arg(long)]
     pub json: bool,
 }

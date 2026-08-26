@@ -31,6 +31,7 @@ pub struct Config {
     api_key: Option<String>,
     tmdb_base_url: Option<String>,
     bangumi_base_url: Option<String>,
+    musicbrainz_base_url: Option<String>,
     anilist_enabled: bool,
     anilist_endpoint: Option<String>,
     anilist_access_token: Option<String>,
@@ -51,6 +52,7 @@ struct FileConfig {
     api_key: Option<String>,
     tmdb_base_url: Option<String>,
     bangumi_base_url: Option<String>,
+    musicbrainz_base_url: Option<String>,
     anilist_enabled: Option<bool>,
     anilist_endpoint: Option<String>,
     anilist_access_token: Option<String>,
@@ -96,6 +98,9 @@ impl Config {
         );
         let tmdb_base_url = env::var("TMDB_BASE_URL").ok().or(file.tmdb_base_url);
         let bangumi_base_url = env::var("BANGUMI_BASE_URL").ok().or(file.bangumi_base_url);
+        let musicbrainz_base_url = env::var("MUSICBRAINZ_BASE_URL")
+            .ok()
+            .or(file.musicbrainz_base_url);
         let env_anilist_enabled = env::var("FIXER_ANILIST_ENABLED")
             .ok()
             .map(|value| parse_bool("FIXER_ANILIST_ENABLED", &value))
@@ -118,6 +123,7 @@ impl Config {
             api_key,
             tmdb_base_url,
             bangumi_base_url,
+            musicbrainz_base_url,
             anilist_enabled,
             anilist_endpoint,
             anilist_access_token,
@@ -149,6 +155,16 @@ impl Config {
             config = config.with_base_url(base_url).map_err(AppError::new)?;
         }
         fixer_provider_bangumi::BangumiProvider::new(config).map_err(AppError::new)
+    }
+
+    pub fn musicbrainz_provider(
+        &self,
+    ) -> AppResult<fixer_provider_musicbrainz::MusicBrainzProvider> {
+        let mut config = fixer_provider_musicbrainz::MusicBrainzConfig::default();
+        if let Some(base_url) = &self.musicbrainz_base_url {
+            config = config.with_base_url(base_url).map_err(AppError::new)?;
+        }
+        fixer_provider_musicbrainz::MusicBrainzProvider::new(config).map_err(AppError::new)
     }
 
     pub fn anilist_provider(&self) -> AppResult<Option<fixer_provider_anilist::AniListProvider>> {
@@ -200,6 +216,7 @@ impl fmt::Debug for Config {
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("tmdb_base_url", &self.tmdb_base_url)
             .field("bangumi_base_url", &self.bangumi_base_url)
+            .field("musicbrainz_base_url", &self.musicbrainz_base_url)
             .field("anilist_enabled", &self.anilist_enabled)
             .field(
                 "anilist_endpoint",

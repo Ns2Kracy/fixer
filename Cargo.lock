@@ -348,6 +348,7 @@ dependencies = [
  "fixer-provider-anilist",
  "fixer-provider-bangumi",
  "fixer-provider-local",
+ "fixer-provider-musicbrainz",
  "fixer-provider-tmdb",
  "fixer-sdk",
  "fixer-writer-local",
