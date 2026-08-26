@@ -122,6 +122,104 @@ fn book_search_and_exact_isbn_resolve_work_offline() {
 }
 
 #[test]
+fn book_scrape_plans_and_applies_sidecars_without_altering_epub() {
+    let root = book_library();
+    let directory = root
+        .path()
+        .join("Ursula K. Le Guin/The Left Hand of Darkness");
+    let epub = directory.join("book.epub");
+    let original = fs::read(&epub).unwrap();
+
+    let dry_run = fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(&epub)
+        .args(["--kind", "book", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    assert!(
+        String::from_utf8(dry_run.stdout)
+            .unwrap()
+            .contains("planned 3 operation(s)")
+    );
+    assert!(!directory.join("book.opf").exists());
+    assert_eq!(fs::read(&epub).unwrap(), original);
+
+    let apply = fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(&epub)
+        .args(["--kind", "book", "--apply"])
+        .output()
+        .unwrap();
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert!(directory.join("book.opf").is_file());
+    assert!(directory.join("book.json").is_file());
+    assert!(directory.join("fixer-manifest.json").is_file());
+    assert!(!directory.join("epub-mutation-intent.json").exists());
+    assert_eq!(fs::read(&epub).unwrap(), original);
+}
+
+#[test]
+fn epub_update_opt_in_writes_confirmation_intent_but_never_targets_archive() {
+    let root = book_library();
+    let directory = root
+        .path()
+        .join("Ursula K. Le Guin/The Left Hand of Darkness");
+    let epub = directory.join("book.epub");
+    let original = fs::read(&epub).unwrap();
+
+    let output = fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(&epub)
+        .args(["--kind", "book", "--update-epub", "--apply"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let intent = fs::read_to_string(directory.join("epub-mutation-intent.json")).unwrap();
+    assert!(intent.contains("\"requires_confirmation\": true"));
+    assert!(intent.contains("book.epub"));
+    assert_eq!(fs::read(&epub).unwrap(), original);
+}
+
+#[test]
+fn book_scrape_rejects_media_relocation() {
+    let root = book_library();
+    let epub = root
+        .path()
+        .join("Ursula K. Le Guin/The Left Hand of Darkness/book.epub");
+    let output = fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(epub)
+        .args(["--kind", "book", "--placement", "copy"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("book scrape currently supports only in-place placement")
+    );
+}
+
+#[test]
 fn invalid_book_isbn_is_rejected_before_provider_search() {
     let root = book_library();
     let output = fixer()

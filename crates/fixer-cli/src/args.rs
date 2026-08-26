@@ -152,11 +152,14 @@ pub struct ScrapeArgs {
     pub apply: bool,
     #[arg(long, value_enum, default_value_t = PlacementArg::InPlace)]
     pub placement: PlacementArg,
+    #[arg(long)]
+    pub update_epub: bool,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum MediaKindArg {
     Anime,
+    Book,
     Movie,
     Music,
     Television,

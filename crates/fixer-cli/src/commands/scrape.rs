@@ -3,14 +3,15 @@ use crate::{
     args::{MediaKindArg, PlacementArg, ScrapeArgs},
     config::Config,
 };
-use fixer_core::{LocalizedValue, Movie, MovieRelease, ReleaseDate, ReleaseId, WorkId};
+use fixer_core::{AssetKind, LocalizedValue, Movie, MovieRelease, ReleaseDate, ReleaseId, WorkId};
 use fixer_provider_local::{
     EpisodeHint, LocalProvider, MediaHint, ScanWarning, identify_episode_path, identify_path,
-    parse_matroska_tags, scan, scan_anime, scan_music, scan_television,
+    parse_matroska_tags, scan, scan_anime, scan_books, scan_music, scan_television,
 };
 use fixer_sdk::output::{ExecutionPolicy, OutputPlanExt, PlacementMode, plan_media_placement};
 use fixer_writer_local::{
-    AnimeWriter, JsonWriter, MusicWriter, PathTemplate, TelevisionWriter, TemplateContext,
+    AnimeWriter, BookWriter, JsonWriter, MusicWriter, PathTemplate, TelevisionWriter,
+    TemplateContext,
 };
 use std::path::{Path, PathBuf};
 
@@ -21,8 +22,14 @@ pub async fn run(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
             args.path.display()
         )));
     }
+    if args.update_epub && args.kind != MediaKindArg::Book {
+        return Err(AppError::new(
+            "--update-epub is supported only for book scrape",
+        ));
+    }
     match args.kind {
         MediaKindArg::Anime => scrape_anime(args, config).await,
+        MediaKindArg::Book => scrape_book(args, config).await,
         MediaKindArg::Movie => scrape_movie(args, config).await,
         MediaKindArg::Music => scrape_music(args, config).await,
         MediaKindArg::Television => scrape_television(args, config).await,
@@ -61,6 +68,69 @@ async fn scrape_anime(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus>
         .plan_resolved(&resolved, output_root)
         .map_err(AppError::new)?;
     execute_plan(plan, &args, output_root, &result.warnings, None)
+}
+
+async fn scrape_book(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
+    if args.placement != PlacementArg::InPlace {
+        return Err(AppError::new(
+            "book scrape currently supports only in-place placement",
+        ));
+    }
+    let scan_root = scan_root(&args.path)?;
+    let result = scan_books(scan_root).map_err(AppError::new)?;
+    if result.documents.is_empty() {
+        return Err(AppError::new("no local EPUB metadata was found"));
+    }
+    if result.documents.len() != 1 {
+        return Err(AppError::new(format!(
+            "ambiguous book input: found {} works; scrape one work at a time",
+            result.documents.len()
+        )));
+    }
+    let work = &result.documents[0];
+    let selected_edition = if args.path.is_file() {
+        let input = args.path.to_string_lossy();
+        work.editions.iter().find(|edition| {
+            edition.assets.iter().any(|asset| {
+                asset.kind == AssetKind::BookFile && asset.source_path.as_str() == input
+            })
+        })
+    } else if work.editions.len() == 1 {
+        work.editions.first()
+    } else {
+        return Err(AppError::new(
+            "book directory contains multiple editions; pass one EPUB path",
+        ));
+    }
+    .ok_or_else(|| AppError::new("input EPUB does not match a scanned edition"))?;
+    let isbn = selected_edition.isbn_13.clone();
+    let title = work
+        .titles
+        .entries()
+        .first()
+        .map(|entry| entry.value().clone())
+        .ok_or_else(|| AppError::new("local book work has no title"))?;
+    let output_root = result.roots[0].clone();
+    let warnings = result.warnings;
+    let provider = LocalProvider::from_book_documents(result.documents).map_err(AppError::new)?;
+    let fixer = super::build_fixer(provider, config)?;
+    let resolved = fixer
+        .book(title)
+        .isbn(isbn.clone())
+        .resolve()
+        .await
+        .map_err(AppError::new)?;
+    let mut writer = BookWriter::for_isbn(isbn);
+    if args.update_epub {
+        if !args.path.is_file() {
+            return Err(AppError::new("--update-epub requires one EPUB file path"));
+        }
+        writer = writer.with_epub_mutation_target(args.path.clone());
+    }
+    let plan = writer
+        .plan_resolved(&resolved, &output_root)
+        .map_err(AppError::new)?;
+    execute_plan(plan, &args, &output_root, &warnings, None)
 }
 
 async fn scrape_movie(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
