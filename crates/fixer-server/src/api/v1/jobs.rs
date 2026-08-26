@@ -266,6 +266,10 @@ fn map_json_rejection(_error: JsonRejection) -> ApiError {
 fn map_runtime_error(error: RuntimeError) -> ApiError {
     match error {
         RuntimeError::Store(error) => map_store_error(error),
+        RuntimeError::FilesystemPolicy(_) => invalid_input(
+            "input_path",
+            "must resolve beneath a configured media root without symlink escapes",
+        ),
         RuntimeError::CancellationConflict(state) => ApiError::new(
             StatusCode::CONFLICT,
             "job_state_conflict",

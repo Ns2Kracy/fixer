@@ -14,6 +14,7 @@ use thiserror::Error;
 use tokio::sync::{Mutex, Notify, oneshot, watch};
 
 use crate::{
+    FsPolicy, FsPolicyError,
     jobs::{
         events::{JobEventHub, JobEventStream, SubscribeError},
         model::{
@@ -136,6 +137,7 @@ pub struct JobRuntime {
     wake_workers: Arc<Notify>,
     request_flow: Arc<OnceLock<SharedWorkerFlow>>,
     execution_tasks: Arc<ExecutionTaskRegistry>,
+    fs_policy: Option<Arc<FsPolicy>>,
 }
 
 impl JobRuntime {
@@ -147,7 +149,14 @@ impl JobRuntime {
             wake_workers: Arc::new(Notify::new()),
             request_flow: Arc::new(OnceLock::new()),
             execution_tasks: Arc::new(ExecutionTaskRegistry::default()),
+            fs_policy: None,
         }
+    }
+
+    /// Restricts job inputs and output plans to canonical media roots.
+    pub fn with_fs_policy(mut self, policy: FsPolicy) -> Self {
+        self.fs_policy = Some(Arc::new(policy));
+        self
     }
 
     pub fn start_workers(&self, worker_count: NonZeroUsize, flow: SdkJobFlow) -> WorkerPool {
@@ -174,6 +183,16 @@ impl JobRuntime {
     }
 
     pub(crate) async fn create(&self, input: JobInputDto) -> Result<JobRecord, RuntimeError> {
+        let input = if let Some(policy) = &self.fs_policy {
+            let canonical = policy.validate_read(input.input_path())?;
+            JobInputDto::new(
+                input.media_kind(),
+                canonical.to_string_lossy().into_owned(),
+                input.apply(),
+            )
+        } else {
+            input
+        };
         let _operation = self.operations.lock().await;
         let job = self.store.create_job(input).await?;
         self.events.publish_state(job.id(), job.state())?;
@@ -214,6 +233,9 @@ impl JobRuntime {
             return Err(RuntimeError::ReviewConflict(job.state()));
         }
         let (plan, fingerprint) = self.reconstruct_plan(job.input(), &decision).await?;
+        if let Some(policy) = &self.fs_policy {
+            policy.validate_plan(&plan)?;
+        }
         let operation_count =
             u64::try_from(plan.operations().len()).map_err(|_| RuntimeError::CountOverflow)?;
         let _operation = self.operations.lock().await;
@@ -271,6 +293,9 @@ impl JobRuntime {
             || reviewed_plan.fingerprint() != Some(fingerprint.as_str())
         {
             return Err(RuntimeError::StalePlan);
+        }
+        if let Some(policy) = &self.fs_policy {
+            policy.validate_plan(&plan)?;
         }
 
         let registration = self.execution_tasks.begin_registration()?;
@@ -684,6 +709,8 @@ impl JobRuntime {
 pub(crate) enum RuntimeError {
     #[error(transparent)]
     Store(#[from] StoreError),
+    #[error(transparent)]
+    FilesystemPolicy(#[from] FsPolicyError),
     #[error("job in state {0} cannot be cancelled at this stage")]
     CancellationConflict(JobState),
     #[error("job in state {0} cannot be reviewed")]
