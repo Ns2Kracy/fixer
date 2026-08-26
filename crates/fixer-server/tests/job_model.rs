@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use fixer_server::jobs::model::{
     ExecutionSummary, JobInputDto, JobMediaKind, JobState, PlanSummary, ProgressSummary,
-    ReviewSummary,
+    ReviewDecisionDto, ReviewSummary,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -50,6 +50,13 @@ fn job_input_and_summaries_are_stable_server_owned_dtos() {
     );
     assert_round_trip(review);
 
+    let decision = ReviewDecisionDto::new(2, vec![0, 1]);
+    assert_eq!(
+        serde_json::to_value(&decision).unwrap(),
+        json!({"schema_version": 1, "candidate_index": 2, "accepted_conflict_indexes": [0, 1]})
+    );
+    assert_round_trip(decision);
+
     let plan = PlanSummary::new(5, true);
     assert_eq!(
         serde_json::to_value(plan).unwrap(),
@@ -83,6 +90,11 @@ fn unsupported_persisted_schema_versions_and_states_are_rejected() {
         "schema_version": 2,
         "candidate_count": 0,
         "conflict_count": 0
+    }));
+    assert_unsupported_version::<ReviewDecisionDto>(json!({
+        "schema_version": 2,
+        "candidate_index": 0,
+        "accepted_conflict_indexes": []
     }));
     assert_unsupported_version::<PlanSummary>(json!({
         "schema_version": 2,

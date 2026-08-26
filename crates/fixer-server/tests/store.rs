@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, str::FromStr};
 use fixer_server::{
     jobs::model::{
         ExecutionSummary, JobInputDto, JobMediaKind, JobState, PlanSummary, ProgressSummary,
-        ReviewSummary,
+        ReviewDecisionDto, ReviewSummary,
     },
     store::{JobUpdate, SqliteJobStore, StoreError},
 };
@@ -65,6 +65,156 @@ async fn migration_and_job_round_trip_persist_versioned_dtos_and_timestamps() {
     assert_eq!(loaded.review(), Some(&ReviewSummary::new(3, 1)));
     assert_eq!(loaded.plan(), Some(&PlanSummary::new(4, true)));
     assert_eq!(loaded.execution(), Some(&ExecutionSummary::new(3, 1)));
+}
+
+#[tokio::test]
+async fn execution_reservation_is_atomic_and_idempotent_per_job() {
+    let (_root, store) = store().await;
+    let job = store
+        .create_job(JobInputDto::new(JobMediaKind::Movie, "/media/a.mkv", true))
+        .await
+        .unwrap();
+    let job = store
+        .transition(
+            job.id(),
+            JobState::Queued,
+            JobState::Scanning,
+            JobUpdate::default(),
+        )
+        .await
+        .unwrap();
+    let job = store
+        .transition(
+            job.id(),
+            JobState::Scanning,
+            JobState::Searching,
+            JobUpdate::default(),
+        )
+        .await
+        .unwrap();
+    let job = store
+        .transition(
+            job.id(),
+            JobState::Searching,
+            JobState::Resolving,
+            JobUpdate::default(),
+        )
+        .await
+        .unwrap();
+    let job = store
+        .transition(
+            job.id(),
+            JobState::Resolving,
+            JobState::AwaitingConfirmation,
+            JobUpdate::default(),
+        )
+        .await
+        .unwrap();
+    let job = store
+        .transition(
+            job.id(),
+            JobState::AwaitingConfirmation,
+            JobState::Planning,
+            JobUpdate::default()
+                .with_review_decision(ReviewDecisionDto::new(0, vec![]))
+                .with_plan(PlanSummary::new(1, true)),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        store
+            .transition(
+                job.id(),
+                JobState::Planning,
+                JobState::Writing,
+                JobUpdate::default(),
+            )
+            .await,
+        Err(StoreError::ExecutionReservationRequired { .. })
+    ));
+
+    let first = store.clone();
+    let second = store.clone();
+    let id = job.id();
+    let (left, right) = tokio::join!(
+        first.reserve_execution(id, "request-a", "approved-v1"),
+        second.reserve_execution(id, "request-a", "approved-v1")
+    );
+    let reservations = [left.unwrap(), right.unwrap()];
+    assert_eq!(
+        reservations
+            .iter()
+            .filter(|result| matches!(
+                result,
+                fixer_server::store::ExecutionReservation::Reserved(_)
+            ))
+            .count(),
+        1
+    );
+    assert_eq!(
+        reservations
+            .iter()
+            .filter(|result| matches!(
+                result,
+                fixer_server::store::ExecutionReservation::Existing(_)
+            ))
+            .count(),
+        1
+    );
+    assert!(
+        reservations
+            .iter()
+            .all(|result| result.job().state() == JobState::Writing)
+    );
+
+    let replay = store
+        .reserve_execution(id, "request-a", "approved-v1")
+        .await
+        .unwrap();
+    assert!(matches!(
+        replay,
+        fixer_server::store::ExecutionReservation::Existing(_)
+    ));
+    assert!(matches!(
+        store
+            .reserve_execution(id, "request-b", "approved-v1")
+            .await,
+        Err(StoreError::IdempotencyConflict { .. })
+    ));
+
+    drop(first);
+    drop(second);
+    drop(store);
+    let database = _root.path().join("jobs.sqlite3");
+    let reopened = SqliteJobStore::open(database).await.unwrap();
+    let interrupted = reopened.get_job(id).await.unwrap();
+    assert_eq!(interrupted.state(), JobState::Interrupted);
+    assert!(matches!(
+        reopened
+            .reserve_execution(id, "request-a", "approved-v1")
+            .await
+            .unwrap(),
+        fixer_server::store::ExecutionReservation::Existing(job)
+            if job.state() == JobState::Interrupted
+    ));
+    assert!(matches!(
+        reopened
+            .reserve_execution(id, "request-b", "approved-v1")
+            .await,
+        Err(StoreError::IdempotencyConflict { .. })
+    ));
+    assert!(matches!(
+        reopened
+            .transition(
+                id,
+                JobState::Interrupted,
+                JobState::Queued,
+                JobUpdate::default(),
+            )
+            .await,
+        Err(StoreError::ReservedExecutionRetry { .. })
+    ));
 }
 
 #[tokio::test]
@@ -301,7 +451,8 @@ async fn schema_has_only_bounded_dto_state_and_timestamp_columns() {
             "plan_json",
             "execution_json",
             "created_at_ms",
-            "updated_at_ms"
+            "updated_at_ms",
+            "review_decision_json"
         ]
     );
     assert!(columns.iter().all(|column| {
@@ -310,6 +461,29 @@ async fn schema_has_only_bounded_dto_state_and_timestamp_columns() {
             && !column.contains("binary")
             && !column.contains("snapshot")
     }));
+    let execution_columns = sqlx::query("PRAGMA table_info(job_executions)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        execution_columns,
+        [
+            "job_id",
+            "idempotency_key",
+            "request_fingerprint",
+            "created_at_ms"
+        ]
+    );
+    let migration_two: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 2")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(migration_two, 1);
+
     let index_exists: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'jobs_state_id_idx'",
     )

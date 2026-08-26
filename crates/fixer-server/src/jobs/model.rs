@@ -117,6 +117,33 @@ impl ReviewSummary {
     }
 }
 
+/// Versioned, bounded review choices persisted without resolved Core snapshots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewDecisionDto {
+    schema_version: SchemaVersion,
+    candidate_index: u64,
+    accepted_conflict_indexes: Vec<u64>,
+}
+
+impl ReviewDecisionDto {
+    pub fn new(candidate_index: u64, accepted_conflict_indexes: Vec<u64>) -> Self {
+        Self {
+            schema_version: SchemaVersion,
+            candidate_index,
+            accepted_conflict_indexes,
+        }
+    }
+
+    pub const fn candidate_index(&self) -> u64 {
+        self.candidate_index
+    }
+
+    pub fn accepted_conflict_indexes(&self) -> &[u64] {
+        &self.accepted_conflict_indexes
+    }
+}
+
 /// Versioned output-plan counts persisted without operation bytes or Core snapshots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

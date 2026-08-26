@@ -13,12 +13,12 @@ use sqlx::{
 
 use crate::{
     jobs::model::{JobInputDto, JobState, ProgressSummary},
-    store::{JobId, JobRecord, JobRecordParts, JobUpdate, StoreError},
+    store::{ExecutionReservation, JobId, JobRecord, JobRecordParts, JobUpdate, StoreError},
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 const ACTIVE_STATES: [&str; 5] = ["scanning", "searching", "resolving", "planning", "writing"];
-const RECORD_COLUMNS: &str = "id, input_json, state, progress_json, review_json, plan_json, execution_json, created_at_ms, updated_at_ms";
+const RECORD_COLUMNS: &str = "id, input_json, state, progress_json, review_json, review_decision_json, plan_json, execution_json, created_at_ms, updated_at_ms";
 
 #[derive(Clone)]
 pub struct SqliteJobStore {
@@ -33,7 +33,8 @@ impl SqliteJobStore {
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
-            .foreign_keys(true);
+            .foreign_keys(true)
+            .busy_timeout(std::time::Duration::from_secs(5));
         let pool = SqlitePoolOptions::new()
             .max_connections(4)
             .connect_with(options)
@@ -103,19 +104,30 @@ impl SqliteJobStore {
                 to: next,
             });
         }
+        if expected == JobState::Planning && next == JobState::Writing {
+            return Err(StoreError::ExecutionReservationRequired { id: id.get() });
+        }
+        if expected == JobState::Interrupted
+            && next == JobState::Queued
+            && self.has_execution_reservation(id).await?
+        {
+            return Err(StoreError::ReservedExecutionRetry { id: id.get() });
+        }
 
         let progress = serialize_optional(update.progress.as_ref())?;
         let review = serialize_optional(update.review.as_ref())?;
+        let review_decision = serialize_optional(update.review_decision.as_ref())?;
         let plan = serialize_optional(update.plan.as_ref())?;
         let execution = serialize_optional(update.execution.as_ref())?;
         let updated_at_ms = timestamp_ms()?;
         let sql = format!(
-            "UPDATE jobs SET state = ?, progress_json = COALESCE(?, progress_json), review_json = COALESCE(?, review_json), plan_json = COALESCE(?, plan_json), execution_json = COALESCE(?, execution_json), updated_at_ms = ? WHERE id = ? AND state = ? RETURNING {RECORD_COLUMNS}"
+            "UPDATE jobs SET state = ?, progress_json = COALESCE(?, progress_json), review_json = COALESCE(?, review_json), review_decision_json = COALESCE(?, review_decision_json), plan_json = COALESCE(?, plan_json), execution_json = COALESCE(?, execution_json), updated_at_ms = ? WHERE id = ? AND state = ? RETURNING {RECORD_COLUMNS}"
         );
         let row = sqlx::query(&sql)
             .bind(next.to_string())
             .bind(progress)
             .bind(review)
+            .bind(review_decision)
             .bind(plan)
             .bind(execution)
             .bind(updated_at_ms)
@@ -128,6 +140,76 @@ impl SqliteJobStore {
             Some(row) => decode_record(&row),
             None => Err(self.transition_conflict(id, expected).await?),
         }
+    }
+
+    pub async fn reserve_execution(
+        &self,
+        id: JobId,
+        idempotency_key: &str,
+        request_fingerprint: &str,
+    ) -> Result<ExecutionReservation, StoreError> {
+        let now = timestamp_ms()?;
+        let mut transaction = self.pool.begin().await?;
+        let inserted = sqlx::query(
+            "INSERT INTO job_executions (job_id, idempotency_key, request_fingerprint, created_at_ms) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM jobs WHERE id = ? AND state = 'planning') ON CONFLICT(job_id) DO NOTHING",
+        )
+        .bind(id.get())
+        .bind(idempotency_key)
+        .bind(request_fingerprint)
+        .bind(now)
+        .bind(id.get())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+        if inserted == 1 {
+            let sql = format!(
+                "UPDATE jobs SET state = 'writing', progress_json = ?, updated_at_ms = ? WHERE id = ? AND state = 'planning' RETURNING {RECORD_COLUMNS}"
+            );
+            let progress = serde_json::to_string(&ProgressSummary::new("writing", 0, None))?;
+            let row = sqlx::query(&sql)
+                .bind(progress)
+                .bind(now)
+                .bind(id.get())
+                .fetch_one(&mut *transaction)
+                .await?;
+            let job = decode_record(&row)?;
+            transaction.commit().await?;
+            return Ok(ExecutionReservation::Reserved(job));
+        }
+
+        let existing = sqlx::query(
+            "SELECT idempotency_key, request_fingerprint FROM job_executions WHERE job_id = ?",
+        )
+        .bind(id.get())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(existing) = existing else {
+            transaction.rollback().await?;
+            return Err(self.transition_conflict(id, JobState::Planning).await?);
+        };
+        let existing_key: String = existing.try_get("idempotency_key")?;
+        let existing_fingerprint: String = existing.try_get("request_fingerprint")?;
+        if existing_key != idempotency_key || existing_fingerprint != request_fingerprint {
+            transaction.rollback().await?;
+            return Err(StoreError::IdempotencyConflict { id: id.get() });
+        }
+        let sql = format!("SELECT {RECORD_COLUMNS} FROM jobs WHERE id = ?");
+        let row = sqlx::query(&sql)
+            .bind(id.get())
+            .fetch_one(&mut *transaction)
+            .await?;
+        let job = decode_record(&row)?;
+        transaction.commit().await?;
+        Ok(ExecutionReservation::Existing(job))
+    }
+
+    async fn has_execution_reservation(&self, id: JobId) -> Result<bool, StoreError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM job_executions WHERE job_id = ?")
+            .bind(id.get())
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count != 0)
     }
 
     async fn transition_conflict(
@@ -212,6 +294,7 @@ fn decode_record(row: &SqliteRow) -> Result<JobRecord, StoreError> {
     let state: String = row.try_get("state")?;
     let progress_json: Option<String> = row.try_get("progress_json")?;
     let review_json: Option<String> = row.try_get("review_json")?;
+    let review_decision_json: Option<String> = row.try_get("review_decision_json")?;
     let plan_json: Option<String> = row.try_get("plan_json")?;
     let execution_json: Option<String> = row.try_get("execution_json")?;
     let created_at_ms: i64 = row.try_get("created_at_ms")?;
@@ -224,6 +307,7 @@ fn decode_record(row: &SqliteRow) -> Result<JobRecord, StoreError> {
         state: parse_state(&state)?,
         progress: deserialize_optional(progress_json)?,
         review: deserialize_optional(review_json)?,
+        review_decision: deserialize_optional(review_decision_json)?,
         plan: deserialize_optional(plan_json)?,
         execution: deserialize_optional(execution_json)?,
         created_at_ms,

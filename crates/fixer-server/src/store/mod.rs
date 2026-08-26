@@ -5,7 +5,8 @@ use std::{num::NonZeroI64, path::PathBuf};
 use thiserror::Error;
 
 use crate::jobs::model::{
-    ExecutionSummary, JobInputDto, JobState, PlanSummary, ProgressSummary, ReviewSummary,
+    ExecutionSummary, JobInputDto, JobState, PlanSummary, ProgressSummary, ReviewDecisionDto,
+    ReviewSummary,
 };
 
 pub use sqlite::SqliteJobStore;
@@ -39,6 +40,7 @@ pub struct JobRecord {
     state: JobState,
     progress: Option<ProgressSummary>,
     review: Option<ReviewSummary>,
+    review_decision: Option<ReviewDecisionDto>,
     plan: Option<PlanSummary>,
     execution: Option<ExecutionSummary>,
     created_at_ms: i64,
@@ -66,6 +68,10 @@ impl JobRecord {
         self.review.as_ref()
     }
 
+    pub const fn review_decision(&self) -> Option<&ReviewDecisionDto> {
+        self.review_decision.as_ref()
+    }
+
     pub const fn plan(&self) -> Option<&PlanSummary> {
         self.plan.as_ref()
     }
@@ -89,6 +95,7 @@ impl JobRecord {
             state: parts.state,
             progress: parts.progress,
             review: parts.review,
+            review_decision: parts.review_decision,
             plan: parts.plan,
             execution: parts.execution,
             created_at_ms: parts.created_at_ms,
@@ -103,6 +110,7 @@ pub(crate) struct JobRecordParts {
     pub state: JobState,
     pub progress: Option<ProgressSummary>,
     pub review: Option<ReviewSummary>,
+    pub review_decision: Option<ReviewDecisionDto>,
     pub plan: Option<PlanSummary>,
     pub execution: Option<ExecutionSummary>,
     pub created_at_ms: i64,
@@ -114,6 +122,7 @@ pub(crate) struct JobRecordParts {
 pub struct JobUpdate {
     pub(crate) progress: Option<ProgressSummary>,
     pub(crate) review: Option<ReviewSummary>,
+    pub(crate) review_decision: Option<ReviewDecisionDto>,
     pub(crate) plan: Option<PlanSummary>,
     pub(crate) execution: Option<ExecutionSummary>,
 }
@@ -129,6 +138,11 @@ impl JobUpdate {
         self
     }
 
+    pub fn with_review_decision(mut self, decision: ReviewDecisionDto) -> Self {
+        self.review_decision = Some(decision);
+        self
+    }
+
     pub fn with_plan(mut self, plan: PlanSummary) -> Self {
         self.plan = Some(plan);
         self
@@ -137,6 +151,20 @@ impl JobUpdate {
     pub fn with_execution(mut self, execution: ExecutionSummary) -> Self {
         self.execution = Some(execution);
         self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionReservation {
+    Reserved(JobRecord),
+    Existing(JobRecord),
+}
+
+impl ExecutionReservation {
+    pub const fn job(&self) -> &JobRecord {
+        match self {
+            Self::Reserved(job) | Self::Existing(job) => job,
+        }
     }
 }
 
@@ -152,6 +180,12 @@ pub enum StoreError {
         expected: JobState,
         actual: JobState,
     },
+    #[error("job {id} must reserve an idempotency key before writing")]
+    ExecutionReservationRequired { id: i64 },
+    #[error("job {id} has a reserved execution and cannot be retried automatically")]
+    ReservedExecutionRetry { id: i64 },
+    #[error("job {id} already has a different execution idempotency request")]
+    IdempotencyConflict { id: i64 },
     #[error("persistent job record is invalid: {0}")]
     CorruptRecord(String),
     #[error("system clock is before the Unix epoch")]
