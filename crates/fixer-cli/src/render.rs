@@ -1,4 +1,4 @@
-use crate::{AppError, AppResult};
+use crate::{AppError, AppResult, json::SCHEMA_VERSION};
 use fixer_core::{
     AnimeSeries, AnimeSeriesRelation, BookWork, Candidate, CreditRole, LocalizedValue, Movie,
     MusicReleaseGroup, OrderingScheme, Resolved, Series,
@@ -11,7 +11,7 @@ pub struct ResolvedAnimeDto {
     kind: &'static str,
     id: String,
     title: String,
-    relation: AnimeSeriesRelation,
+    relation: &'static str,
     cours: usize,
     episodes: usize,
     titles: Vec<TitleDto>,
@@ -37,7 +37,7 @@ pub struct ResolvedBookDto {
 struct BookContributorDto {
     id: String,
     name: String,
-    role: CreditRole,
+    role: &'static str,
 }
 
 #[derive(Serialize)]
@@ -102,7 +102,7 @@ pub struct ResolvedTelevisionDto {
     kind: &'static str,
     id: String,
     title: String,
-    ordering: OrderingScheme,
+    ordering: &'static str,
     seasons: usize,
     episodes: usize,
     titles: Vec<TitleDto>,
@@ -120,11 +120,11 @@ struct TitleDto {
 impl ResolvedAnimeDto {
     pub fn from_resolved(resolved: &Resolved<AnimeSeries>) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             kind: "anime",
             id: resolved.value.id.as_str().to_owned(),
             title: preferred_title(&resolved.value.titles).to_owned(),
-            relation: resolved.value.relation,
+            relation: anime_relation(resolved.value.relation),
             cours: resolved.value.cours.len(),
             episodes: resolved
                 .value
@@ -143,7 +143,7 @@ impl ResolvedAnimeDto {
 impl ResolvedBookDto {
     pub fn from_resolved(resolved: &Resolved<BookWork>) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             kind: "book",
             id: resolved.value.id.as_str().to_owned(),
             title: preferred_title(&resolved.value.titles).to_owned(),
@@ -154,7 +154,7 @@ impl ResolvedBookDto {
                 .map(|credit| BookContributorDto {
                     id: credit.person.id.as_str().to_owned(),
                     name: credit.person.name.clone(),
-                    role: credit.role.clone(),
+                    role: credit_role(&credit.role),
                 })
                 .collect(),
             editions: resolved
@@ -179,7 +179,7 @@ impl ResolvedBookDto {
 impl ResolvedMovieDto {
     pub fn from_resolved(resolved: &Resolved<Movie>) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             kind: "movie",
             id: resolved.value.id.as_str().to_owned(),
             title: preferred_title(&resolved.value.titles).to_owned(),
@@ -195,7 +195,7 @@ impl ResolvedMovieDto {
 impl ResolvedMusicDto {
     pub fn from_resolved(resolved: &Resolved<MusicReleaseGroup>) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             kind: "music",
             id: resolved.value.id.as_str().to_owned(),
             title: preferred_title(&resolved.value.titles).to_owned(),
@@ -236,11 +236,11 @@ impl ResolvedMusicDto {
 impl ResolvedTelevisionDto {
     pub fn from_resolved(resolved: &Resolved<Series>) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             kind: "television",
             id: resolved.value.id.as_str().to_owned(),
             title: preferred_title(&resolved.value.titles).to_owned(),
-            ordering: resolved.value.ordering,
+            ordering: ordering_scheme(resolved.value.ordering),
             seasons: resolved.value.seasons.len(),
             episodes: resolved
                 .value
@@ -333,6 +333,39 @@ pub fn resolved_television_text(resolved: &Resolved<Series>) {
         resolved.value.seasons.len(),
         resolved.value.ordering
     );
+}
+
+const fn anime_relation(relation: AnimeSeriesRelation) -> &'static str {
+    match relation {
+        AnimeSeriesRelation::Original => "original",
+        AnimeSeriesRelation::Adaptation => "adaptation",
+        AnimeSeriesRelation::Sequel => "sequel",
+        AnimeSeriesRelation::Prequel => "prequel",
+        AnimeSeriesRelation::SideStory => "side_story",
+        AnimeSeriesRelation::SpinOff => "spin_off",
+    }
+}
+
+const fn credit_role(role: &CreditRole) -> &'static str {
+    match role {
+        CreditRole::Director => "director",
+        CreditRole::Writer => "writer",
+        CreditRole::Actor => "actor",
+        CreditRole::Author => "author",
+        CreditRole::Editor => "editor",
+        CreditRole::Translator => "translator",
+        CreditRole::Performer => "performer",
+        CreditRole::Composer => "composer",
+        CreditRole::Producer => "producer",
+    }
+}
+
+const fn ordering_scheme(ordering: OrderingScheme) -> &'static str {
+    match ordering {
+        OrderingScheme::Aired => "aired",
+        OrderingScheme::Dvd => "dvd",
+        OrderingScheme::Absolute => "absolute",
+    }
 }
 
 fn title_dtos(titles: &LocalizedValue<String>) -> Vec<TitleDto> {

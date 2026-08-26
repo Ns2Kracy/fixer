@@ -4,6 +4,15 @@ fn fixer() -> Command {
     Command::new(env!("CARGO_BIN_EXE_fixer"))
 }
 
+fn json_keys(value: &serde_json::Value) -> std::collections::BTreeSet<&str> {
+    value
+        .as_object()
+        .expect("JSON contract value must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
 fn album_library() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let album = root.path().join("Miles Davis/Kind of Blue");
@@ -65,6 +74,32 @@ fn music_search_and_resolve_preserve_album_hierarchy_offline() {
         String::from_utf8_lossy(&resolve.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&resolve.stdout).unwrap();
+    assert_eq!(
+        json_keys(&value),
+        std::collections::BTreeSet::from([
+            "artist",
+            "completeness",
+            "conflicts",
+            "id",
+            "kind",
+            "releases",
+            "schema_version",
+            "title",
+            "warnings",
+        ])
+    );
+    assert_eq!(
+        json_keys(&value["releases"][0]),
+        std::collections::BTreeSet::from(["discs", "id"])
+    );
+    assert_eq!(
+        json_keys(&value["releases"][0]["discs"][0]),
+        std::collections::BTreeSet::from(["number", "tracks"])
+    );
+    assert_eq!(
+        json_keys(&value["releases"][0]["discs"][0]["tracks"][0]),
+        std::collections::BTreeSet::from(["disc", "duration_seconds", "id", "title", "track",])
+    );
     assert_eq!(value["schema_version"], 1);
     assert_eq!(value["kind"], "music");
     assert_eq!(value["title"], "Kind of Blue");

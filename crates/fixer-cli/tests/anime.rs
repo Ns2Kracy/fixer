@@ -8,6 +8,15 @@ fn run(command: &mut Command) -> std::process::Output {
     command.output().unwrap()
 }
 
+fn json_keys(value: &serde_json::Value) -> std::collections::BTreeSet<&str> {
+    value
+        .as_object()
+        .expect("JSON contract value must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
 fn anime_library() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let anime = root.path().join("Frieren");
@@ -77,6 +86,26 @@ fn anime_search_and_resolve_work_offline() {
         String::from_utf8_lossy(&resolve.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&resolve.stdout).unwrap();
+    assert_eq!(
+        json_keys(&value),
+        std::collections::BTreeSet::from([
+            "completeness",
+            "conflicts",
+            "cours",
+            "episodes",
+            "id",
+            "kind",
+            "relation",
+            "schema_version",
+            "title",
+            "titles",
+            "warnings",
+        ])
+    );
+    assert_eq!(
+        json_keys(&value["titles"][0]),
+        std::collections::BTreeSet::from(["locale", "value"])
+    );
     assert_eq!(value["schema_version"], 1);
     assert_eq!(value["kind"], "anime");
     assert_eq!(value["title"], "葬送のフリーレン");

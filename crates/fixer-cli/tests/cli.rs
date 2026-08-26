@@ -13,6 +13,15 @@ fn fixture() -> &'static str {
     include_str!("../../fixer-provider-local/tests/fixtures/movie.json")
 }
 
+fn json_keys(value: &serde_json::Value) -> std::collections::BTreeSet<&str> {
+    value
+        .as_object()
+        .expect("JSON contract value must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
 #[test]
 fn help_lists_the_first_cli_surface() {
     let output = run(fixer().arg("--help"));
@@ -59,6 +68,24 @@ fn resolve_json_uses_a_stable_dto() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        json_keys(&value),
+        std::collections::BTreeSet::from([
+            "completeness",
+            "conflicts",
+            "id",
+            "kind",
+            "schema_version",
+            "title",
+            "titles",
+            "warnings",
+            "year",
+        ])
+    );
+    assert_eq!(
+        json_keys(&value["titles"][0]),
+        std::collections::BTreeSet::from(["locale", "value"])
+    );
     assert_eq!(value["schema_version"], 1);
     assert_eq!(value["kind"], "movie");
     assert_eq!(value["title"], "花样年华");
@@ -177,6 +204,26 @@ fn television_search_resolve_and_scrape_work_offline() {
         String::from_utf8_lossy(&resolve.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&resolve.stdout).unwrap();
+    assert_eq!(
+        json_keys(&value),
+        std::collections::BTreeSet::from([
+            "completeness",
+            "conflicts",
+            "episodes",
+            "id",
+            "kind",
+            "ordering",
+            "schema_version",
+            "seasons",
+            "title",
+            "titles",
+            "warnings",
+        ])
+    );
+    assert_eq!(
+        json_keys(&value["titles"][0]),
+        std::collections::BTreeSet::from(["locale", "value"])
+    );
     assert_eq!(value["schema_version"], 1);
     assert_eq!(value["kind"], "television");
     assert_eq!(value["title"], "Example Show");

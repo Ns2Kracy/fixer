@@ -9,6 +9,15 @@ fn fixer() -> Command {
     Command::new(env!("CARGO_BIN_EXE_fixer"))
 }
 
+fn json_keys(value: &serde_json::Value) -> std::collections::BTreeSet<&str> {
+    value
+        .as_object()
+        .expect("JSON contract value must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
 fn book_library() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let directory = root
@@ -111,6 +120,28 @@ fn book_search_and_exact_isbn_resolve_work_offline() {
         String::from_utf8_lossy(&resolve.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&resolve.stdout).unwrap();
+    assert_eq!(
+        json_keys(&value),
+        std::collections::BTreeSet::from([
+            "completeness",
+            "conflicts",
+            "contributors",
+            "editions",
+            "id",
+            "kind",
+            "schema_version",
+            "title",
+            "warnings",
+        ])
+    );
+    assert_eq!(
+        json_keys(&value["contributors"][0]),
+        std::collections::BTreeSet::from(["id", "name", "role"])
+    );
+    assert_eq!(
+        json_keys(&value["editions"][0]),
+        std::collections::BTreeSet::from(["assets", "id", "isbn_10", "isbn_13", "publisher",])
+    );
     assert_eq!(value["schema_version"], 1);
     assert_eq!(value["kind"], "book");
     assert_eq!(value["title"], "The Left Hand of Darkness");
