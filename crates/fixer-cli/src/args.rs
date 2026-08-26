@@ -120,6 +120,7 @@ pub struct ScrapeArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum MediaKindArg {
+    Anime,
     Movie,
     Television,
 }
