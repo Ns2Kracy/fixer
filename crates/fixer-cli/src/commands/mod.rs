@@ -44,16 +44,30 @@ pub(crate) fn local_fixer(config: &Config) -> AppResult<(Fixer, Vec<ScanWarning>
     Ok((build_fixer(provider, config)?, warnings))
 }
 pub(crate) fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult<Fixer> {
+    let locales = config
+        .preferred_locales
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
     let mut builder = Fixer::builder()
-        .provider(provider)
-        .preferred_languages(["zh-Hans", "zh-Hant", "ja", "en", "und"])
-        .map_err(AppError::new)?;
+        .preferred_languages(locales)
+        .map_err(AppError::new)?
+        .timeout(config.timeout);
+    if config.provider_enabled("local") {
+        builder = builder.provider(provider);
+    }
     if let Some(tmdb) = config.tmdb_provider()? {
         builder = builder.provider(tmdb);
     }
-    builder = builder.provider(config.bangumi_provider()?);
-    builder = builder.provider(config.musicbrainz_provider()?);
-    builder = builder.provider(config.openlibrary_provider()?);
+    if let Some(bangumi) = config.bangumi_provider()? {
+        builder = builder.provider(bangumi);
+    }
+    if let Some(musicbrainz) = config.musicbrainz_provider()? {
+        builder = builder.provider(musicbrainz);
+    }
+    if let Some(openlibrary) = config.openlibrary_provider()? {
+        builder = builder.provider(openlibrary);
+    }
     if let Some(anilist) = config.anilist_provider()? {
         builder = builder.provider(anilist);
     }

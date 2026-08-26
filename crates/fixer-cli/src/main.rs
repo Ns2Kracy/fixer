@@ -44,7 +44,7 @@ async fn main() -> ExitCode {
         Ok(config) => config,
         Err(error) => {
             eprintln!("error: {error}");
-            return ExitCode::FAILURE;
+            return ExitCode::from(2);
         }
     };
     match commands::run(cli.command, config).await {
