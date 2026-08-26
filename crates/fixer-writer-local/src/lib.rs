@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod anime;
+mod book;
 mod content_template;
 mod json;
 mod manifest;
@@ -12,6 +13,7 @@ mod path_template;
 mod television;
 
 pub use anime::AnimeWriter;
+pub use book::BookWriter;
 pub use content_template::ContentTemplate;
 pub use json::JsonWriter;
 pub use manifest::ManifestWriter;
