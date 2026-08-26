@@ -8,7 +8,8 @@ rust-version.workspace = true
 [dependencies]
 axum.workspace = true
 serde.workspace = true
-tokio.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]
 http-body-util.workspace = true
