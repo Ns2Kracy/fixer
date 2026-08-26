@@ -174,6 +174,14 @@ fn output_plans_serialize_with_previewable_sources_and_targets() {
 }
 
 #[test]
+fn anime_search_requests_are_typed() {
+    let request = SearchRequest::anime("葬送のフリーレン", Some(2023)).unwrap();
+    assert_eq!(request.media_kind(), MediaKind::Anime);
+    assert_eq!(request.title(), Some("葬送のフリーレン"));
+    assert_eq!(request.year(), Some(2023));
+}
+
+#[test]
 fn sensitive_headers_are_redacted_in_debug_output() {
     let request = HttpRequest::new(HttpMethod::Get, "https://example.invalid")
         .with_header(Header::new("authorization", "Bearer super-secret").unwrap())
