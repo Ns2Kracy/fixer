@@ -383,6 +383,8 @@ name = "fixer-provider-bangumi"
 version = "0.1.0"
 dependencies = [
  "fixer-core",
+ "serde",
+ "serde_json",
  "thiserror",
  "url",
 ]

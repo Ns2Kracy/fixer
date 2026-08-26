@@ -74,4 +74,10 @@ impl BangumiConfig {
     pub fn user_agent(&self) -> &str {
         &self.user_agent
     }
+
+    pub(crate) fn endpoint(&self, path: &str) -> Result<Url, BangumiError> {
+        self.base_url
+            .join(path)
+            .map_err(|error| BangumiError::InvalidConfig(error.to_string()))
+    }
 }
