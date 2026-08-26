@@ -2,9 +2,9 @@
 
 use crate::{Fixer, SdkError};
 use fixer_core::{
-    AnimeSeries, Candidate, ExternalId, FetchRequest, MatchQuery, Matcher, MediaKind, MergePolicy,
-    MetadataDocument, MovieDocument, MovieMerger, OrderingScheme, ProvenanceMap, ResolutionWarning,
-    Resolved, SearchRequest, SeriesDocument, SeriesMerger, SourceRef,
+    AnimeDocument, AnimeMerger, AnimeSeries, Candidate, ExternalId, FetchRequest, MatchQuery,
+    Matcher, MediaKind, MergePolicy, MetadataDocument, MovieDocument, MovieMerger, OrderingScheme,
+    ResolutionWarning, Resolved, SearchRequest, SeriesDocument, SeriesMerger, SourceRef,
 };
 use futures_util::future::join_all;
 use std::time::SystemTime;
@@ -167,46 +167,21 @@ pub(crate) async fn fetch_anime(
     warnings: Vec<ResolutionWarning>,
     identity_ids: &[ExternalId],
 ) -> Result<Resolved<AnimeSeries>, SdkError> {
-    let primary = candidates.first().ok_or(SdkError::NoCandidates)?;
-    let (documents, mut warnings) = fetch_metadata(
-        fixer,
-        MediaKind::Anime,
-        std::slice::from_ref(primary),
-        warnings,
-        identity_ids,
-    )
-    .await?;
-    let metadata = documents.into_iter().next().ok_or(SdkError::NoCandidates)?;
-    let MetadataDocument::Anime(anime) = metadata.document else {
-        return Err(SdkError::UnexpectedDocument);
-    };
-    let mut provenance = ProvenanceMap::new();
-    if !anime.titles.entries().is_empty() {
-        provenance.add("anime.titles", metadata.source.clone())?;
-    }
-    if !anime.summaries.entries().is_empty() {
-        provenance.add("anime.summaries", metadata.source.clone())?;
-    }
-    provenance.add("anime.relation", metadata.source.clone())?;
-    if !anime.cours.is_empty() {
-        provenance.add("anime.cours", metadata.source)?;
-    }
-    let completeness = (u8::from(!anime.titles.entries().is_empty())
-        + u8::from(!anime.cours.is_empty())) as f32
-        / 2.0;
-    if completeness < 1.0 {
-        warnings.push(ResolutionWarning {
-            code: "incomplete_metadata".to_owned(),
-            message: format!("anime metadata is {:.0}% complete", completeness * 100.0),
-        });
-    }
-    Ok(Resolved {
-        value: anime,
-        provenance,
-        conflicts: Vec::new(),
-        completeness,
-        warnings,
-    })
+    let (documents, warnings) =
+        fetch_metadata(fixer, MediaKind::Anime, candidates, warnings, identity_ids).await?;
+    let documents = documents
+        .into_iter()
+        .map(|metadata| match metadata.document {
+            MetadataDocument::Anime(anime) => Ok(AnimeDocument::new(anime, metadata.source)),
+            _ => Err(SdkError::UnexpectedDocument),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let policy = merge_policy(fixer);
+    let mut resolved = AnimeMerger::new(policy)
+        .merge(documents)
+        .map_err(|error| SdkError::Merge(error.to_string()))?;
+    resolved.warnings.extend(warnings);
+    Ok(resolved)
 }
 
 pub(crate) async fn fetch_series(
@@ -268,7 +243,7 @@ async fn fetch_metadata(
     mut warnings: Vec<ResolutionWarning>,
     identity_ids: &[ExternalId],
 ) -> Result<(Vec<SourcedMetadata>, Vec<ResolutionWarning>), SdkError> {
-    let candidates = if media_kind == MediaKind::Television {
+    let candidates = if matches!(media_kind, MediaKind::Television | MediaKind::Anime) {
         candidate_group(candidates, identity_ids)
     } else {
         candidates.iter().collect()
