@@ -1,4 +1,5 @@
 pub mod resolve;
+mod scan;
 pub mod scrape;
 pub mod search;
 
@@ -15,6 +16,7 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
     match command {
         Command::Search { command } => search::run(command, &config).await,
         Command::Resolve { command } => resolve::run(command, &config).await,
+        Command::Scan(args) => scan::run(args),
         Command::Scrape(args) => scrape::run(args, &config).await,
         Command::Config {
             command: ConfigCommand::Validate,

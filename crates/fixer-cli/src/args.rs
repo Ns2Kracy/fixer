@@ -30,6 +30,7 @@ pub enum Command {
         #[command(subcommand)]
         command: ResolveCommand,
     },
+    Scan(ScanArgs),
     Scrape(ScrapeArgs),
     Config {
         #[command(subcommand)]
@@ -137,6 +138,15 @@ pub struct ResolveMusicArgs {
 pub struct ResolveTelevisionArgs {
     #[command(flatten)]
     pub query: TelevisionQueryArgs,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ScanArgs {
+    pub path: PathBuf,
+    #[arg(long, value_enum)]
+    pub kind: MediaKindArg,
     #[arg(long)]
     pub json: bool,
 }

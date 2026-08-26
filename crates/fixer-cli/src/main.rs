@@ -1,6 +1,7 @@
 mod args;
 mod commands;
 mod config;
+mod json;
 mod render;
 
 use args::Cli;

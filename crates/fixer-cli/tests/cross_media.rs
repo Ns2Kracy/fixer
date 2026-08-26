@@ -87,3 +87,94 @@ fn invalid_cross_media_policy_values_fail_during_config_validation() {
         );
     }
 }
+
+#[test]
+fn scan_dispatches_all_media_kinds_with_a_stable_json_envelope() {
+    for kind in ["anime", "book", "movie", "music", "television"] {
+        let root = tempfile::tempdir().unwrap();
+        let output = fixer()
+            .args([
+                "scan",
+                root.path().to_str().unwrap(),
+                "--kind",
+                kind,
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{kind}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["kind"], kind);
+        assert_eq!(value["documents"], 0);
+        assert_eq!(value["warnings"], serde_json::json!([]));
+        assert!(value["root"].as_str().unwrap().starts_with('/'));
+    }
+}
+
+#[test]
+fn movie_scan_counts_local_documents_without_serializing_domain_models() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("movie.json"),
+        include_str!("../../fixer-provider-local/tests/fixtures/movie.json"),
+    )
+    .unwrap();
+    let output = fixer()
+        .args([
+            "scan",
+            root.path().to_str().unwrap(),
+            "--kind",
+            "movie",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["documents"], 1);
+    assert!(value.get("id").is_none());
+    assert!(value.get("titles").is_none());
+}
+
+#[test]
+fn scan_warnings_are_structured_and_return_partial_success() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("broken.json"), b"not json").unwrap();
+    let output = fixer()
+        .args([
+            "scan",
+            root.path().to_str().unwrap(),
+            "--kind",
+            "movie",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["documents"], 0);
+    assert_eq!(value["warnings"].as_array().unwrap().len(), 1);
+    assert!(
+        value["warnings"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("broken.json")
+    );
+    assert!(
+        value["warnings"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid")
+    );
+}
