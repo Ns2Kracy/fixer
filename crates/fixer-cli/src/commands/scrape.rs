@@ -370,7 +370,7 @@ fn finish_plan(
     mode: OutputMode,
     policy: FinalizationPolicy,
 ) -> AppResult<RunStatus> {
-    plan = apply_output_preset(plan, policy.output_preset);
+    plan = apply_output_preset(plan, policy.output_preset)?;
     if args.placement() != PlacementArg::InPlace {
         if !args.path.is_file() {
             return Err(AppError::new(
@@ -596,21 +596,78 @@ fn safe_folder_name(value: &str) -> String {
 fn apply_output_preset(
     plan: fixer_core::OutputPlan,
     preset: OutputPreset,
-) -> fixer_core::OutputPlan {
+) -> AppResult<fixer_core::OutputPlan> {
     if preset == OutputPreset::Full {
-        return plan;
+        return Ok(plan);
     }
+    let dropped_targets = plan
+        .operations()
+        .iter()
+        .filter(|operation| {
+            !matches!(
+                operation,
+                fixer_core::OutputOperation::CreateDirectory { .. }
+                    | fixer_core::OutputOperation::WriteBytes { .. }
+            )
+        })
+        .filter_map(fixer_core::OutputOperation::target)
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
     let mut filtered = fixer_core::OutputPlan::new(plan.output_root.clone());
     for operation in plan.operations() {
-        if matches!(
-            operation,
-            fixer_core::OutputOperation::CreateDirectory { .. }
-                | fixer_core::OutputOperation::WriteBytes { .. }
-        ) {
-            filtered.push(operation.clone());
+        match operation {
+            fixer_core::OutputOperation::CreateDirectory { .. } => filtered.push(operation.clone()),
+            fixer_core::OutputOperation::WriteBytes { target, content } => {
+                if target.file_name().and_then(|name| name.to_str()) == Some("fixer-manifest.json")
+                {
+                    filtered.push(reconcile_manifest(target, content, &dropped_targets)?);
+                } else {
+                    filtered.push(operation.clone());
+                }
+            }
+            fixer_core::OutputOperation::Copy { .. }
+            | fixer_core::OutputOperation::Symlink { .. }
+            | fixer_core::OutputOperation::Hardlink { .. }
+            | fixer_core::OutputOperation::Reflink { .. } => {}
         }
     }
-    filtered
+    Ok(filtered)
+}
+
+fn reconcile_manifest(
+    target: &Path,
+    content: &fixer_core::PlannedContent,
+    dropped_targets: &[PathBuf],
+) -> AppResult<fixer_core::OutputOperation> {
+    let mut manifest: serde_json::Value = serde_json::from_slice(content.as_bytes())
+        .map_err(|error| AppError::new(format!("invalid planned manifest: {error}")))?;
+    if let Some(planned_files) = manifest.get_mut("planned_files") {
+        match planned_files {
+            serde_json::Value::Array(files) => files.retain(|file| {
+                file.as_str().is_none_or(|file| {
+                    !dropped_targets
+                        .iter()
+                        .any(|target| target == Path::new(file))
+                })
+            }),
+            serde_json::Value::Object(files) => files.retain(|_, file| {
+                file.as_str().is_none_or(|file| {
+                    !dropped_targets
+                        .iter()
+                        .any(|target| target == Path::new(file))
+                })
+            }),
+            _ => {}
+        }
+    }
+    let mut bytes = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| AppError::new(format!("could not serialize planned manifest: {error}")))?;
+    bytes.push(b'\n');
+    fixer_core::OutputOperation::write_bytes(
+        target.to_path_buf(),
+        fixer_core::PlannedContent::new(bytes),
+    )
+    .map_err(AppError::new)
 }
 
 const fn placement_mode(placement: PlacementArg) -> PlacementMode {
@@ -635,22 +692,67 @@ mod tests {
         plan.push(
             OutputOperation::write_bytes("metadata/item.json", PlannedContent::new(b"{}")).unwrap(),
         );
+        plan.push(
+            OutputOperation::write_bytes(
+                "fixer-manifest.json",
+                PlannedContent::new(br#"{"planned_files":["metadata/item.json","cover.jpg"]}"#),
+            )
+            .unwrap(),
+        );
         plan.push(OutputOperation::copy("source.jpg", "cover.jpg").unwrap());
         plan.push(OutputOperation::symlink("source.mkv", "movie.mkv").unwrap());
         plan.push(OutputOperation::hardlink("source.flac", "track.flac").unwrap());
         plan.push(OutputOperation::reflink("source.epub", "book.epub").unwrap());
 
-        let metadata = apply_output_preset(plan.clone(), OutputPreset::Metadata);
-        assert_eq!(metadata.operations().len(), 2);
-        assert!(matches!(
-            metadata.operations(),
-            [
-                OutputOperation::CreateDirectory { .. },
-                OutputOperation::WriteBytes { .. }
-            ]
-        ));
+        let metadata = apply_output_preset(plan.clone(), OutputPreset::Metadata).unwrap();
+        assert_eq!(metadata.operations().len(), 3);
+        assert!(metadata.operations().iter().all(|operation| matches!(
+            operation,
+            OutputOperation::CreateDirectory { .. } | OutputOperation::WriteBytes { .. }
+        )));
+        let manifest = metadata
+            .operations()
+            .iter()
+            .find_map(|operation| match operation {
+                OutputOperation::WriteBytes { target, content }
+                    if target == std::path::Path::new("fixer-manifest.json") =>
+                {
+                    Some(serde_json::from_slice::<serde_json::Value>(content.as_bytes()).unwrap())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            manifest["planned_files"],
+            serde_json::json!(["metadata/item.json"])
+        );
 
-        let full = apply_output_preset(plan.clone(), OutputPreset::Full);
+        let full = apply_output_preset(plan.clone(), OutputPreset::Full).unwrap();
         assert_eq!(full, plan);
+    }
+
+    #[test]
+    fn output_preset_reconciles_named_manifest_entries() {
+        let mut plan = OutputPlan::new("library");
+        plan.push(
+            OutputOperation::write_bytes(
+                "fixer-manifest.json",
+                PlannedContent::new(
+                    br#"{"planned_files":{"metadata":"item.json","artwork":"cover.jpg"}}"#,
+                ),
+            )
+            .unwrap(),
+        );
+        plan.push(OutputOperation::copy("source.jpg", "cover.jpg").unwrap());
+
+        let metadata = apply_output_preset(plan, OutputPreset::Metadata).unwrap();
+        let OutputOperation::WriteBytes { content, .. } = &metadata.operations()[0] else {
+            panic!("expected manifest write");
+        };
+        let manifest: serde_json::Value = serde_json::from_slice(content.as_bytes()).unwrap();
+        assert_eq!(
+            manifest["planned_files"],
+            serde_json::json!({"metadata":"item.json"})
+        );
     }
 }
