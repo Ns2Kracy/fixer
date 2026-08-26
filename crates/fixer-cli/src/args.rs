@@ -43,13 +43,24 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum SearchCommand {
+    Anime(AnimeQueryArgs),
     Movie(MovieQueryArgs),
     Television(TelevisionQueryArgs),
 }
 #[derive(Debug, Subcommand)]
 pub enum ResolveCommand {
+    Anime(ResolveAnimeArgs),
     Movie(ResolveMovieArgs),
     Television(ResolveTelevisionArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct AnimeQueryArgs {
+    pub title: String,
+    #[arg(long)]
+    pub year: Option<u16>,
+    #[arg(long = "external-id", value_name = "NAMESPACE:ID")]
+    pub external_ids: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -68,6 +79,14 @@ pub struct TelevisionQueryArgs {
     pub external_ids: Vec<String>,
     #[arg(long, value_enum)]
     pub ordering: Option<OrderingArg>,
+}
+
+#[derive(Debug, Args)]
+pub struct ResolveAnimeArgs {
+    #[command(flatten)]
+    pub query: AnimeQueryArgs,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

@@ -1,6 +1,24 @@
 use crate::{AppError, AppResult};
-use fixer_core::{Candidate, LocalizedValue, Movie, OrderingScheme, Resolved, Series};
+use fixer_core::{
+    AnimeSeries, AnimeSeriesRelation, Candidate, LocalizedValue, Movie, OrderingScheme, Resolved,
+    Series,
+};
 use serde::Serialize;
+
+#[derive(Serialize)]
+pub struct ResolvedAnimeDto {
+    schema_version: u8,
+    kind: &'static str,
+    id: String,
+    title: String,
+    relation: AnimeSeriesRelation,
+    cours: usize,
+    episodes: usize,
+    titles: Vec<TitleDto>,
+    completeness: f32,
+    conflicts: usize,
+    warnings: Vec<String>,
+}
 
 #[derive(Serialize)]
 pub struct ResolvedMovieDto {
@@ -34,6 +52,29 @@ pub struct ResolvedTelevisionDto {
 struct TitleDto {
     locale: Option<String>,
     value: String,
+}
+
+impl ResolvedAnimeDto {
+    pub fn from_resolved(resolved: &Resolved<AnimeSeries>) -> Self {
+        Self {
+            schema_version: 1,
+            kind: "anime",
+            id: resolved.value.id.as_str().to_owned(),
+            title: preferred_title(&resolved.value.titles).to_owned(),
+            relation: resolved.value.relation,
+            cours: resolved.value.cours.len(),
+            episodes: resolved
+                .value
+                .cours
+                .iter()
+                .map(|cour| cour.episodes.len())
+                .sum(),
+            titles: title_dtos(&resolved.value.titles),
+            completeness: resolved.completeness,
+            conflicts: resolved.conflicts.len(),
+            warnings: warning_messages(resolved),
+        }
+    }
 }
 
 impl ResolvedMovieDto {
@@ -81,6 +122,21 @@ pub fn json(value: &impl Serialize) -> AppResult<()> {
         serde_json::to_string_pretty(value).map_err(AppError::new)?
     );
     Ok(())
+}
+
+pub fn resolved_anime_text(resolved: &Resolved<AnimeSeries>) {
+    let title = preferred_title(&resolved.value.titles);
+    let episodes = resolved
+        .value
+        .cours
+        .iter()
+        .map(|cour| cour.episodes.len())
+        .sum::<usize>();
+    println!(
+        "{title}\t{} cour(s)\t{episodes} episode(s)\t{:?}",
+        resolved.value.cours.len(),
+        resolved.value.relation
+    );
 }
 
 pub fn resolved_movie_text(resolved: &Resolved<Movie>) {
@@ -147,6 +203,7 @@ pub fn search_text(candidates: &[Candidate]) {
         let (title, year, provider) = match candidate {
             Candidate::Movie(value) => (&value.title, value.year, &value.provider),
             Candidate::Television(value) => (&value.title, value.year, &value.provider),
+            Candidate::Anime(value) => (&value.title, value.year, &value.provider),
             _ => continue,
         };
         match year {
