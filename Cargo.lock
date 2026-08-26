@@ -384,10 +384,13 @@ name = "fixer-provider-anilist"
 version = "0.1.0"
 dependencies = [
  "fixer-core",
+ "fixer-http",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "url",
+ "wiremock",
 ]
 
 [[package]]
