@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod anime;
 mod content_template;
 mod json;
 mod manifest;
@@ -9,6 +10,7 @@ mod nfo;
 mod path_template;
 mod television;
 
+pub use anime::AnimeWriter;
 pub use content_template::ContentTemplate;
 pub use json::JsonWriter;
 pub use manifest::ManifestWriter;
