@@ -78,6 +78,64 @@ fn music_search_and_resolve_preserve_album_hierarchy_offline() {
 }
 
 #[test]
+fn music_scrape_plans_and_applies_metadata_without_mutating_audio() {
+    let root = album_library();
+    let album = root.path().join("Miles Davis/Kind of Blue");
+    let audio = album.join("01 So What.mp3");
+    let original = fs::read(&audio).unwrap();
+
+    let dry_run = fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(&album)
+        .args(["--kind", "music", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    assert!(
+        String::from_utf8(dry_run.stdout)
+            .unwrap()
+            .contains("planned 2 operation(s)")
+    );
+    assert!(!album.join("album.json").exists());
+
+    let apply = fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(&album)
+        .args(["--kind", "music", "--apply"])
+        .output()
+        .unwrap();
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert!(album.join("album.json").is_file());
+    assert!(album.join("fixer-manifest.json").is_file());
+    assert!(!album.join("tag-update-intent.json").exists());
+    assert_eq!(fs::read(&audio).unwrap(), original);
+
+    let placement = fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(&audio)
+        .args(["--kind", "music", "--placement", "hardlink"])
+        .output()
+        .unwrap();
+    assert_eq!(placement.status.code(), Some(1));
+    assert!(
+        String::from_utf8(placement.stderr)
+            .unwrap()
+            .contains("music scrape currently supports only in-place placement")
+    );
+}
+
+#[test]
 fn provider_list_advertises_musicbrainz_and_local_music() {
     let output = fixer().args(["providers", "list"]).output().unwrap();
     assert!(output.status.success());

@@ -6,11 +6,11 @@ use crate::{
 use fixer_core::{LocalizedValue, Movie, MovieRelease, ReleaseDate, ReleaseId, WorkId};
 use fixer_provider_local::{
     EpisodeHint, LocalProvider, MediaHint, ScanWarning, identify_episode_path, identify_path,
-    parse_matroska_tags, scan, scan_anime, scan_television,
+    parse_matroska_tags, scan, scan_anime, scan_music, scan_television,
 };
 use fixer_sdk::output::{ExecutionPolicy, OutputPlanExt, PlacementMode, plan_media_placement};
 use fixer_writer_local::{
-    AnimeWriter, JsonWriter, PathTemplate, TelevisionWriter, TemplateContext,
+    AnimeWriter, JsonWriter, MusicWriter, PathTemplate, TelevisionWriter, TemplateContext,
 };
 use std::path::{Path, PathBuf};
 
@@ -24,6 +24,7 @@ pub async fn run(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
     match args.kind {
         MediaKindArg::Anime => scrape_anime(args, config).await,
         MediaKindArg::Movie => scrape_movie(args, config).await,
+        MediaKindArg::Music => scrape_music(args, config).await,
         MediaKindArg::Television => scrape_television(args, config).await,
     }
 }
@@ -88,6 +89,40 @@ async fn scrape_movie(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus>
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
     execute_plan(plan, &args, &output_root, &result.warnings, None)
+}
+
+async fn scrape_music(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
+    if args.placement != PlacementArg::InPlace {
+        return Err(AppError::new(
+            "music scrape currently supports only in-place placement",
+        ));
+    }
+    let scan_root = scan_root(&args.path)?;
+    let result = scan_music(scan_root).map_err(AppError::new)?;
+    if result.documents.is_empty() {
+        return Err(AppError::new("no local music metadata was found"));
+    }
+    if result.documents.len() != 1 {
+        return Err(AppError::new(format!(
+            "ambiguous music input: found {} albums; scrape one album at a time",
+            result.documents.len()
+        )));
+    }
+    let title = result.documents[0]
+        .titles
+        .entries()
+        .first()
+        .map(|entry| entry.value().clone())
+        .ok_or_else(|| AppError::new("local music album has no title"))?;
+    let output_root = result.roots[0].clone();
+    let warnings = result.warnings;
+    let provider = LocalProvider::from_music_documents(result.documents).map_err(AppError::new)?;
+    let fixer = super::build_fixer(provider, config)?;
+    let resolved = fixer.music(title).resolve().await.map_err(AppError::new)?;
+    let plan = MusicWriter::default()
+        .plan_resolved(&resolved, &output_root)
+        .map_err(AppError::new)?;
+    execute_plan(plan, &args, &output_root, &warnings, None)
 }
 
 async fn scrape_television(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {

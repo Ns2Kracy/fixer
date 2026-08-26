@@ -139,6 +139,7 @@ pub struct ScrapeArgs {
 pub enum MediaKindArg {
     Anime,
     Movie,
+    Music,
     Television,
 }
 
