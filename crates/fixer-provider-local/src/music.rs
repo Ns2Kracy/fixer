@@ -1,6 +1,15 @@
 //! Read-only baseline music metadata parsers.
 
-use crate::LocalError;
+use crate::{LocalError, ScanWarning};
+use fixer_core::{
+    AssetId, Disc, Duration, LocalizedValue, MusicArtist, MusicRelease, MusicReleaseGroup,
+    ReleaseId, Track, TrackSequence, WorkId,
+};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 const ID3V1_SIZE: usize = 128;
 const CUE_FRAMES_PER_SECOND: u32 = 75;
@@ -221,4 +230,272 @@ fn parse_position_field(value: Option<&str>, line_number: usize) -> Result<u32, 
 
 fn cue_error(line: usize, message: &str) -> LocalError {
     LocalError::InvalidMetadata(format!("CUE line {line}: {message}"))
+}
+
+/// Documents, album roots, and non-fatal warnings produced by a music scan.
+#[derive(Debug, Clone, Default)]
+pub struct MusicScanResult {
+    pub documents: Vec<MusicReleaseGroup>,
+    pub roots: Vec<PathBuf>,
+    pub warnings: Vec<ScanWarning>,
+}
+
+#[derive(Debug)]
+struct AlbumAggregate {
+    artist: String,
+    title: String,
+    root: PathBuf,
+    discs: BTreeMap<u32, Vec<TrackInput>>,
+}
+
+#[derive(Debug)]
+struct TrackInput {
+    number: u32,
+    title: String,
+    duration: Duration,
+}
+
+/// Recursively reads baseline ID3v1 and CUE metadata without following symlinks.
+pub fn scan_music(root: &Path) -> Result<MusicScanResult, LocalError> {
+    if !root.is_dir() {
+        return Err(LocalError::InvalidPath(root.to_path_buf()));
+    }
+    let mut paths = Vec::new();
+    collect_music_metadata(root, &mut paths)?;
+    paths.sort();
+    let mut groups = BTreeMap::<String, AlbumAggregate>::new();
+    let mut warnings = Vec::new();
+    for path in paths {
+        let result = match path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("cue") => read_cue_album(&path, &mut groups),
+            Some("mp3") => read_id3_track(&path, &mut groups),
+            _ => Ok(()),
+        };
+        if let Err(error) = result {
+            warnings.push(ScanWarning {
+                path,
+                message: error.to_string(),
+            });
+        }
+    }
+    let mut documents = Vec::with_capacity(groups.len());
+    let mut roots = Vec::with_capacity(groups.len());
+    for aggregate in groups.into_values() {
+        roots.push(aggregate.root.clone());
+        documents.push(build_album(aggregate)?);
+    }
+    Ok(MusicScanResult {
+        documents,
+        roots,
+        warnings,
+    })
+}
+
+fn read_cue_album(
+    path: &Path,
+    groups: &mut BTreeMap<String, AlbumAggregate>,
+) -> Result<(), LocalError> {
+    let sheet = parse_cue(&fs::read_to_string(path)?)?;
+    let artist = required_metadata(sheet.performer, "CUE album performer is required")?;
+    let title = required_metadata(sheet.title, "CUE album title is required")?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| LocalError::InvalidPath(path.to_path_buf()))?;
+    let (root, disc_number) = album_root_and_disc(directory);
+    let aggregate = album_group(groups, artist, title, root);
+    let tracks = aggregate.discs.entry(disc_number).or_default();
+    for file in sheet.files {
+        for (index, track) in file.tracks.iter().enumerate() {
+            let title = required_metadata(track.title.clone(), "CUE track title is required")?;
+            let duration = track_duration(&file.tracks, index);
+            tracks.push(TrackInput {
+                number: track.number,
+                title,
+                duration,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn read_id3_track(
+    path: &Path,
+    groups: &mut BTreeMap<String, AlbumAggregate>,
+) -> Result<(), LocalError> {
+    let Some(tags) = parse_id3v1(&fs::read(path)?)? else {
+        return Ok(());
+    };
+    let artist = required_metadata(tags.artist, "ID3 artist is required")?;
+    let album = required_metadata(tags.album, "ID3 album is required")?;
+    let title = required_metadata(tags.title, "ID3 title is required")?;
+    let number = tags
+        .track
+        .map(u32::from)
+        .filter(|number| *number > 0)
+        .ok_or_else(|| LocalError::InvalidMetadata("ID3 track number is required".to_owned()))?;
+    let root = path
+        .parent()
+        .ok_or_else(|| LocalError::InvalidPath(path.to_path_buf()))?
+        .to_path_buf();
+    album_group(groups, artist, album, root)
+        .discs
+        .entry(1)
+        .or_default()
+        .push(TrackInput {
+            number,
+            title,
+            duration: Duration::from_seconds(0),
+        });
+    Ok(())
+}
+
+fn album_group(
+    groups: &mut BTreeMap<String, AlbumAggregate>,
+    artist: String,
+    title: String,
+    root: PathBuf,
+) -> &mut AlbumAggregate {
+    let key = format!(
+        "{}\0{}\0{}",
+        root.to_string_lossy(),
+        normalize(&artist),
+        normalize(&title)
+    );
+    groups.entry(key).or_insert_with(|| AlbumAggregate {
+        artist,
+        title,
+        root,
+        discs: BTreeMap::new(),
+    })
+}
+
+fn build_album(aggregate: AlbumAggregate) -> Result<MusicReleaseGroup, LocalError> {
+    let album_slug = slug(&format!("{}-{}", aggregate.artist, aggregate.title));
+    let mut discs = Vec::with_capacity(aggregate.discs.len());
+    for (disc_number, mut inputs) in aggregate.discs {
+        inputs.sort_by_key(|track| track.number);
+        let tracks = inputs
+            .into_iter()
+            .map(|input| {
+                let mut titles = LocalizedValue::new();
+                titles.insert("und", input.title)?;
+                Ok(Track::new(
+                    AssetId::new(format!(
+                        "local-music-{album_slug}-d{disc_number}-t{}",
+                        input.number
+                    ))?,
+                    titles,
+                    TrackSequence::new(disc_number, input.number)?,
+                    input.duration,
+                ))
+            })
+            .collect::<Result<Vec<_>, LocalError>>()?;
+        discs.push(Disc::new(disc_number, tracks)?);
+    }
+    discs.sort_by_key(|disc| disc.number);
+    let artist = MusicArtist::new(
+        WorkId::new(format!("local-music-artist-{}", slug(&aggregate.artist)))?,
+        aggregate.artist,
+    )?;
+    let mut titles = LocalizedValue::new();
+    titles.insert("und", aggregate.title)?;
+    Ok(MusicReleaseGroup::new(
+        WorkId::new(format!("local-music-release-group-{album_slug}"))?,
+        titles,
+        artist,
+        vec![MusicRelease::new(
+            ReleaseId::new(format!("local-music-release-{album_slug}"))?,
+            discs,
+        )],
+    ))
+}
+
+fn collect_music_metadata(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), LocalError> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_music_metadata(&path, paths)?;
+        } else if matches!(
+            path.extension()
+                .and_then(|value| value.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("cue" | "mp3")
+        ) {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn album_root_and_disc(directory: &Path) -> (PathBuf, u32) {
+    let name = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if let Some(number) = disc_folder_number(name) {
+        return (
+            directory.parent().unwrap_or(directory).to_path_buf(),
+            number,
+        );
+    }
+    (directory.to_path_buf(), 1)
+}
+
+fn disc_folder_number(value: &str) -> Option<u32> {
+    let normalized = value.to_ascii_lowercase();
+    ["disc", "disk", "cd"].into_iter().find_map(|prefix| {
+        normalized
+            .strip_prefix(prefix)
+            .map(str::trim)
+            .and_then(|number| number.parse().ok())
+            .filter(|number| *number > 0)
+    })
+}
+
+fn track_duration(tracks: &[CueTrack], index: usize) -> Duration {
+    let start = tracks[index].index_frames;
+    let end = tracks.get(index + 1).and_then(|track| track.index_frames);
+    let seconds = start
+        .zip(end)
+        .and_then(|(start, end)| end.checked_sub(start))
+        .map_or(0, |frames| u64::from(frames / CUE_FRAMES_PER_SECOND));
+    Duration::from_seconds(seconds)
+}
+
+fn required_metadata(value: Option<String>, message: &str) -> Result<String, LocalError> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| LocalError::InvalidMetadata(message.to_owned()))
+}
+
+fn normalize(value: &str) -> String {
+    value.split_whitespace().collect::<String>().to_lowercase()
+}
+
+fn slug(value: &str) -> String {
+    let mut output = value
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    while output.contains("--") {
+        output = output.replace("--", "-");
+    }
+    output.trim_matches('-').to_owned()
 }
