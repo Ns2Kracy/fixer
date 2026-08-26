@@ -1,6 +1,6 @@
 use fixer_core::{
     AnimeCandidate, Candidate, ExternalId, MatchEvidenceKind, MatchQuery, Matcher, MovieCandidate,
-    ProviderId,
+    MusicCandidate, ProviderId,
 };
 
 fn candidate(id: &str, title: &str, year: Option<u16>) -> Candidate {
@@ -86,6 +86,23 @@ fn matcher_exposes_positive_and_negative_evidence() {
             })
         );
     }
+}
+
+#[test]
+fn music_queries_rank_music_candidates() {
+    let query = MatchQuery::music("Kind of Blue").unwrap().with_year(1959);
+    let candidate = Candidate::Music(
+        MusicCandidate::new(
+            ProviderId::new("musicbrainz").unwrap(),
+            ExternalId::new("musicbrainz-release-group", "1f2a").unwrap(),
+            "Kind of Blue",
+            Some(1959),
+        )
+        .unwrap(),
+    );
+
+    let score = Matcher.score(&query, &candidate).unwrap();
+    assert!(score.total > 0);
 }
 
 #[test]

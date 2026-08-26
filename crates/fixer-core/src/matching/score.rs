@@ -92,6 +92,20 @@ impl MatchQuery {
             sequence: None,
         })
     }
+    /// Constructs a music release-group matching query.
+    pub fn music(title: impl Into<String>) -> Result<Self, CoreError> {
+        let title = title.into();
+        validate_text("match.title", &title)?;
+        Ok(Self {
+            media_kind: MediaKind::Music,
+            title,
+            localized_titles: LocalizedValue::new(),
+            aliases: Vec::new(),
+            external_ids: Vec::new(),
+            year: None,
+            sequence: None,
+        })
+    }
     /// Adds a localized title alternative.
     pub fn add_localized_title(
         &mut self,

@@ -161,6 +161,17 @@ impl SearchRequest {
         })
     }
 
+    /// Constructs a music release-group title search.
+    pub fn music(title: impl Into<String>, year: Option<u16>) -> Result<Self, CoreError> {
+        let title = title.into();
+        validate_query_title(&title)?;
+        Ok(Self::Music {
+            title,
+            year,
+            locales: Vec::new(),
+        })
+    }
+
     /// Returns the requested media domain.
     pub const fn media_kind(&self) -> MediaKind {
         match self {

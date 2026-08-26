@@ -174,6 +174,14 @@ fn output_plans_serialize_with_previewable_sources_and_targets() {
 }
 
 #[test]
+fn music_search_requests_are_typed() {
+    let request = SearchRequest::music("Kind of Blue", Some(1959)).unwrap();
+    assert_eq!(request.media_kind(), MediaKind::Music);
+    assert_eq!(request.title(), Some("Kind of Blue"));
+    assert_eq!(request.year(), Some(1959));
+}
+
+#[test]
 fn anime_search_requests_are_typed() {
     let request = SearchRequest::anime("葬送のフリーレン", Some(2023)).unwrap();
     assert_eq!(request.media_kind(), MediaKind::Anime);
