@@ -437,6 +437,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixer-provider-openlibrary"
+version = "0.1.0"
+dependencies = [
+ "fixer-core",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "fixer-provider-tmdb"
 version = "0.1.0"
 dependencies = [
