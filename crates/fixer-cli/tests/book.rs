@@ -87,11 +87,8 @@ fn book_search_and_exact_isbn_resolve_work_offline() {
         ])
         .output()
         .unwrap();
-    assert!(
-        search.status.success(),
-        "{}",
-        String::from_utf8_lossy(&search.stderr)
-    );
+    assert_eq!(search.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&search.stderr).contains("offline_provider_skipped"));
     let stdout = String::from_utf8(search.stdout).unwrap();
     assert!(stdout.contains("The Left Hand of Darkness"));
     assert!(stdout.contains("local"));

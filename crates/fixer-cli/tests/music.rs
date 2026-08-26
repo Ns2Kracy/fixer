@@ -44,11 +44,8 @@ fn music_search_and_resolve_preserve_album_hierarchy_offline() {
         .args(["search", "music", "Kind of Blue", "--year", "1959"])
         .output()
         .unwrap();
-    assert!(
-        search.status.success(),
-        "{}",
-        String::from_utf8_lossy(&search.stderr)
-    );
+    assert_eq!(search.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&search.stderr).contains("offline_provider_skipped"));
     let stdout = String::from_utf8(search.stdout).unwrap();
     assert!(stdout.contains("Kind of Blue"));
     assert!(stdout.contains("local"));

@@ -58,11 +58,8 @@ fn anime_search_and_resolve_work_offline() {
         .arg(root.path())
         .arg("--offline")
         .args(["search", "anime", "葬送のフリーレン", "--year", "2023"]));
-    assert!(
-        search.status.success(),
-        "{}",
-        String::from_utf8_lossy(&search.stderr)
-    );
+    assert_eq!(search.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&search.stderr).contains("offline_provider_skipped"));
     let stdout = String::from_utf8(search.stdout).unwrap();
     assert!(stdout.contains("葬送のフリーレン"));
     assert!(stdout.contains("local"));

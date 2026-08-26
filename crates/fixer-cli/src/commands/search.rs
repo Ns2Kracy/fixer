@@ -30,7 +30,10 @@ async fn search_anime(args: AnimeQueryArgs, config: &Config) -> AppResult<RunSta
     }
     let results = query.search().await.map_err(AppError::new)?;
     render::search_text(results.candidates());
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        results.warnings(),
+    ))
 }
 
 async fn search_book(args: BookQueryArgs, config: &Config) -> AppResult<RunStatus> {
@@ -44,7 +47,10 @@ async fn search_book(args: BookQueryArgs, config: &Config) -> AppResult<RunStatu
     }
     let results = query.search().await.map_err(AppError::new)?;
     render::search_text(results.candidates());
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        results.warnings(),
+    ))
 }
 
 async fn search_movie(args: MovieQueryArgs, config: &Config) -> AppResult<RunStatus> {
@@ -55,7 +61,10 @@ async fn search_movie(args: MovieQueryArgs, config: &Config) -> AppResult<RunSta
     }
     let results = query.search().await.map_err(AppError::new)?;
     render::search_text(results.candidates());
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        results.warnings(),
+    ))
 }
 
 async fn search_music(args: MusicQueryArgs, config: &Config) -> AppResult<RunStatus> {
@@ -66,7 +75,10 @@ async fn search_music(args: MusicQueryArgs, config: &Config) -> AppResult<RunSta
     }
     let results = query.search().await.map_err(AppError::new)?;
     render::search_text(results.candidates());
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        results.warnings(),
+    ))
 }
 
 async fn search_television(args: TelevisionQueryArgs, config: &Config) -> AppResult<RunStatus> {
@@ -84,5 +96,8 @@ async fn search_television(args: TelevisionQueryArgs, config: &Config) -> AppRes
     }
     let results = query.search().await.map_err(AppError::new)?;
     render::search_text(results.candidates());
-    Ok(super::finish_with_warnings(&warnings))
+    Ok(super::finish_with_resolution_warnings(
+        &warnings,
+        results.warnings(),
+    ))
 }
