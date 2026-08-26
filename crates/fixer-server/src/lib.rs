@@ -5,6 +5,7 @@ mod app;
 pub mod auth;
 mod fs_policy;
 pub mod jobs;
+mod network_policy;
 pub mod store;
 
 use std::{
@@ -18,6 +19,7 @@ pub use app::{app, job_app, secure_job_app};
 pub use auth::{AuthConfigError, AuthState};
 pub use fs_policy::{FsPolicy, FsPolicyError};
 pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
+pub use network_policy::{TrustedProxyError, TrustedProxyPolicy};
 pub use store::SqliteJobStore;
 use thiserror::Error;
 
