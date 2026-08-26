@@ -71,6 +71,11 @@ impl BookSearch {
         &self.candidates
     }
 
+    /// Returns non-fatal provider and matching warnings from the search.
+    pub fn warnings(&self) -> &[ResolutionWarning] {
+        &self.warnings
+    }
+
     /// Selects one book edition candidate explicitly.
     pub fn select(self, index: usize) -> Result<SelectedBook, SdkError> {
         let length = self.candidates.len();

@@ -57,7 +57,15 @@ async fn offline_skips_network_providers_and_warns() {
         .offline()
         .build()
         .unwrap();
-    let outcome = fixer.movie("Local Movie").resolve().await.unwrap();
+    let search = fixer.movie("Local Movie").search().await.unwrap();
+    assert!(
+        search
+            .warnings()
+            .iter()
+            .any(|warning| warning.code == "offline_provider_skipped")
+    );
+
+    let outcome = search.select(0).unwrap().fetch_selected().await.unwrap();
     assert!(
         outcome
             .warnings

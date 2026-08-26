@@ -76,6 +76,11 @@ impl AnimeSearch {
         &self.candidates
     }
 
+    /// Returns non-fatal provider and matching warnings from the search.
+    pub fn warnings(&self) -> &[ResolutionWarning] {
+        &self.warnings
+    }
+
     /// Selects one candidate explicitly.
     pub fn select(self, index: usize) -> Result<SelectedAnime, SdkError> {
         let length = self.candidates.len();
