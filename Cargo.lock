@@ -422,6 +422,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixer-provider-musicbrainz"
+version = "0.1.0"
+dependencies = [
+ "fixer-core",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "fixer-provider-tmdb"
 version = "0.1.0"
 dependencies = [
