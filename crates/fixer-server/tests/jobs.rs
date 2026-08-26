@@ -1,11 +1,19 @@
-use std::num::NonZeroUsize;
+use std::{
+    num::NonZeroUsize,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use axum::{
     Router,
     body::Body,
     http::{Method, Request, StatusCode, header},
 };
-use fixer_server::{JobRuntime, SqliteJobStore, job_app};
+use fixer_core::{
+    BoxFuture, Candidate, ExternalId, FetchRequest, HttpClient, LocalizedValue, MetadataDocument,
+    Movie, Provider, ProviderDescriptor, ProviderError, ProviderId, SearchRequest, WorkId,
+};
+use fixer_sdk::{Fixer, FixtureDocument, FixtureProvider};
+use fixer_server::{JobRuntime, SdkJobFlow, SqliteJobStore, job_app};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -98,6 +106,298 @@ fn event_id(frame: &str) -> &str {
 fn cursor_with_sequence(cursor: &str, sequence: u64) -> String {
     let (epoch, _) = cursor.split_once(':').expect("opaque cursor has an epoch");
     format!("{epoch}:{sequence}")
+}
+
+#[tokio::test]
+async fn one_worker_calls_the_sdk_and_processes_persistent_jobs_serially() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let mut titles = LocalizedValue::new();
+    titles.insert("en", "Fixture Movie".to_owned()).unwrap();
+    let movie = Movie::new(WorkId::new("fixture-movie").unwrap(), titles);
+    let provider = FixtureProvider::new(
+        ProviderId::new("fixture.worker").unwrap(),
+        [FixtureDocument::new(
+            ExternalId::new("fixture.worker", "fixture-movie").unwrap(),
+            MetadataDocument::Movie(movie),
+        )],
+    )
+    .unwrap()
+    .with_search_delay(Duration::from_millis(150));
+    let fixer = Fixer::builder()
+        .provider(provider)
+        .offline()
+        .build()
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(16));
+    let _workers = runtime.start_workers(capacity(1), SdkJobFlow::new(fixer));
+    let router = job_app(runtime);
+
+    for path in [
+        "/media/First Movie (2000).mkv",
+        "/media/Second Movie (2001).mkv",
+    ] {
+        let response = send(
+            &router,
+            Request::post("/api/v1/jobs")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"media_kind": "movie", "input_path": path, "apply": false}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    wait_for_state(&router, 1, "searching").await;
+    let second = get_job(&router, 2).await;
+    assert_eq!(second["job"]["state"], "queued");
+
+    let first = wait_for_state(&router, 1, "awaiting_confirmation").await;
+    assert_eq!(first["job"]["review"]["candidate_count"], 1);
+    assert_eq!(first["job"]["review"]["conflict_count"], 0);
+    assert_eq!(first["job"]["progress"]["stage"], "awaiting_confirmation");
+
+    let second = wait_for_state(&router, 2, "awaiting_confirmation").await;
+    assert_eq!(second["job"]["review"]["candidate_count"], 1);
+}
+
+#[tokio::test]
+async fn two_workers_atomically_claim_distinct_queued_jobs() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let _workers = runtime.start_workers(
+        capacity(2),
+        SdkJobFlow::new(fixture_fixer(Duration::from_millis(200))),
+    );
+    let router = job_app(runtime);
+
+    create_job(&router, "/media/First Movie.mkv").await;
+    create_job(&router, "/media/Second Movie.mkv").await;
+
+    let (first, second) = tokio::join!(
+        wait_for_state(&router, 1, "searching"),
+        wait_for_state(&router, 2, "searching")
+    );
+    assert_eq!(first["job"]["state"], "searching");
+    assert_eq!(second["job"]["state"], "searching");
+}
+
+#[tokio::test]
+async fn cancellation_during_sdk_search_prevents_later_worker_stages() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let _workers = runtime.start_workers(
+        capacity(1),
+        SdkJobFlow::new(fixture_fixer(Duration::from_millis(150))),
+    );
+    let router = job_app(runtime);
+
+    create_job(&router, "/media/Cancelled Movie.mkv").await;
+    wait_for_state(&router, 1, "searching").await;
+    let response = send(
+        &router,
+        Request::post("/api/v1/jobs/1/cancel")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["job"]["state"], "cancelled");
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let job = get_job(&router, 1).await;
+    assert_eq!(job["job"]["state"], "cancelled");
+    assert!(job["job"].get("review").is_none());
+}
+
+#[tokio::test]
+async fn a_panicking_sdk_provider_interrupts_one_job_and_the_worker_survives() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let provider = PanicsOnceProvider {
+        inner: fixture_provider(Duration::ZERO),
+        panicked: AtomicBool::new(false),
+    };
+    let fixer = Fixer::builder()
+        .provider(provider)
+        .offline()
+        .build()
+        .unwrap();
+    let _workers = runtime.start_workers(capacity(1), SdkJobFlow::new(fixer));
+    let router = job_app(runtime);
+
+    create_job(&router, "/media/Panic Movie.mkv").await;
+    let first = wait_for_state(&router, 1, "interrupted").await;
+    assert_eq!(first["job"]["progress"]["stage"], "interrupted");
+
+    create_job(&router, "/media/Recovered Movie.mkv").await;
+    let second = wait_for_state(&router, 2, "awaiting_confirmation").await;
+    assert_eq!(second["job"]["review"]["candidate_count"], 1);
+}
+
+struct PanicsOnceProvider {
+    inner: FixtureProvider,
+    panicked: AtomicBool,
+}
+
+impl Provider for PanicsOnceProvider {
+    fn descriptor(&self) -> &ProviderDescriptor {
+        self.inner.descriptor()
+    }
+
+    fn search<'a>(
+        &'a self,
+        request: SearchRequest,
+        http: &'a dyn HttpClient,
+    ) -> BoxFuture<'a, Result<Vec<Candidate>, ProviderError>> {
+        assert!(
+            self.panicked.swap(true, Ordering::SeqCst),
+            "intentional provider panic"
+        );
+        self.inner.search(request, http)
+    }
+
+    fn fetch<'a>(
+        &'a self,
+        request: FetchRequest,
+        http: &'a dyn HttpClient,
+    ) -> BoxFuture<'a, Result<MetadataDocument, ProviderError>> {
+        self.inner.fetch(request, http)
+    }
+}
+
+#[tokio::test]
+async fn awaited_worker_shutdown_cooperates_after_the_current_sdk_stage() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let workers = runtime.start_workers(
+        capacity(1),
+        SdkJobFlow::new(fixture_fixer(Duration::from_millis(100))),
+    );
+    let router = job_app(runtime);
+
+    create_job(&router, "/media/Shutdown Movie.mkv").await;
+    wait_for_state(&router, 1, "searching").await;
+    workers.shutdown().await;
+
+    let job = get_job(&router, 1).await;
+    assert_eq!(job["job"]["state"], "interrupted");
+    assert_eq!(job["job"]["progress"]["stage"], "interrupted");
+}
+
+#[tokio::test]
+async fn workers_emit_replayable_progress_and_review_events() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let _workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+
+    create_job(&router, "/media/Event Movie.mkv").await;
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+    let response = send(
+        &router,
+        Request::get("/api/v1/jobs/1/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let mut saw_progress = false;
+    let mut saw_review = false;
+    for _ in 0..12 {
+        let frame = next_sse_frame(&mut body).await;
+        saw_progress |= frame.contains("event: progress");
+        saw_review |= frame.contains("event: review");
+        if saw_progress && saw_review {
+            break;
+        }
+    }
+    assert!(saw_progress, "worker SSE omitted progress events");
+    assert!(saw_review, "worker SSE omitted review events");
+}
+
+fn fixture_provider(delay: Duration) -> FixtureProvider {
+    let mut titles = LocalizedValue::new();
+    titles.insert("en", "Fixture Movie".to_owned()).unwrap();
+    let movie = Movie::new(WorkId::new("fixture-movie").unwrap(), titles);
+    FixtureProvider::new(
+        ProviderId::new("fixture.worker").unwrap(),
+        [FixtureDocument::new(
+            ExternalId::new("fixture.worker", "fixture-movie").unwrap(),
+            MetadataDocument::Movie(movie),
+        )],
+    )
+    .unwrap()
+    .with_search_delay(delay)
+}
+
+fn fixture_fixer(delay: Duration) -> Fixer {
+    Fixer::builder()
+        .provider(fixture_provider(delay))
+        .offline()
+        .build()
+        .unwrap()
+}
+
+async fn create_job(router: &Router, path: &str) {
+    let response = send(
+        router,
+        Request::post("/api/v1/jobs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"media_kind": "movie", "input_path": path, "apply": false}).to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+async fn get_job(router: &Router, id: i64) -> Value {
+    let response = send(
+        router,
+        Request::get(format!("/api/v1/jobs/{id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    response_json(response).await
+}
+
+async fn wait_for_state(router: &Router, id: i64, expected: &str) -> Value {
+    timeout(Duration::from_secs(2), async {
+        loop {
+            let job = get_job(router, id).await;
+            if job["job"]["state"] == expected {
+                return job;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("job {id} did not reach {expected}"))
 }
 
 #[tokio::test]

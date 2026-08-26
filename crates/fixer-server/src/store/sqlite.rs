@@ -12,7 +12,7 @@ use sqlx::{
 };
 
 use crate::{
-    jobs::model::{JobInputDto, JobState},
+    jobs::model::{JobInputDto, JobState, ProgressSummary},
     store::{JobId, JobRecord, JobRecordParts, JobUpdate, StoreError},
 };
 
@@ -60,6 +60,24 @@ impl SqliteJobStore {
         .await?;
         let id = JobId::from_database(result.last_insert_rowid())?;
         self.get_job(id).await
+    }
+
+    pub(crate) async fn claim_next_queued(
+        &self,
+        progress: ProgressSummary,
+    ) -> Result<Option<JobRecord>, StoreError> {
+        let progress_json = serde_json::to_string(&progress)?;
+        let updated_at_ms = timestamp_ms()?;
+        let sql = format!(
+            "UPDATE jobs SET state = 'scanning', progress_json = ?, updated_at_ms = ? WHERE id = (SELECT id FROM jobs WHERE state = 'queued' ORDER BY id LIMIT 1) AND state = 'queued' RETURNING {RECORD_COLUMNS}"
+        );
+        sqlx::query(&sql)
+            .bind(progress_json)
+            .bind(updated_at_ms)
+            .fetch_optional(&self.pool)
+            .await?
+            .map(|row| decode_record(&row))
+            .transpose()
     }
 
     pub async fn get_job(&self, id: JobId) -> Result<JobRecord, StoreError> {

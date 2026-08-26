@@ -13,7 +13,7 @@ use std::{
 };
 
 pub use app::{app, job_app};
-pub use jobs::JobRuntime;
+pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
 pub use store::SqliteJobStore;
 use thiserror::Error;
 
@@ -21,6 +21,7 @@ const DEFAULT_BIND_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 3000);
 const DEFAULT_DATABASE_PATH: &str = "fixer.sqlite3";
 const DEFAULT_EVENT_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).unwrap();
+const DEFAULT_WORKER_COUNT: NonZeroUsize = NonZeroUsize::new(2).unwrap();
 
 /// Validated network and persistence configuration for the HTTP service.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +136,15 @@ pub async fn serve(config: ServerConfig) -> Result<(), ServeError> {
     let store = SqliteJobStore::open(config.database_path()).await?;
     let runtime = JobRuntime::new(store, DEFAULT_EVENT_CAPACITY);
     let listener = tokio::net::TcpListener::bind(config.bind_addr()).await?;
-    axum::serve(listener, job_app(runtime)).await?;
+    let workers = runtime.start_local_workers(DEFAULT_WORKER_COUNT);
+    let serve_result = axum::serve(listener, job_app(runtime))
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+    workers.shutdown().await;
+    serve_result?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }

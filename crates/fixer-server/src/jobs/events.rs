@@ -14,7 +14,10 @@ use futures_util::{Stream, stream};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
-use crate::{jobs::model::JobState, store::JobId};
+use crate::{
+    jobs::model::{JobState, ProgressSummary},
+    store::JobId,
+};
 
 static NEXT_RUNTIME_EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -27,17 +30,25 @@ struct JobEvent {
 }
 
 impl JobEvent {
-    fn state(sequence: u64, job_id: JobId, state: JobState) -> Self {
+    fn new(job_id: JobId, kind: &'static str, data: Value) -> Self {
         Self {
-            sequence,
+            sequence: 0,
             job_id,
-            kind: "state",
-            data: json!({
+            kind,
+            data,
+        }
+    }
+
+    fn state(job_id: JobId, state: JobState) -> Self {
+        Self::new(
+            job_id,
+            "state",
+            json!({
                 "schema_version": 1,
                 "job_id": job_id.get(),
                 "state": state,
             }),
-        }
+        )
     }
 
     fn into_sse(self, epoch: &str) -> Event {
@@ -97,7 +108,49 @@ impl JobEventHub {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.publish_locked(&mut guard, job_id, state)
+        self.publish_locked(&mut guard, JobEvent::state(job_id, state))
+    }
+
+    pub(crate) fn publish_progress(
+        &self,
+        job_id: JobId,
+        progress: &ProgressSummary,
+    ) -> Result<(), SubscribeError> {
+        self.publish(JobEvent::new(
+            job_id,
+            "progress",
+            json!({
+                "schema_version": 1,
+                "job_id": job_id.get(),
+                "progress": progress,
+            }),
+        ))
+    }
+
+    pub(crate) fn publish_review(
+        &self,
+        job_id: JobId,
+        candidate_count: u64,
+        conflict_count: u64,
+    ) -> Result<(), SubscribeError> {
+        self.publish(JobEvent::new(
+            job_id,
+            "review",
+            json!({
+                "schema_version": 1,
+                "job_id": job_id.get(),
+                "candidate_count": candidate_count,
+                "conflict_count": conflict_count,
+            }),
+        ))
+    }
+
+    fn publish(&self, event: JobEvent) -> Result<(), SubscribeError> {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.publish_locked(&mut guard, event)
     }
 
     pub(crate) fn ensure_state(
@@ -112,7 +165,7 @@ impl JobEventHub {
         if guard.retained.iter().any(|event| event.job_id == job_id) {
             return Ok(());
         }
-        self.publish_locked(&mut guard, job_id, state)
+        self.publish_locked(&mut guard, JobEvent::state(job_id, state))
     }
 
     pub(crate) fn subscribe(
@@ -165,15 +218,14 @@ impl JobEventHub {
     fn publish_locked(
         &self,
         state: &mut EventState,
-        job_id: JobId,
-        job_state: JobState,
+        mut event: JobEvent,
     ) -> Result<(), SubscribeError> {
         let sequence = state
             .next_sequence
             .checked_add(1)
             .ok_or(SubscribeError::SequenceExhausted)?;
         state.next_sequence = sequence;
-        let event = JobEvent::state(sequence, job_id, job_state);
+        event.sequence = sequence;
         state.retained.push_back(event.clone());
         while state.retained.len() > self.capacity {
             state.retained.pop_front();
