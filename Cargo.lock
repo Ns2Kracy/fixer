@@ -426,7 +426,10 @@ name = "fixer-provider-musicbrainz"
 version = "0.1.0"
 dependencies = [
  "fixer-core",
+ "serde",
+ "serde_json",
  "thiserror",
+ "tokio",
  "url",
 ]
 
