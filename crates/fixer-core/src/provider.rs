@@ -139,6 +139,17 @@ impl SearchRequest {
         })
     }
 
+    /// Constructs a television series title search.
+    pub fn television(title: impl Into<String>, year: Option<u16>) -> Result<Self, CoreError> {
+        let title = title.into();
+        validate_query_title(&title)?;
+        Ok(Self::Television {
+            title,
+            year,
+            locales: Vec::new(),
+        })
+    }
+
     /// Returns the requested media domain.
     pub const fn media_kind(&self) -> MediaKind {
         match self {

@@ -27,13 +27,15 @@ pub use matching::{
     MatchingError, RankedCandidate,
 };
 pub use media::*;
-pub use merge::{FieldPath, MergeError, MergePolicy, MovieDocument, MovieMerger};
+pub use merge::{
+    FieldPath, MergeError, MergePolicy, MovieDocument, MovieMerger, SeriesDocument, SeriesMerger,
+};
 pub use output::{
     OutputOperation, OutputPlan, PlannedContent, PlanningError, WriteRequest, Writer,
 };
 pub use provenance::{ProvenanceMap, SourceRef, Sourced};
 pub use provider::{
     BoxFuture, Candidate, FetchRequest, MediaKind, MetadataDocument, MovieCandidate, Provider,
-    ProviderDescriptor, ProviderError, SearchRequest,
+    ProviderDescriptor, ProviderError, SearchRequest, TelevisionCandidate,
 };
 pub use resolved::{MergeConflict, ResolutionWarning, Resolved};

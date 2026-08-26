@@ -5,7 +5,7 @@ use crate::CoreError;
 use serde::{Deserialize, Serialize};
 
 /// Numbering scheme used to interpret episodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OrderingScheme {
     Aired,
@@ -14,7 +14,7 @@ pub enum OrderingScheme {
 }
 
 /// Typed television episode sequence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EpisodeSequence {
     pub scheme: OrderingScheme,
     pub season: Option<u32>,
@@ -62,6 +62,7 @@ pub struct Episode {
     pub sequence: EpisodeSequence,
     pub runtime: Option<Duration>,
     pub credits: Vec<Credit>,
+    pub artwork: Vec<ArtworkReference>,
 }
 
 impl Episode {
@@ -74,6 +75,7 @@ impl Episode {
             sequence,
             runtime: None,
             credits: Vec::new(),
+            artwork: Vec::new(),
         }
     }
 }
@@ -84,6 +86,7 @@ pub struct Season {
     pub id: WorkId,
     pub number: u32,
     pub episodes: Vec<Episode>,
+    pub artwork: Vec<ArtworkReference>,
 }
 
 impl Season {
@@ -93,6 +96,7 @@ impl Season {
             id,
             number,
             episodes,
+            artwork: Vec::new(),
         })
     }
 }

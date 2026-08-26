@@ -1,8 +1,10 @@
 //! Metadata merge policies and typed merge entry points.
 
 mod policy;
+mod television;
 
 pub use policy::{FieldPath, MergePolicy};
+pub use television::{SeriesDocument, SeriesMerger};
 
 use crate::{
     ArtworkReference, ContentRating, CoreError, Credit, Genre, LocalizedEntry, LocalizedValue,
@@ -26,12 +28,17 @@ impl MovieDocument {
 /// Explicit merge failures.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MergeError {
-    #[error("no movie documents were supplied")]
+    #[error("no metadata documents were supplied")]
     NoDocuments,
     #[error("metadata document lacks source metadata")]
     MissingSource,
-    #[error("unsupported metadata document for movie merge: {0:?}")]
+    #[error("unsupported metadata document: {0:?}")]
     UnsupportedDocument(MediaKind),
+    #[error("television ordering mismatch: expected {expected:?}, found {found:?}")]
+    OrderingMismatch {
+        expected: crate::OrderingScheme,
+        found: crate::OrderingScheme,
+    },
     #[error("invalid merge data: {0}")]
     Invalid(String),
 }
