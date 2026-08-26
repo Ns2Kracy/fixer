@@ -1,7 +1,9 @@
 use crate::{
     AppError, AppResult, RunStatus,
-    args::{MediaKindArg, PlacementArg, ScrapeArgs},
+    args::{MediaKindArg, PlacementArg, PlanArgs, ScrapeArgs},
     config::Config,
+    json::PlanDto,
+    render,
 };
 use fixer_core::{AssetKind, LocalizedValue, Movie, MovieRelease, ReleaseDate, ReleaseId, WorkId};
 use fixer_provider_local::{
@@ -15,7 +17,41 @@ use fixer_writer_local::{
 };
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy)]
+enum OutputMode {
+    Scrape,
+    Plan { json: bool, kind: MediaKindArg },
+}
+
 pub async fn run(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
+    run_with_mode(args, config, OutputMode::Scrape).await
+}
+
+pub async fn plan(args: PlanArgs, config: &Config) -> AppResult<RunStatus> {
+    let mode = OutputMode::Plan {
+        json: args.json,
+        kind: args.kind,
+    };
+    run_with_mode(
+        ScrapeArgs {
+            path: args.path,
+            kind: args.kind,
+            dry_run: true,
+            apply: false,
+            placement: args.placement,
+            update_epub: false,
+        },
+        config,
+        mode,
+    )
+    .await
+}
+
+async fn run_with_mode(
+    args: ScrapeArgs,
+    config: &Config,
+    mode: OutputMode,
+) -> AppResult<RunStatus> {
     if !args.path.exists() {
         return Err(AppError::new(format!(
             "input path does not exist: {}",
@@ -28,15 +64,15 @@ pub async fn run(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
         ));
     }
     match args.kind {
-        MediaKindArg::Anime => scrape_anime(args, config).await,
-        MediaKindArg::Book => scrape_book(args, config).await,
-        MediaKindArg::Movie => scrape_movie(args, config).await,
-        MediaKindArg::Music => scrape_music(args, config).await,
-        MediaKindArg::Television => scrape_television(args, config).await,
+        MediaKindArg::Anime => scrape_anime(args, config, mode).await,
+        MediaKindArg::Book => scrape_book(args, config, mode).await,
+        MediaKindArg::Movie => scrape_movie(args, config, mode).await,
+        MediaKindArg::Music => scrape_music(args, config, mode).await,
+        MediaKindArg::Television => scrape_television(args, config, mode).await,
     }
 }
 
-async fn scrape_anime(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
+async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
     if args.placement != PlacementArg::InPlace {
         return Err(AppError::new(
             "anime scrape currently supports only in-place placement",
@@ -67,10 +103,10 @@ async fn scrape_anime(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus>
     let plan = AnimeWriter
         .plan_resolved(&resolved, output_root)
         .map_err(AppError::new)?;
-    execute_plan(plan, &args, output_root, &result.warnings, None)
+    finish_plan(plan, &args, output_root, &result.warnings, None, mode)
 }
 
-async fn scrape_book(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
+async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
     if args.placement != PlacementArg::InPlace {
         return Err(AppError::new(
             "book scrape currently supports only in-place placement",
@@ -130,10 +166,10 @@ async fn scrape_book(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> 
     let plan = writer
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
-    execute_plan(plan, &args, &output_root, &warnings, None)
+    finish_plan(plan, &args, &output_root, &warnings, None, mode)
 }
 
-async fn scrape_movie(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
+async fn scrape_movie(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
     let scan_root = scan_root(&args.path)?;
     let mut result = scan(scan_root).map_err(AppError::new)?;
     result
@@ -158,10 +194,10 @@ async fn scrape_movie(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus>
     let plan = JsonWriter
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
-    execute_plan(plan, &args, &output_root, &result.warnings, None)
+    finish_plan(plan, &args, &output_root, &result.warnings, None, mode)
 }
 
-async fn scrape_music(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
+async fn scrape_music(args: ScrapeArgs, config: &Config, mode: OutputMode) -> AppResult<RunStatus> {
     if args.placement != PlacementArg::InPlace {
         return Err(AppError::new(
             "music scrape currently supports only in-place placement",
@@ -192,10 +228,14 @@ async fn scrape_music(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus>
     let plan = MusicWriter::default()
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
-    execute_plan(plan, &args, &output_root, &warnings, None)
+    finish_plan(plan, &args, &output_root, &warnings, None, mode)
 }
 
-async fn scrape_television(args: ScrapeArgs, config: &Config) -> AppResult<RunStatus> {
+async fn scrape_television(
+    args: ScrapeArgs,
+    config: &Config,
+    mode: OutputMode,
+) -> AppResult<RunStatus> {
     let scan_root = scan_root(&args.path)?;
     let result = scan_television(scan_root).map_err(AppError::new)?;
     if result.documents.is_empty() {
@@ -242,21 +282,23 @@ async fn scrape_television(args: ScrapeArgs, config: &Config) -> AppResult<RunSt
     let plan = TelevisionWriter
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
-    execute_plan(
+    finish_plan(
         plan,
         &args,
         &output_root,
         &warnings,
         placement_target.as_deref(),
+        mode,
     )
 }
 
-fn execute_plan(
+fn finish_plan(
     mut plan: fixer_core::OutputPlan,
     args: &ScrapeArgs,
     output_root: &Path,
     warnings: &[ScanWarning],
     placement_target: Option<&Path>,
+    mode: OutputMode,
 ) -> AppResult<RunStatus> {
     if args.placement != PlacementArg::InPlace {
         if !args.path.is_file() {
@@ -280,6 +322,19 @@ fn execute_plan(
             }
         }
     }
+    if let OutputMode::Plan { json, kind } = mode {
+        if json {
+            render::json(&PlanDto::new(kind.as_str(), output_root, &plan))?;
+        } else {
+            println!(
+                "planned {} operation(s) at {}",
+                plan.operations().len(),
+                output_root.display()
+            );
+        }
+        return Ok(super::finish_with_warnings(warnings));
+    }
+
     let dry_run = args.dry_run || !args.apply;
     let policy = if dry_run {
         ExecutionPolicy::dry_run()

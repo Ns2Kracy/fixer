@@ -178,3 +178,58 @@ fn scan_warnings_are_structured_and_return_partial_success() {
             .contains("invalid")
     );
 }
+
+#[test]
+fn plan_emits_a_stable_operation_summary_without_mutating_targets() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("source.json"),
+        include_str!("../../fixer-provider-local/tests/fixtures/movie.json"),
+    )
+    .unwrap();
+    let output = fixer()
+        .arg("--offline")
+        .arg("plan")
+        .arg(root.path())
+        .args(["--kind", "movie", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["kind"], "movie");
+    assert_eq!(value["output_root"], root.path().to_string_lossy().as_ref());
+    let operations = value["operations"].as_array().unwrap();
+    assert!(!operations.is_empty());
+    for operation in operations {
+        assert!(operation["operation"].is_string());
+        assert!(operation["target"].is_string());
+        assert!(operation.get("content").is_none());
+        assert!(operation.get("bytes").is_none());
+    }
+    assert!(!root.path().join("movie.json").exists());
+    assert!(!root.path().join("fixer-manifest.json").exists());
+}
+
+#[test]
+fn plan_cannot_accept_execution_flags() {
+    let root = tempfile::tempdir().unwrap();
+    let output = fixer()
+        .arg("plan")
+        .arg(root.path())
+        .args(["--kind", "movie", "--apply"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unexpected argument '--apply'")
+    );
+}

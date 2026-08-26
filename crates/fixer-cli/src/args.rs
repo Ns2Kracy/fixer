@@ -31,6 +31,7 @@ pub enum Command {
         command: ResolveCommand,
     },
     Scan(ScanArgs),
+    Plan(PlanArgs),
     Scrape(ScrapeArgs),
     Config {
         #[command(subcommand)]
@@ -152,6 +153,17 @@ pub struct ScanArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct PlanArgs {
+    pub path: PathBuf,
+    #[arg(long, value_enum)]
+    pub kind: MediaKindArg,
+    #[arg(long, value_enum, default_value_t = PlacementArg::InPlace)]
+    pub placement: PlacementArg,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct ScrapeArgs {
     pub path: PathBuf,
     #[arg(long, value_enum)]
@@ -173,6 +185,18 @@ pub enum MediaKindArg {
     Movie,
     Music,
     Television,
+}
+
+impl MediaKindArg {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Anime => "anime",
+            Self::Book => "book",
+            Self::Movie => "movie",
+            Self::Music => "music",
+            Self::Television => "television",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

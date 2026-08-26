@@ -17,6 +17,7 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
         Command::Search { command } => search::run(command, &config).await,
         Command::Resolve { command } => resolve::run(command, &config).await,
         Command::Scan(args) => scan::run(args),
+        Command::Plan(args) => scrape::plan(args, &config).await,
         Command::Scrape(args) => scrape::run(args, &config).await,
         Command::Config {
             command: ConfigCommand::Validate,
