@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod anime;
+mod book;
 mod identify;
 mod json;
 mod music;
@@ -10,6 +11,7 @@ mod nfo;
 mod television;
 
 pub use anime::{AnimeScanResult, scan_anime};
+pub use book::{BookMetadata, parse_epub, parse_opf};
 pub use identify::{EvidenceKind, HintEvidence, MediaHint, identify_path};
 pub use json::parse_json;
 pub use music::{
@@ -48,6 +50,8 @@ pub enum LocalError {
     Json(#[from] serde_json::Error),
     #[error("local NFO XML was invalid: {0}")]
     Xml(#[from] quick_xml::DeError),
+    #[error("local EPUB container was invalid: {0}")]
+    Zip(#[from] zip::result::ZipError),
     #[error(transparent)]
     Core(#[from] CoreError),
 }

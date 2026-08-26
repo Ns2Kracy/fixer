@@ -25,3 +25,4 @@ reflink-copy = "0.1.30"
 clap = { version = "4.6.6", features = ["derive"] }
 url = "2.5.8"
 wiremock = "0.6.5"
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
