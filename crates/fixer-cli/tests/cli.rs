@@ -126,6 +126,169 @@ fn scrape_warnings_return_partial_success_exit_code() {
 }
 
 #[test]
+fn television_search_resolve_and_scrape_work_offline() {
+    let root = tempfile::tempdir().unwrap();
+    let season = root.path().join("Example Show").join("Season 01");
+    fs::create_dir_all(&season).unwrap();
+    let episode_path = season.join("Example.Show.S01E02.{tmdb-1399}.mkv");
+    fs::write(&episode_path, []).unwrap();
+
+    let search = run(fixer()
+        .arg("--local-root")
+        .arg(root.path())
+        .arg("--offline")
+        .args([
+            "search",
+            "television",
+            "Example Show",
+            "--external-id",
+            "tmdb:1399",
+        ]));
+    assert!(
+        search.status.success(),
+        "{}",
+        String::from_utf8_lossy(&search.stderr)
+    );
+    assert!(
+        String::from_utf8(search.stdout)
+            .unwrap()
+            .contains("Example Show")
+    );
+
+    let resolve = run(fixer()
+        .arg("--local-root")
+        .arg(root.path())
+        .arg("--offline")
+        .args([
+            "resolve",
+            "television",
+            "Example Show",
+            "--external-id",
+            "tmdb:1399",
+            "--ordering",
+            "aired",
+            "--json",
+        ]));
+    assert!(
+        resolve.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resolve.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&resolve.stdout).unwrap();
+    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["kind"], "television");
+    assert_eq!(value["title"], "Example Show");
+    assert_eq!(value["ordering"], "aired");
+    assert_eq!(value["seasons"], 1);
+    assert_eq!(value["episodes"], 1);
+
+    let scrape = run(fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(root.path())
+        .args(["--kind", "television", "--dry-run"]));
+    assert!(
+        scrape.status.success(),
+        "{}",
+        String::from_utf8_lossy(&scrape.stderr)
+    );
+    assert!(
+        String::from_utf8(scrape.stdout)
+            .unwrap()
+            .contains("planned 3 operation(s)")
+    );
+
+    let apply = run(fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(&episode_path)
+        .args(["--kind", "television", "--apply"]));
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let series_root = root.path().join("Example Show");
+    assert!(series_root.join("tvshow.nfo").is_file());
+    assert!(series_root.join("Season 01/season.nfo").is_file());
+    assert!(series_root.join("Season 01/S01E02.nfo").is_file());
+    assert!(!season.join("tvshow.nfo").exists());
+    assert!(!season.join("Season 01").exists());
+}
+
+#[test]
+fn television_copy_placement_keeps_media_in_its_season_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let incoming = root.path().join("Incoming").join("Season 01");
+    fs::create_dir_all(&incoming).unwrap();
+    let source = incoming.join("Example.Show.S01E02.mkv");
+    fs::write(&source, b"episode").unwrap();
+    fs::write(
+        source.with_extension("tags.xml"),
+        r#"<Tags><Tag>
+            <Simple><Name>SEASON</Name><String>2</String></Simple>
+            <Simple><Name>EPISODE</Name><String>2</String></Simple>
+        </Tag></Tags>"#,
+    )
+    .unwrap();
+
+    let output = run(fixer().arg("--offline").arg("scrape").arg(&source).args([
+        "--kind",
+        "television",
+        "--placement",
+        "copy",
+        "--apply",
+    ]));
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let target = root
+        .path()
+        .join("Example Show")
+        .join("Season 02")
+        .join("Example.Show.S01E02.mkv");
+    assert_eq!(fs::read(target).unwrap(), b"episode");
+    assert!(
+        root.path()
+            .join("Example Show/Season 02/S02E02.nfo")
+            .is_file()
+    );
+    assert!(
+        !root
+            .path()
+            .join("Example Show/Example.Show.S01E02.mkv")
+            .exists()
+    );
+}
+
+#[test]
+fn television_scrape_rejects_roots_with_multiple_series() {
+    let root = tempfile::tempdir().unwrap();
+    let first = root.path().join("First Show").join("Season 01");
+    let second = root.path().join("Second Show").join("Season 01");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    fs::write(first.join("First.Show.S01E01.mkv"), []).unwrap();
+    fs::write(second.join("Second.Show.S01E01.mkv"), []).unwrap();
+
+    let output = run(fixer()
+        .arg("--offline")
+        .arg("scrape")
+        .arg(root.path())
+        .args(["--kind", "television", "--dry-run"]));
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("ambiguous television input: found 2 series")
+    );
+}
+
+#[test]
 fn apply_defaults_to_no_overwrite() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join("source.json"), fixture()).unwrap();
