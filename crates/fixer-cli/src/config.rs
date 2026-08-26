@@ -31,6 +31,10 @@ pub struct Config {
     api_key: Option<String>,
     tmdb_base_url: Option<String>,
     bangumi_base_url: Option<String>,
+    anilist_enabled: bool,
+    anilist_endpoint: Option<String>,
+    anilist_access_token: Option<String>,
+    anilist_source: ConfigSource,
     offline_source: ConfigSource,
     proxy_source: ConfigSource,
     local_root_source: ConfigSource,
@@ -47,6 +51,9 @@ struct FileConfig {
     api_key: Option<String>,
     tmdb_base_url: Option<String>,
     bangumi_base_url: Option<String>,
+    anilist_enabled: Option<bool>,
+    anilist_endpoint: Option<String>,
+    anilist_access_token: Option<String>,
 }
 
 impl Config {
@@ -89,6 +96,21 @@ impl Config {
         );
         let tmdb_base_url = env::var("TMDB_BASE_URL").ok().or(file.tmdb_base_url);
         let bangumi_base_url = env::var("BANGUMI_BASE_URL").ok().or(file.bangumi_base_url);
+        let env_anilist_enabled = env::var("FIXER_ANILIST_ENABLED")
+            .ok()
+            .map(|value| parse_bool("FIXER_ANILIST_ENABLED", &value))
+            .transpose()?;
+        let (anilist_enabled, anilist_source) = if let Some(enabled) = env_anilist_enabled {
+            (enabled, ConfigSource::Environment)
+        } else if let Some(enabled) = file.anilist_enabled {
+            (enabled, ConfigSource::File)
+        } else {
+            (false, ConfigSource::Default)
+        };
+        let anilist_endpoint = env::var("ANILIST_ENDPOINT").ok().or(file.anilist_endpoint);
+        let anilist_access_token = env::var("ANILIST_ACCESS_TOKEN")
+            .ok()
+            .or(file.anilist_access_token);
         Ok(Self {
             offline,
             proxy,
@@ -96,6 +118,10 @@ impl Config {
             api_key,
             tmdb_base_url,
             bangumi_base_url,
+            anilist_enabled,
+            anilist_endpoint,
+            anilist_access_token,
+            anilist_source,
             offline_source,
             proxy_source,
             local_root_source,
@@ -125,9 +151,27 @@ impl Config {
         fixer_provider_bangumi::BangumiProvider::new(config).map_err(AppError::new)
     }
 
+    pub fn anilist_provider(&self) -> AppResult<Option<fixer_provider_anilist::AniListProvider>> {
+        if !self.anilist_enabled {
+            return Ok(None);
+        }
+        let mut config = fixer_provider_anilist::AniListConfig::default();
+        if let Some(endpoint) = &self.anilist_endpoint {
+            config = config.with_endpoint(endpoint).map_err(AppError::new)?;
+        }
+        if let Some(access_token) = &self.anilist_access_token {
+            config = config
+                .with_access_token(access_token.clone())
+                .map_err(AppError::new)?;
+        }
+        fixer_provider_anilist::AniListProvider::new(config)
+            .map(Some)
+            .map_err(AppError::new)
+    }
+
     pub fn validation_summary(&self) -> String {
         format!(
-            "configuration valid\noffline: {} ({})\nproxy: {} ({})\nlocal_root: {} ({})\napi_key: {} ({})\n",
+            "configuration valid\noffline: {} ({})\nproxy: {} ({})\nlocal_root: {} ({})\napi_key: {} ({})\nanilist: {} ({})\n",
             self.offline,
             self.offline_source,
             configured(&self.proxy),
@@ -136,6 +180,12 @@ impl Config {
             self.local_root_source,
             configured(&self.api_key),
             self.api_key_source,
+            if self.anilist_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            self.anilist_source,
         )
     }
 }
@@ -150,6 +200,15 @@ impl fmt::Debug for Config {
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("tmdb_base_url", &self.tmdb_base_url)
             .field("bangumi_base_url", &self.bangumi_base_url)
+            .field("anilist_enabled", &self.anilist_enabled)
+            .field(
+                "anilist_endpoint",
+                &self.anilist_endpoint.as_ref().map(|_| "[CONFIGURED]"),
+            )
+            .field(
+                "anilist_access_token",
+                &self.anilist_access_token.as_ref().map(|_| "[REDACTED]"),
+            )
             .finish()
     }
 }

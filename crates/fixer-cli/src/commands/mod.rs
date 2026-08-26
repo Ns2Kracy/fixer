@@ -28,6 +28,7 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
             println!("local\tmovie,television,anime\toffline");
             println!("tmdb\tmovie,television\tnetwork");
             println!("bangumi\tanime\tnetwork");
+            println!("anilist\tanime\tnetwork,optional");
             Ok(RunStatus::Success)
         }
     }
@@ -49,6 +50,9 @@ pub(crate) fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult
         builder = builder.provider(tmdb);
     }
     builder = builder.provider(config.bangumi_provider()?);
+    if let Some(anilist) = config.anilist_provider()? {
+        builder = builder.provider(anilist);
+    }
     if let Some(proxy) = &config.proxy {
         builder = builder.proxy(proxy.clone());
     }
