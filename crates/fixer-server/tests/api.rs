@@ -77,6 +77,20 @@ async fn method_errors_use_the_same_safe_envelope() {
 }
 
 #[tokio::test]
+async fn unsupported_api_versions_use_the_safe_error_envelope() {
+    let response = app()
+        .oneshot(Request::get("/api/v2/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(response.headers().contains_key("x-request-id"));
+    let body = response_json(response).await;
+    assert_eq!(body["error"]["code"], "not_found");
+    assert_eq!(body["error"]["message"], "API endpoint not found");
+}
+
+#[tokio::test]
 async fn api_errors_are_safe_versioned_envelopes_with_request_ids() {
     let response = app()
         .oneshot(Request::get("/api/v1/missing").body(Body::empty()).unwrap())
