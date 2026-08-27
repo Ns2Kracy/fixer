@@ -1,0 +1,16 @@
+import { QueryClient } from '@tanstack/solid-query'
+
+export function createQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 15_000,
+        retry: 1,
+        refetchOnWindowFocus: false,
+      },
+      mutations: {
+        retry: false,
+      },
+    },
+  })
+}
