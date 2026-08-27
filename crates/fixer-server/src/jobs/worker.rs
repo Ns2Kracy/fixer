@@ -5,7 +5,7 @@ use std::{
 };
 
 use fixer_core::{
-    AnimeSeries, AssetKind, BookWork, Isbn13, LocalizedValue, Movie, MovieRelease,
+    AnimeSeries, AssetKind, BookWork, Isbn13, LocalizedValue, MatchQuery, Movie, MovieRelease,
     MusicReleaseGroup, OutputPlan, ReleaseDate, ReleaseId, Resolved, Series, WorkId,
 };
 use fixer_provider_local::{
@@ -19,7 +19,7 @@ use thiserror::Error;
 use tokio::{sync::watch, task::JoinHandle};
 
 use crate::jobs::{
-    ExecutionTaskRegistry,
+    ExecutionTaskRegistry, artifacts,
     model::{JobInputDto, JobMediaKind, ReviewDecisionDto},
 };
 
@@ -73,27 +73,32 @@ pub(crate) struct ScannedJob {
 pub(crate) enum SearchArtifact {
     Anime {
         search: AnimeSearch,
+        title: String,
         count: u64,
         output_root: PathBuf,
     },
     Book {
         search: BookSearch,
+        title: String,
         count: u64,
         isbn: Option<Isbn13>,
         output_root: PathBuf,
     },
     Movie {
         search: MovieSearch,
+        title: String,
         count: u64,
         output_root: PathBuf,
     },
     Music {
         search: MusicSearch,
+        title: String,
         count: u64,
         output_root: PathBuf,
     },
     Television {
         search: TelevisionSearch,
+        title: String,
         count: u64,
         output_root: PathBuf,
     },
@@ -154,20 +159,22 @@ impl ScannedJob {
         } = self;
         let artifact = match media_kind {
             JobMediaKind::Anime => {
-                let search = fixer.anime(title).search().await?;
+                let search = fixer.anime(title.clone()).search().await?;
                 SearchArtifact::Anime {
+                    title,
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
                 }
             }
             JobMediaKind::Book => {
-                let mut query = fixer.book(title);
+                let mut query = fixer.book(title.clone());
                 if let Some(isbn) = isbn.clone() {
                     query = query.isbn(isbn);
                 }
                 let search = query.search().await?;
                 SearchArtifact::Book {
+                    title,
                     count: count(search.candidates().len())?,
                     search,
                     isbn,
@@ -175,24 +182,27 @@ impl ScannedJob {
                 }
             }
             JobMediaKind::Movie => {
-                let search = fixer.movie(title).search().await?;
+                let search = fixer.movie(title.clone()).search().await?;
                 SearchArtifact::Movie {
+                    title,
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
                 }
             }
             JobMediaKind::Music => {
-                let search = fixer.music(title).search().await?;
+                let search = fixer.music(title.clone()).search().await?;
                 SearchArtifact::Music {
+                    title,
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
                 }
             }
             JobMediaKind::Television => {
-                let search = fixer.television(title).search().await?;
+                let search = fixer.television(title.clone()).search().await?;
                 SearchArtifact::Television {
+                    title,
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
@@ -221,6 +231,38 @@ impl SearchArtifact {
             | Self::Music { count, .. }
             | Self::Television { count, .. } => *count,
         }
+    }
+
+    pub(crate) fn candidate_artifacts(
+        &self,
+    ) -> Result<(Vec<artifacts::CandidateArtifact>, bool), JobFlowError> {
+        let (query, candidates) = match self {
+            Self::Anime { search, title, .. } => (MatchQuery::anime(title), search.candidates()),
+            Self::Book {
+                search,
+                title,
+                isbn,
+                ..
+            } => {
+                let mut query = MatchQuery::book(title);
+                if let Some(isbn) = isbn {
+                    query = query.and_then(|query| {
+                        fixer_core::ExternalId::new("isbn", isbn.as_str())
+                            .map(|external_id| query.with_external_id(external_id))
+                    });
+                }
+                (query, search.candidates())
+            }
+            Self::Movie { search, title, .. } => (MatchQuery::movie(title), search.candidates()),
+            Self::Music { search, title, .. } => (MatchQuery::music(title), search.candidates()),
+            Self::Television { search, title, .. } => {
+                (MatchQuery::television(title), search.candidates())
+            }
+        };
+        artifacts::candidates(
+            &query.map_err(|error| JobFlowError::Matching(error.to_string()))?,
+            candidates,
+        )
     }
 
     pub(crate) async fn resolve_selected(
@@ -276,6 +318,16 @@ impl SearchArtifact {
 }
 
 impl ResolvedArtifact {
+    pub(crate) fn review_diagnostics(&self) -> artifacts::ReviewArtifacts {
+        match self {
+            Self::Anime { resolved, .. } => artifacts::diagnostics(resolved),
+            Self::Book { resolved, .. } => artifacts::diagnostics(resolved),
+            Self::Movie { resolved, .. } => artifacts::diagnostics(resolved),
+            Self::Music { resolved, .. } => artifacts::diagnostics(resolved),
+            Self::Television { resolved, .. } => artifacts::diagnostics(resolved),
+        }
+    }
+
     pub(crate) fn conflict_count(&self) -> Result<u64, JobFlowError> {
         count(match self {
             Self::Anime { resolved, .. } => resolved.conflicts.len(),
@@ -714,6 +766,8 @@ pub enum JobFlowError {
     IndexOverflow,
     #[error("book planning requires an ISBN-13 selected during scan")]
     MissingBookIsbn,
+    #[error("candidate matching failed: {0}")]
+    Matching(String),
     #[error("output planning failed: {0}")]
     Planning(String),
     #[error("reviewed-plan fingerprint failed: {0}")]

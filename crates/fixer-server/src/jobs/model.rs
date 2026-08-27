@@ -177,6 +177,10 @@ impl PlanSummary {
     pub const fn operation_count(&self) -> u64 {
         self.operation_count
     }
+
+    pub const fn requires_confirmation(&self) -> bool {
+        self.requires_confirmation
+    }
 }
 
 /// Versioned execution counts persisted without filesystem payloads.

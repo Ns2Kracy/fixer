@@ -822,6 +822,8 @@ async fn malformed_requests_and_methods_use_safe_error_envelopes() {
     for (method, uri, allow) in [
         (Method::PUT, "/api/v1/jobs", "GET, HEAD, POST"),
         (Method::POST, "/api/v1/jobs/99", "GET, HEAD"),
+        (Method::PUT, "/api/v1/jobs/99/review", "GET, HEAD, POST"),
+        (Method::POST, "/api/v1/jobs/99/plan", "GET, HEAD"),
         (Method::GET, "/api/v1/jobs/99/cancel", "POST"),
         (Method::POST, "/api/v1/jobs/99/events", "GET, HEAD"),
     ] {
@@ -1035,4 +1037,106 @@ async fn retry_requeues_only_interrupted_jobs_and_wakes_workers() {
     );
     wait_for_state(&router, 1, "awaiting_confirmation").await;
     workers.shutdown().await;
+}
+
+#[tokio::test]
+async fn review_and_plan_details_reconstruct_bounded_server_owned_artifacts() {
+    let directory = tempfile::tempdir().unwrap();
+    let media = directory.path().join("Fixture Movie.mkv");
+    std::fs::write(&media, b"fixture").unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+    create_apply_job(&router, &media).await;
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+
+    let response = send(
+        &router,
+        Request::get("/api/v1/jobs/1/review")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let details = response_json(response).await;
+    assert_eq!(details["schema_version"], 1);
+    assert_eq!(details["job_id"], 1);
+    assert_eq!(details["selected_candidate_index"], 0);
+    assert_eq!(details["candidates"].as_array().unwrap().len(), 1);
+    assert_eq!(details["candidates"][0]["index"], 0);
+    assert_eq!(details["candidates"][0]["media_kind"], "movie");
+    assert_eq!(details["candidates"][0]["provider"], "fixture.worker");
+    assert_eq!(
+        details["candidates"][0]["external_id"]["namespace"],
+        "fixture.worker"
+    );
+    assert_eq!(details["candidates"][0]["title"], "Fixture Movie");
+    assert!(details["candidates"][0]["score"].as_i64().is_some());
+    assert!(
+        !details["candidates"][0]["evidence"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(details["warnings"].is_array());
+    assert!(details["conflicts"].is_array());
+
+    let response = send(
+        &router,
+        Request::get("/api/v1/jobs/1/review?candidate_index=9")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response_json(response).await["error"]["details"]["candidate_index"],
+        "must identify an available candidate"
+    );
+
+    review_job(&router, 1).await;
+    let response = send(
+        &router,
+        Request::get("/api/v1/jobs/1/plan")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let plan = response_json(response).await;
+    assert_eq!(plan["schema_version"], 1);
+    assert_eq!(plan["job_id"], 1);
+    assert_eq!(
+        plan["output_root"],
+        directory.path().to_string_lossy().as_ref()
+    );
+    assert_eq!(plan["operations"].as_array().unwrap().len(), 1);
+    assert_eq!(plan["operations"][0]["index"], 0);
+    assert_eq!(plan["operations"][0]["kind"], "write");
+    assert_eq!(plan["operations"][0]["target"], "movie.json");
+    assert!(plan["operations"][0]["source"].is_null());
+    assert!(plan["operations"][0]["content_bytes"].as_u64().unwrap() > 0);
+    assert!(plan["requires_approval"].as_bool().unwrap());
+
+    workers.shutdown().await;
+}
+
+#[tokio::test]
+async fn artifact_details_require_the_corresponding_review_state() {
+    let app = TestApp::new(8).await;
+    assert_eq!(app.create_movie_job().await.status(), StatusCode::ACCEPTED);
+    for uri in ["/api/v1/jobs/1/review", "/api/v1/jobs/1/plan"] {
+        let response = app
+            .request(Request::get(uri).body(Body::empty()).unwrap())
+            .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response_json(response).await["error"]["code"],
+            "job_state_conflict"
+        );
+    }
 }

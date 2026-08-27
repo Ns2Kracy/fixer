@@ -16,6 +16,7 @@ use crate::{
     api::error::ApiError,
     jobs::{
         JobRuntime, RuntimeError,
+        artifacts::{CandidateArtifact, ConflictArtifact, OperationArtifact, WarningArtifact},
         model::{
             ExecutionSummary, JobInputDto, JobMediaKind, JobState, PlanSummary, ProgressSummary,
             ReviewDecisionDto, ReviewSummary,
@@ -32,7 +33,11 @@ pub(crate) fn router(runtime: JobRuntime) -> Router {
         .route("/jobs/{id}", get(get_job).fallback(get_only))
         .route("/jobs/{id}/cancel", post(cancel).fallback(post_only))
         .route("/jobs/{id}/retry", post(retry).fallback(post_only))
-        .route("/jobs/{id}/review", post(review).fallback(post_only))
+        .route(
+            "/jobs/{id}/review",
+            get(review_details).post(review).fallback(get_or_post_only),
+        )
+        .route("/jobs/{id}/plan", get(plan_details).fallback(get_only))
         .route("/jobs/{id}/execute", post(execute).fallback(post_only))
         .route("/jobs/{id}/events", get(events).fallback(get_only))
         .with_state(runtime)
@@ -66,6 +71,12 @@ struct ListJobsQuery {
     state: Option<JobState>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewDetailsQuery {
+    candidate_index: Option<u64>,
+}
+
 #[derive(Debug, Serialize)]
 struct JobListEnvelope {
     schema_version: u8,
@@ -77,6 +88,29 @@ struct JobListEnvelope {
 struct JobEnvelope {
     schema_version: u8,
     job: JobDto,
+}
+
+#[derive(Debug, Serialize)]
+struct ReviewDetailsEnvelope {
+    schema_version: u8,
+    job_id: i64,
+    selected_candidate_index: u64,
+    candidates: Vec<CandidateArtifact>,
+    candidates_truncated: bool,
+    warnings: Vec<WarningArtifact>,
+    warnings_truncated: bool,
+    conflicts: Vec<ConflictArtifact>,
+    conflicts_truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct PlanDetailsEnvelope {
+    schema_version: u8,
+    job_id: i64,
+    output_root: String,
+    operations: Vec<OperationArtifact>,
+    operations_truncated: bool,
+    requires_approval: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +175,50 @@ async fn get_job(
     let id = extract_id(path)?;
     let job = runtime.get(id).await.map_err(map_runtime_error)?;
     Ok(Json(envelope(job)))
+}
+
+async fn review_details(
+    State(runtime): State<JobRuntime>,
+    path: Result<Path<i64>, PathRejection>,
+    query: Result<Query<ReviewDetailsQuery>, QueryRejection>,
+) -> Result<Json<ReviewDetailsEnvelope>, ApiError> {
+    let id = extract_id(path)?;
+    let Query(query) =
+        query.map_err(|_| invalid_input("candidate_index", "must be a non-negative integer"))?;
+    let (details, selected_candidate_index) = runtime
+        .review_artifacts(id, query.candidate_index)
+        .await
+        .map_err(map_runtime_error)?;
+    Ok(Json(ReviewDetailsEnvelope {
+        schema_version: SCHEMA_VERSION,
+        job_id: id.get(),
+        selected_candidate_index,
+        candidates: details.candidates,
+        candidates_truncated: details.candidates_truncated,
+        warnings: details.warnings,
+        warnings_truncated: details.warnings_truncated,
+        conflicts: details.conflicts,
+        conflicts_truncated: details.conflicts_truncated,
+    }))
+}
+
+async fn plan_details(
+    State(runtime): State<JobRuntime>,
+    path: Result<Path<i64>, PathRejection>,
+) -> Result<Json<PlanDetailsEnvelope>, ApiError> {
+    let id = extract_id(path)?;
+    let (details, requires_approval) = runtime
+        .plan_artifacts(id)
+        .await
+        .map_err(map_runtime_error)?;
+    Ok(Json(PlanDetailsEnvelope {
+        schema_version: SCHEMA_VERSION,
+        job_id: id.get(),
+        output_root: details.output_root,
+        operations: details.operations,
+        operations_truncated: details.operations_truncated,
+        requires_approval,
+    }))
 }
 
 async fn retry(
@@ -335,6 +413,12 @@ fn map_runtime_error(error: RuntimeError) -> ApiError {
             StatusCode::CONFLICT,
             "job_state_conflict",
             "Job cannot be reviewed in its current state",
+            Some(BTreeMap::from([("state".to_owned(), state.to_string())])),
+        ),
+        RuntimeError::ArtifactConflict(state) => ApiError::new(
+            StatusCode::CONFLICT,
+            "job_state_conflict",
+            "Job artifacts are not available in its current state",
             Some(BTreeMap::from([("state".to_owned(), state.to_string())])),
         ),
         RuntimeError::ExecutionConflict(state) => ApiError::new(

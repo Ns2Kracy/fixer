@@ -1,3 +1,4 @@
+pub(crate) mod artifacts;
 pub(crate) mod events;
 pub mod model;
 mod worker;
@@ -226,6 +227,71 @@ impl JobRuntime {
         self.publish_transition(&job)?;
         self.wake_workers.notify_waiters();
         Ok(job)
+    }
+
+    pub(crate) async fn review_artifacts(
+        &self,
+        id: JobId,
+        candidate_index: Option<u64>,
+    ) -> Result<(artifacts::ReviewArtifacts, u64), RuntimeError> {
+        let job = self.store.get_job(id).await?;
+        if job.review().is_none() {
+            return Err(RuntimeError::ArtifactConflict(job.state()));
+        }
+        let flow = self
+            .request_flow
+            .get()
+            .ok_or(RuntimeError::WorkerFlowUnavailable)?;
+        let search = flow.scan(job.input()).await?.search().await?;
+        let (candidates, candidates_truncated) = search.candidate_artifacts()?;
+        let selected_index = candidate_index.unwrap_or_else(|| {
+            job.review_decision()
+                .map_or(0, ReviewDecisionDto::candidate_index)
+        });
+        let resolved = search.resolve_selected(selected_index).await?;
+        let mut details = resolved.review_diagnostics();
+        details.candidates = candidates;
+        details.candidates_truncated = candidates_truncated;
+        Ok((details, selected_index))
+    }
+
+    pub(crate) async fn plan_artifacts(
+        &self,
+        id: JobId,
+    ) -> Result<(artifacts::PlanArtifacts, bool), RuntimeError> {
+        let job = self.store.get_job(id).await?;
+        let Some(decision) = job.review_decision() else {
+            return Err(RuntimeError::ArtifactConflict(job.state()));
+        };
+        let Some(summary) = job.plan() else {
+            return Err(RuntimeError::ArtifactConflict(job.state()));
+        };
+        let flow = self
+            .request_flow
+            .get()
+            .ok_or(RuntimeError::WorkerFlowUnavailable)?;
+        let search = flow.scan(job.input()).await?.search().await?;
+        let resolved = search.resolve_selected(decision.candidate_index()).await?;
+        let conflict_count = resolved.conflict_count()?;
+        let expected = (0..conflict_count).collect::<Vec<_>>();
+        if decision.accepted_conflict_indexes() != expected {
+            return Err(RuntimeError::ConflictAcknowledgementMismatch {
+                expected: conflict_count,
+            });
+        }
+        let plan = resolved.plan()?;
+        let fingerprint = resolved.plan_fingerprint(decision, &plan)?;
+        let operation_count =
+            u64::try_from(plan.operations().len()).map_err(|_| RuntimeError::CountOverflow)?;
+        if operation_count != summary.operation_count()
+            || summary.fingerprint() != Some(fingerprint.as_str())
+        {
+            return Err(RuntimeError::StalePlan);
+        }
+        if let Some(policy) = &self.fs_policy {
+            policy.validate_plan(&plan)?;
+        }
+        Ok((artifacts::plan(&plan)?, summary.requires_confirmation()))
     }
 
     pub(crate) async fn cancel(&self, id: JobId) -> Result<JobRecord, RuntimeError> {
@@ -739,6 +805,8 @@ pub(crate) enum RuntimeError {
     CancellationConflict(JobState),
     #[error("job in state {0} cannot be reviewed")]
     ReviewConflict(JobState),
+    #[error("job in state {0} has no reconstructable review or plan artifacts")]
+    ArtifactConflict(JobState),
     #[error("job in state {0} cannot be executed")]
     ExecutionConflict(JobState),
     #[error("all resolved conflicts must be acknowledged; expected {expected} indexes")]
