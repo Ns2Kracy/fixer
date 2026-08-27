@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, num::NonZeroI64};
 use axum::{
     Json, Router,
     extract::{
-        Path, State,
-        rejection::{JsonRejection, PathRejection},
+        Path, Query, State,
+        rejection::{JsonRejection, PathRejection, QueryRejection},
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response, Sse},
@@ -28,9 +28,10 @@ const SCHEMA_VERSION: u8 = 1;
 
 pub(crate) fn router(runtime: JobRuntime) -> Router {
     Router::new()
-        .route("/jobs", post(create).fallback(post_only))
+        .route("/jobs", get(list).post(create).fallback(get_or_post_only))
         .route("/jobs/{id}", get(get_job).fallback(get_only))
         .route("/jobs/{id}/cancel", post(cancel).fallback(post_only))
+        .route("/jobs/{id}/retry", post(retry).fallback(post_only))
         .route("/jobs/{id}/review", post(review).fallback(post_only))
         .route("/jobs/{id}/execute", post(execute).fallback(post_only))
         .route("/jobs/{id}/events", get(events).fallback(get_only))
@@ -56,6 +57,20 @@ struct ReviewRequest {
 #[serde(deny_unknown_fields)]
 struct ExecuteRequest {
     approved: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListJobsQuery {
+    limit: Option<usize>,
+    state: Option<JobState>,
+}
+
+#[derive(Debug, Serialize)]
+struct JobListEnvelope {
+    schema_version: u8,
+    jobs: Vec<JobDto>,
+    has_more: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,12 +111,44 @@ async fn create(
     Ok((StatusCode::ACCEPTED, Json(envelope(job))))
 }
 
+async fn list(
+    State(runtime): State<JobRuntime>,
+    query: Result<Query<ListJobsQuery>, QueryRejection>,
+) -> Result<Json<JobListEnvelope>, ApiError> {
+    let Query(query) =
+        query.map_err(|_| invalid_input("query", "must contain a valid limit and job state"))?;
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(invalid_input("limit", "must be between 1 and 100"));
+    }
+    let mut jobs = runtime
+        .list(limit + 1, query.state)
+        .await
+        .map_err(map_runtime_error)?;
+    let has_more = jobs.len() > limit;
+    jobs.truncate(limit);
+    Ok(Json(JobListEnvelope {
+        schema_version: SCHEMA_VERSION,
+        jobs: jobs.into_iter().map(job_dto).collect(),
+        has_more,
+    }))
+}
+
 async fn get_job(
     State(runtime): State<JobRuntime>,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<JobEnvelope>, ApiError> {
     let id = extract_id(path)?;
     let job = runtime.get(id).await.map_err(map_runtime_error)?;
+    Ok(Json(envelope(job)))
+}
+
+async fn retry(
+    State(runtime): State<JobRuntime>,
+    path: Result<Path<i64>, PathRejection>,
+) -> Result<Json<JobEnvelope>, ApiError> {
+    let id = extract_id(path)?;
+    let job = runtime.retry(id).await.map_err(map_runtime_error)?;
     Ok(Json(envelope(job)))
 }
 
@@ -180,6 +227,10 @@ async fn post_only() -> Response {
     method_not_allowed("POST")
 }
 
+async fn get_or_post_only() -> Response {
+    method_not_allowed("GET, HEAD, POST")
+}
+
 async fn get_only() -> Response {
     method_not_allowed("GET, HEAD")
 }
@@ -244,18 +295,22 @@ fn event_cursor(headers: &HeaderMap) -> Result<Option<&str>, ApiError> {
 fn envelope(job: JobRecord) -> JobEnvelope {
     JobEnvelope {
         schema_version: SCHEMA_VERSION,
-        job: JobDto {
-            id: job.id().get(),
-            input: job.input().clone(),
-            state: job.state(),
-            progress: job.progress().cloned(),
-            review: job.review().copied(),
-            review_decision: job.review_decision().cloned(),
-            plan: job.plan().cloned(),
-            execution: job.execution().copied(),
-            created_at_ms: job.created_at_ms(),
-            updated_at_ms: job.updated_at_ms(),
-        },
+        job: job_dto(job),
+    }
+}
+
+fn job_dto(job: JobRecord) -> JobDto {
+    JobDto {
+        id: job.id().get(),
+        input: job.input().clone(),
+        state: job.state(),
+        progress: job.progress().cloned(),
+        review: job.review().copied(),
+        review_decision: job.review_decision().cloned(),
+        plan: job.plan().cloned(),
+        execution: job.execution().copied(),
+        created_at_ms: job.created_at_ms(),
+        updated_at_ms: job.updated_at_ms(),
     }
 }
 

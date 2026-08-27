@@ -820,7 +820,7 @@ async fn malformed_requests_and_methods_use_safe_error_envelopes() {
     }
 
     for (method, uri, allow) in [
-        (Method::GET, "/api/v1/jobs", "POST"),
+        (Method::PUT, "/api/v1/jobs", "GET, HEAD, POST"),
         (Method::POST, "/api/v1/jobs/99", "GET, HEAD"),
         (Method::GET, "/api/v1/jobs/99/cancel", "POST"),
         (Method::POST, "/api/v1/jobs/99/events", "GET, HEAD"),
@@ -916,4 +916,123 @@ async fn a_new_runtime_seeds_persisted_jobs_and_keeps_the_subscription_live() {
 
     let cancelled = next_sse_frame(&mut body).await;
     assert!(cancelled.contains(r#""state":"cancelled""#), "{cancelled}");
+}
+
+#[tokio::test]
+async fn list_jobs_is_bounded_newest_first_and_filters_by_state() {
+    let app = TestApp::new(16).await;
+    for path in ["/media/First.mkv", "/media/Second.mkv", "/media/Third.mkv"] {
+        let response = app
+            .request(
+                Request::post("/api/v1/jobs")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "media_kind": "movie",
+                            "input_path": path,
+                            "apply": false
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+    let cancelled = app
+        .request(
+            Request::post("/api/v1/jobs/2/cancel")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(cancelled.status(), StatusCode::OK);
+
+    let response = app
+        .request(
+            Request::get("/api/v1/jobs?limit=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["jobs"].as_array().unwrap().len(), 2);
+    assert_eq!(body["jobs"][0]["id"], 3);
+    assert_eq!(body["jobs"][1]["id"], 2);
+    assert_eq!(body["has_more"], true);
+
+    let response = app
+        .request(
+            Request::get("/api/v1/jobs?state=cancelled")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["jobs"].as_array().unwrap().len(), 1);
+    assert_eq!(body["jobs"][0]["id"], 2);
+
+    for uri in [
+        "/api/v1/jobs?limit=0",
+        "/api/v1/jobs?limit=101",
+        "/api/v1/jobs?state=unknown",
+    ] {
+        let response = app
+            .request(Request::get(uri).body(Body::empty()).unwrap())
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await["error"]["code"],
+            "invalid_input"
+        );
+    }
+}
+
+#[tokio::test]
+async fn retry_requeues_only_interrupted_jobs_and_wakes_workers() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(16));
+    let provider = PanicsOnceProvider {
+        inner: fixture_provider(Duration::ZERO),
+        panicked: AtomicBool::new(false),
+    };
+    let fixer = Fixer::builder()
+        .provider(provider)
+        .offline()
+        .build()
+        .unwrap();
+    let workers = runtime.start_workers(capacity(1), SdkJobFlow::new(fixer));
+    let router = job_app(runtime);
+    create_job(&router, "/media/Retry Movie.mkv").await;
+    wait_for_state(&router, 1, "interrupted").await;
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/jobs/1/retry")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["job"]["state"], "queued");
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/jobs/1/retry")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(response).await["error"]["code"],
+        "job_state_conflict"
+    );
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+    workers.shutdown().await;
 }

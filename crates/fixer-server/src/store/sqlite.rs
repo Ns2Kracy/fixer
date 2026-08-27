@@ -234,6 +234,30 @@ impl SqliteJobStore {
         decode_record(&row)
     }
 
+    pub async fn list_jobs(
+        &self,
+        limit: usize,
+        state: Option<JobState>,
+    ) -> Result<Vec<JobRecord>, StoreError> {
+        let limit = i64::try_from(limit).map_err(|_| {
+            StoreError::CorruptRecord("job list limit exceeds SQLite range".to_owned())
+        })?;
+        let rows = if let Some(state) = state {
+            let sql = format!(
+                "SELECT {RECORD_COLUMNS} FROM jobs WHERE state = ? ORDER BY id DESC LIMIT ?"
+            );
+            sqlx::query(&sql)
+                .bind(state.to_string())
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+        } else {
+            let sql = format!("SELECT {RECORD_COLUMNS} FROM jobs ORDER BY id DESC LIMIT ?");
+            sqlx::query(&sql).bind(limit).fetch_all(&self.pool).await?
+        };
+        rows.iter().map(decode_record).collect()
+    }
+
     pub async fn transition(
         &self,
         id: JobId,

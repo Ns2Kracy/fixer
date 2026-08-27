@@ -204,6 +204,30 @@ impl JobRuntime {
         self.store.get_job(id).await.map_err(Into::into)
     }
 
+    pub(crate) async fn list(
+        &self,
+        limit: usize,
+        state: Option<JobState>,
+    ) -> Result<Vec<JobRecord>, RuntimeError> {
+        self.store.list_jobs(limit, state).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn retry(&self, id: JobId) -> Result<JobRecord, RuntimeError> {
+        let _operation = self.operations.lock().await;
+        let job = self
+            .store
+            .transition(
+                id,
+                JobState::Interrupted,
+                JobState::Queued,
+                JobUpdate::default().with_progress(ProgressSummary::new("queued", 0, None)),
+            )
+            .await?;
+        self.publish_transition(&job)?;
+        self.wake_workers.notify_waiters();
+        Ok(job)
+    }
+
     pub(crate) async fn cancel(&self, id: JobId) -> Result<JobRecord, RuntimeError> {
         let _operation = self.operations.lock().await;
         let job = self.store.get_job(id).await?;
