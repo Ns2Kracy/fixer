@@ -10,6 +10,11 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LibraryRouteImport } from './routes/library'
+import { Route as ProvidersRouteImport } from './routes/providers'
+import { Route as SearchRouteImport } from './routes/search'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as JobsJobIdIndexRouteImport } from './routes/jobs/$jobId/index'
 import { Route as JobsJobIdPlanRouteImport } from './routes/jobs/$jobId/plan'
@@ -18,6 +23,31 @@ import { Route as JobsJobIdReviewRouteImport } from './routes/jobs/$jobId/review
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LibraryRoute = LibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProvidersRoute = ProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TemplatesRoute = TemplatesRouteImport.update({
+  id: '/templates',
+  path: '/templates',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JobsIndexRoute = JobsIndexRouteImport.update({
@@ -43,6 +73,11 @@ const JobsJobIdReviewRoute = JobsJobIdReviewRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/library': typeof LibraryRoute
+  '/providers': typeof ProvidersRoute
+  '/search': typeof SearchRoute
+  '/settings': typeof SettingsRoute
+  '/templates': typeof TemplatesRoute
   '/jobs/': typeof JobsIndexRoute
   '/jobs/$jobId/plan': typeof JobsJobIdPlanRoute
   '/jobs/$jobId/review': typeof JobsJobIdReviewRoute
@@ -50,6 +85,11 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/library': typeof LibraryRoute
+  '/providers': typeof ProvidersRoute
+  '/search': typeof SearchRoute
+  '/settings': typeof SettingsRoute
+  '/templates': typeof TemplatesRoute
   '/jobs': typeof JobsIndexRoute
   '/jobs/$jobId/plan': typeof JobsJobIdPlanRoute
   '/jobs/$jobId/review': typeof JobsJobIdReviewRoute
@@ -58,6 +98,11 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/library': typeof LibraryRoute
+  '/providers': typeof ProvidersRoute
+  '/search': typeof SearchRoute
+  '/settings': typeof SettingsRoute
+  '/templates': typeof TemplatesRoute
   '/jobs/': typeof JobsIndexRoute
   '/jobs/$jobId/plan': typeof JobsJobIdPlanRoute
   '/jobs/$jobId/review': typeof JobsJobIdReviewRoute
@@ -67,16 +112,35 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/library'
+    | '/providers'
+    | '/search'
+    | '/settings'
+    | '/templates'
     | '/jobs/'
     | '/jobs/$jobId/plan'
     | '/jobs/$jobId/review'
     | '/jobs/$jobId/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    '/' | '/jobs' | '/jobs/$jobId/plan' | '/jobs/$jobId/review' | '/jobs/$jobId'
+    | '/'
+    | '/library'
+    | '/providers'
+    | '/search'
+    | '/settings'
+    | '/templates'
+    | '/jobs'
+    | '/jobs/$jobId/plan'
+    | '/jobs/$jobId/review'
+    | '/jobs/$jobId'
   id:
     | '__root__'
     | '/'
+    | '/library'
+    | '/providers'
+    | '/search'
+    | '/settings'
+    | '/templates'
     | '/jobs/'
     | '/jobs/$jobId/plan'
     | '/jobs/$jobId/review'
@@ -85,6 +149,11 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LibraryRoute: typeof LibraryRoute
+  ProvidersRoute: typeof ProvidersRoute
+  SearchRoute: typeof SearchRoute
+  SettingsRoute: typeof SettingsRoute
+  TemplatesRoute: typeof TemplatesRoute
   JobsIndexRoute: typeof JobsIndexRoute
   JobsJobIdPlanRoute: typeof JobsJobIdPlanRoute
   JobsJobIdReviewRoute: typeof JobsJobIdReviewRoute
@@ -98,6 +167,41 @@ declare module '@tanstack/solid-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/library': {
+      id: '/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof LibraryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/providers': {
+      id: '/providers'
+      path: '/providers'
+      fullPath: '/providers'
+      preLoaderRoute: typeof ProvidersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/templates': {
+      id: '/templates'
+      path: '/templates'
+      fullPath: '/templates'
+      preLoaderRoute: typeof TemplatesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/jobs/': {
@@ -133,6 +237,11 @@ declare module '@tanstack/solid-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LibraryRoute: LibraryRoute,
+  ProvidersRoute: ProvidersRoute,
+  SearchRoute: SearchRoute,
+  SettingsRoute: SettingsRoute,
+  TemplatesRoute: TemplatesRoute,
   JobsIndexRoute: JobsIndexRoute,
   JobsJobIdPlanRoute: JobsJobIdPlanRoute,
   JobsJobIdReviewRoute: JobsJobIdReviewRoute,

@@ -4,6 +4,11 @@ import type { JSX } from "@solidjs/web";
 const navigation = [
   { to: "/", label: "Workspace", marker: "01" },
   { to: "/jobs", label: "Jobs", marker: "02" },
+  { to: "/search", label: "Search", marker: "03" },
+  { to: "/library", label: "Library", marker: "04" },
+  { to: "/providers", label: "Providers", marker: "05" },
+  { to: "/settings", label: "Settings", marker: "06" },
+  { to: "/templates", label: "Templates", marker: "07" },
 ] as const;
 
 export function AppShell(): JSX.Element {
