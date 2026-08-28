@@ -1,7 +1,10 @@
 import { Link, Outlet } from '@tanstack/solid-router'
 import type { JSX } from '@solidjs/web'
 
-const navigation = [{ to: '/', label: 'Workspace', marker: '01' }] as const
+const navigation = [
+  { to: '/', label: 'Workspace', marker: '01' },
+  { to: '/jobs', label: 'Jobs', marker: '02' },
+] as const
 
 export function AppShell(): JSX.Element {
   let main!: HTMLElement

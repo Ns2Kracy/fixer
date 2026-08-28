@@ -10,6 +10,7 @@ export default defineConfig({
       routesDirectory: './src/routes',
       generatedRouteTree: './src/routeTree.gen.ts',
       autoCodeSplitting: true,
+      routeFileIgnorePattern: '\\.test\\.tsx$',
     }),
     solid(),
     tailwindcss(),
