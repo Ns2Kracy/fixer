@@ -7,6 +7,7 @@ mod fs_policy;
 pub mod jobs;
 mod network_policy;
 pub mod store;
+mod workspace;
 
 use std::{
     env, fmt,
@@ -15,13 +16,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use app::{app, job_app, secure_job_app};
+pub use app::{app, job_app, secure_job_app, secure_workspace_app, workspace_app};
 pub use auth::{AuthConfigError, AuthState, ClientIp};
 pub use fs_policy::{FsPolicy, FsPolicyError};
 pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
 pub use network_policy::{TrustedProxyError, TrustedProxyPolicy};
 pub use store::SqliteJobStore;
 use thiserror::Error;
+pub use workspace::{WorkspaceState, WorkspaceStateError};
 
 const DEFAULT_BIND_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 3000);
@@ -289,6 +291,8 @@ pub enum ServeError {
     Password(#[from] auth::password::PasswordError),
     #[error("password hashing worker failed: {0}")]
     PasswordTask(#[from] tokio::task::JoinError),
+    #[error("workspace initialization failed: {0}")]
+    Workspace(#[from] WorkspaceStateError),
     #[error("server I/O failed: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -311,6 +315,7 @@ pub async fn serve(config: ServerConfig) -> Result<(), ServeError> {
         .media_policy
         .clone()
         .expect("validated production configuration has media roots");
+    let workspace_state = WorkspaceState::new(fs_policy.roots())?;
     let runtime = JobRuntime::new(store.clone(), DEFAULT_EVENT_CAPACITY).with_fs_policy(fs_policy);
     let auth_state = AuthState::new(store)
         .with_secure_cookie(config.https_termination)
@@ -319,7 +324,7 @@ pub async fn serve(config: ServerConfig) -> Result<(), ServeError> {
         .with_trusted_proxy_policy(config.trusted_proxy_policy.clone());
     let listener = tokio::net::TcpListener::bind(config.bind_addr()).await?;
     let workers = runtime.start_local_workers(DEFAULT_WORKER_COUNT);
-    let application = secure_job_app(runtime, auth_state);
+    let application = secure_workspace_app(runtime, auth_state, workspace_state);
     let serve_result = axum::serve(
         listener,
         application.into_make_service_with_connect_info::<SocketAddr>(),

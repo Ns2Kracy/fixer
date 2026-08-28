@@ -155,7 +155,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use fixer_server::{AuthState, JobRuntime, secure_job_app};
+use fixer_server::{AuthState, JobRuntime, WorkspaceState, secure_workspace_app};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::num::NonZeroUsize;
@@ -173,7 +173,8 @@ async fn secure_app(secure_cookie: bool) -> (tempfile::TempDir, SqliteJobStore, 
         .with_secure_cookie(secure_cookie)
         .with_allowed_origins(["https://fixer.example"])
         .unwrap();
-    (root, store, secure_job_app(runtime, auth))
+    let workspace = WorkspaceState::new([root.path()]).unwrap();
+    (root, store, secure_workspace_app(runtime, auth, workspace))
 }
 
 async fn json_body(response: axum::response::Response) -> Value {
@@ -266,6 +267,61 @@ async fn login_sets_strict_http_only_cookie_and_protects_api_routes() {
         .await
         .unwrap();
     assert_eq!(authorized.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn workspace_routes_require_authentication_and_csrf() {
+    let (_root, _store, router) = secure_app(false).await;
+
+    let unauthorized = router
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/settings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let (cookie, csrf) = login(&router).await;
+    let settings = router
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/settings")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(settings.status(), StatusCode::OK);
+
+    let missing_csrf = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/providers/local/test")
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing_csrf.status(), StatusCode::FORBIDDEN);
+
+    let accepted = router
+        .oneshot(
+            Request::post("/api/v1/providers/local/test")
+                .header(header::COOKIE, cookie)
+                .header("x-csrf-token", csrf)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
 }
 
 #[tokio::test]

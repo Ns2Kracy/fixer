@@ -41,6 +41,31 @@ pub struct TemplateContext {
     values: BTreeMap<String, String>,
 }
 impl TemplateContext {
+    /// Builds a bounded context for validating and previewing templates without writing.
+    pub fn preview(
+        title: impl Into<String>,
+        id: impl Into<String>,
+        year: Option<u16>,
+        edition: Option<String>,
+    ) -> Result<Self, TemplateError> {
+        let title = title.into();
+        let id = id.into();
+        if title.is_empty() {
+            return Err(TemplateError::MissingVariable("title".to_owned()));
+        }
+        if id.is_empty() {
+            return Err(TemplateError::MissingVariable("id".to_owned()));
+        }
+        let mut values = BTreeMap::from([("title".to_owned(), title), ("id".to_owned(), id)]);
+        if let Some(year) = year {
+            values.insert("year".to_owned(), year.to_string());
+        }
+        if let Some(edition) = edition {
+            values.insert("edition".to_owned(), edition);
+        }
+        Ok(Self { values })
+    }
+
     /// Projects a resolved movie through an ordered locale preference.
     pub fn movie<I, S>(resolved: &Resolved<Movie>, languages: I) -> Result<Self, TemplateError>
     where

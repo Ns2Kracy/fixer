@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 fixer-core = { path = "../fixer-core" }
+fixer-http = { path = "../fixer-http" }
 fixer-provider-local = { path = "../fixer-provider-local" }
 fixer-sdk = { path = "../fixer-sdk" }
 fixer-writer-local = { path = "../fixer-writer-local" }
@@ -16,6 +17,7 @@ base64.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
 ipnet.workspace = true
+language-tags.workspace = true
 fs2.workspace = true
 same-file.workspace = true
 serde.workspace = true
