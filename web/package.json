@@ -14,6 +14,8 @@
     "routes:generate": "vite build --mode route-generation",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium",
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
@@ -23,6 +25,7 @@
     "solid-js": "2.0.0-rc.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@solidjs/vite-plugin": "3.0.0-next.34",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/router-plugin": "1.168.35",

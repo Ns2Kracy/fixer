@@ -26,6 +26,8 @@ rustc-ice-*.txt
 # Node and web output
 node_modules/
 dist/
+web/test-results/
+web/playwright-report/
 .vite/
 .tanstack/
 .solid/
