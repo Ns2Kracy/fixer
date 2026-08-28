@@ -375,18 +375,21 @@ export interface ApiClientOptions {
   baseUrl?: string
   fetch?: Fetch
   csrfToken?: () => string | undefined
+  csrfTokenChanged?: (token: string | undefined) => void
 }
 
 export class ApiClient {
   readonly #baseUrl: string
   readonly #fetch: Fetch
   readonly #csrfToken: () => string | undefined
+  readonly #csrfTokenChanged: (token: string | undefined) => void
   #issuedCsrfToken: string | undefined
 
   constructor(options: ApiClientOptions = {}) {
     this.#baseUrl = options.baseUrl ?? API_BASE
     this.#fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init))
     this.#csrfToken = options.csrfToken ?? (() => undefined)
+    this.#csrfTokenChanged = options.csrfTokenChanged ?? (() => undefined)
   }
 
   health(): Promise<HealthDto> {
@@ -447,12 +450,14 @@ export class ApiClient {
   async login(request: LoginRequest): Promise<LoginResponse> {
     const response = await this.#request<LoginResponse>('/auth/login', { method: 'POST', body: request })
     this.#issuedCsrfToken = response.csrf_token
+    this.#csrfTokenChanged(response.csrf_token)
     return response
   }
 
   async logout(): Promise<void> {
     await this.#request('/auth/logout', { method: 'POST' })
     this.#issuedCsrfToken = undefined
+    this.#csrfTokenChanged(undefined)
   }
 
   createJob(request: CreateJobRequest): Promise<JobEnvelope> {
@@ -545,4 +550,26 @@ async function readJson<T>(response: Response): Promise<T | undefined> {
   }
 }
 
-export const api = new ApiClient()
+const CSRF_STORAGE_KEY = 'fixer.csrf-token'
+
+function sessionCsrfToken(): string | undefined {
+  try {
+    return globalThis.sessionStorage?.getItem(CSRF_STORAGE_KEY) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+function storeSessionCsrfToken(token: string | undefined): void {
+  try {
+    if (token) globalThis.sessionStorage?.setItem(CSRF_STORAGE_KEY, token)
+    else globalThis.sessionStorage?.removeItem(CSRF_STORAGE_KEY)
+  } catch {
+    // Storage can be unavailable in hardened or non-browser runtimes.
+  }
+}
+
+export const api = new ApiClient({
+  csrfToken: sessionCsrfToken,
+  csrfTokenChanged: storeSessionCsrfToken,
+})

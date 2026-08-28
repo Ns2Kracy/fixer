@@ -780,4 +780,25 @@ textarea {
   .settings-save-bar .button { justify-content: center; }
 }
 
+
+.login-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, .7fr) minmax(300px, 1.3fr);
+  gap: clamp(2rem, 7vw, 7rem);
+  margin-top: 3rem;
+  border-top: 2px solid var(--color-ink);
+  padding: 2.5rem 0;
+}
+.login-panel h2,
+.login-panel p { margin: 0; }
+.login-panel h2 { font: 500 1.65rem var(--font-serif); }
+.login-panel > div > p:last-child { margin-top: .75rem; color: #686961; font-size: .78rem; }
+.login-panel form { display: grid; gap: 1.25rem; align-content: start; }
+.login-panel .button { justify-self: start; }
+
+@media (max-width: 700px) {
+  .login-panel { grid-template-columns: 1fr; }
+  .login-panel .button { justify-self: stretch; justify-content: center; }
+}
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
