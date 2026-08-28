@@ -7,6 +7,7 @@ mod fs_policy;
 pub mod jobs;
 mod network_policy;
 pub mod store;
+mod web;
 mod workspace;
 
 use std::{
@@ -23,6 +24,7 @@ pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
 pub use network_policy::{TrustedProxyError, TrustedProxyPolicy};
 pub use store::SqliteJobStore;
 use thiserror::Error;
+pub use web::web_app;
 pub use workspace::{WorkspaceState, WorkspaceStateError};
 
 const DEFAULT_BIND_ADDR: SocketAddr =
@@ -298,7 +300,7 @@ pub enum ServeError {
 }
 
 /// Opens persistent services, installs every security boundary, binds, and serves.
-pub async fn serve(config: ServerConfig) -> Result<(), ServeError> {
+pub async fn serve(config: ServerConfig, web_root: impl AsRef<Path>) -> Result<(), ServeError> {
     config.validate_for_serve()?;
     let store = SqliteJobStore::open(config.database_path()).await?;
     let password = config
@@ -324,7 +326,10 @@ pub async fn serve(config: ServerConfig) -> Result<(), ServeError> {
         .with_trusted_proxy_policy(config.trusted_proxy_policy.clone());
     let listener = tokio::net::TcpListener::bind(config.bind_addr()).await?;
     let workers = runtime.start_local_workers(DEFAULT_WORKER_COUNT);
-    let application = secure_workspace_app(runtime, auth_state, workspace_state);
+    let application = web_app(
+        secure_workspace_app(runtime, auth_state, workspace_state),
+        web_root,
+    );
     let serve_result = axum::serve(
         listener,
         application.into_make_service_with_connect_info::<SocketAddr>(),
