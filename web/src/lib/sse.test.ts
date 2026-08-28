@@ -58,8 +58,9 @@ describe("connectJobEvents", () => {
     expect(source.url).toBe("/api/v1/jobs/7/events");
     expect(source.withCredentials).toBe(true);
     source.onopen?.(new Event("open"));
-    source.emit("state", { schema_version: 1, job_id: 7, state: "searching" });
     await vi.waitFor(() => expect(reconcile).toHaveBeenCalledTimes(1));
+    source.emit("state", { schema_version: 1, job_id: 7, state: "searching" });
+    await vi.waitFor(() => expect(reconcile).toHaveBeenCalledTimes(2));
 
     expect(onConnectionChange).toHaveBeenCalledWith("connected");
     expect(onEvent).toHaveBeenCalledWith(
@@ -72,6 +73,7 @@ describe("connectJobEvents", () => {
 
     source.onerror?.(new Event("error"));
     expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting");
+    await vi.waitFor(() => expect(reconcile).toHaveBeenCalledTimes(3));
     connection.close();
     expect(source.closed).toBe(true);
   });

@@ -98,10 +98,6 @@ export function connectJobEvents(
   const reconcile = options.reconcile;
 
   options.onConnectionChange?.("connecting");
-  source.onopen = () => options.onConnectionChange?.("connected");
-  source.onerror = () => {
-    if (!closed) options.onConnectionChange?.("reconnecting");
-  };
 
   const requestReconcile = () => {
     if (!reconcile || closed) return;
@@ -119,6 +115,16 @@ export function connectJobEvents(
           requestReconcile();
         }
       });
+  };
+
+  source.onopen = () => {
+    options.onConnectionChange?.("connected");
+    requestReconcile();
+  };
+  source.onerror = () => {
+    if (closed) return;
+    options.onConnectionChange?.("reconnecting");
+    requestReconcile();
   };
 
   const listeners = new Map<string, JobMessageListener>();
