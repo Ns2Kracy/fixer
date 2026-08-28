@@ -17,16 +17,12 @@ test("user reviews a local candidate and approves its bounded write", async ({
   const password = requiredEnvironment("FIXER_E2E_PASSWORD");
   const mediaPath = requiredEnvironment("FIXER_E2E_MEDIA_PATH");
   const outputPath = requiredEnvironment("FIXER_E2E_OUTPUT_PATH");
-  const sourceNames = [
-    "In the Mood for Love (2000).mkv",
-    "movie.nfo",
-  ].sort();
+  const sourceNames = ["In the Mood for Love (2000).mkv", "movie.nfo"].sort();
   const sourceContents = new Map(
     await Promise.all(
-      sourceNames.map(async (name) => [
-        name,
-        await readFile(join(mediaPath, name)),
-      ] as const),
+      sourceNames.map(
+        async (name) => [name, await readFile(join(mediaPath, name))] as const,
+      ),
     ),
   );
   expect((await readdir(mediaPath)).sort()).toEqual(sourceNames);
@@ -118,7 +114,9 @@ test("user reviews a local candidate and approves its bounded write", async ({
   };
   expect(executedBody.job.state).toBe("completed");
   await expect(
-    page.getByText("Execution was accepted. Live progress is available on the job page."),
+    page.getByText(
+      "Execution was accepted. Live progress is available on the job page.",
+    ),
   ).toBeVisible();
 
   expect((await readdir(mediaPath)).sort()).toEqual(

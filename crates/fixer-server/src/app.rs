@@ -1,6 +1,6 @@
 use axum::Router;
 
-use crate::{WorkspaceState, auth::AuthState, jobs::JobRuntime};
+use crate::{auth::AuthState, jobs::JobRuntime, WorkspaceState};
 
 /// Builds the stateless HTTP router without opening a listener.
 pub fn app() -> Router {
@@ -56,16 +56,10 @@ pub fn secure_workspace_app(
 
 fn api_app(v1: Router) -> Router {
     let api = Router::new()
-        .route(
-            "/",
-            axum::routing::any(crate::api::error::not_found),
-        )
+        .route("/", axum::routing::any(crate::api::error::not_found))
         .nest("/v1", v1)
         .fallback(crate::api::error::not_found);
     Router::new()
-        .route(
-            "/api/",
-            axum::routing::any(crate::api::error::not_found),
-        )
+        .route("/api/", axum::routing::any(crate::api::error::not_found))
         .nest("/api", api)
 }

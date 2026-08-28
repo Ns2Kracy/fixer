@@ -2,8 +2,7 @@
 
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL =
-  process.env.FIXER_E2E_BASE_URL ?? "http://127.0.0.1:32145";
+const baseURL = process.env.FIXER_E2E_BASE_URL ?? "http://127.0.0.1:32145";
 const browserChannel = process.env.FIXER_E2E_BROWSER_CHANNEL;
 
 export default defineConfig({
