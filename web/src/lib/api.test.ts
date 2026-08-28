@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiClient, type ApiError } from './api'
+import { ApiClient, type ApiError, type UpdateWorkspaceSettingsRequest } from './api'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -129,6 +129,103 @@ describe('ApiClient', () => {
         credentials: 'same-origin',
         headers: expect.objectContaining({ 'x-csrf-token': 'csrf' }),
       }),
+    )
+  })
+
+  it('requests opaque library/search resources with encoded query parameters', async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ schema_version: 1, roots: [], results: [] }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+    )
+    const client = new ApiClient({ fetch: fetchMock })
+
+    await client.libraryRoots()
+    await client.listLibrary({ rootId: 'root-0', path: 'Books & Audio' })
+    await client.search({
+      mediaKind: 'book',
+      query: 'fixture title',
+      limit: 20,
+    })
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/library/roots',
+      '/api/v1/library?root_id=root-0&path=Books+%26+Audio',
+      '/api/v1/search?media_kind=book&query=fixture+title&limit=20',
+    ])
+  })
+
+  it('updates settings and previews providers/templates through CSRF-protected mutations', async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ schema_version: 1 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    )
+    const client = new ApiClient({
+      fetch: fetchMock,
+      csrfToken: () => 'workspace-csrf',
+    })
+    const settings: UpdateWorkspaceSettingsRequest = {
+      offline: false,
+      proxy: null,
+      preferred_locales: ['ja', 'en'],
+      timeout_seconds: 20,
+      auto_accept_confidence: 0.9,
+      review_confidence: 0.6,
+      output_preset: 'full' as const,
+      placement: 'in_place' as const,
+      conflict_policy: 'review' as const,
+      enabled_providers: ['local', 'tmdb'],
+      provider_endpoints: {
+        tmdb: 'https://api.themoviedb.org/3',
+        bangumi: 'https://api.bgm.tv',
+        anilist: 'https://graphql.anilist.co',
+        musicbrainz: 'https://musicbrainz.org/ws/2',
+        openlibrary: 'https://openlibrary.org',
+        openlibrary_cover: 'https://covers.openlibrary.org/b/',
+      },
+      tmdb_api_token: null,
+      anilist_access_token: null,
+      clear_tmdb_api_token: false,
+      clear_anilist_access_token: false,
+    }
+
+    await client.updateSettings(settings)
+    await client.testProvider('tmdb')
+    await client.previewTemplate({
+      path_template: '{{title|sanitize}}/metadata.json',
+      content_template: 'title={{title}}',
+      sample: { title: 'Fixture', id: 'fixture', year: 2024, edition: null },
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/settings',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: expect.objectContaining({
+          'content-type': 'application/json',
+          'x-csrf-token': 'workspace-csrf',
+        }),
+        body: JSON.stringify(settings),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/providers/tmdb/test',
+      expect.objectContaining({ method: 'POST', body: '{}' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/templates/preview',
+      expect.objectContaining({ method: 'POST' }),
     )
   })
 

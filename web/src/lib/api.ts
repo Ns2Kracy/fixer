@@ -46,6 +46,143 @@ export interface ProvidersDto {
   providers: ProviderDto[]
 }
 
+export type ProviderId =
+  | 'local'
+  | 'tmdb'
+  | 'bangumi'
+  | 'anilist'
+  | 'musicbrainz'
+  | 'openlibrary'
+export type OutputPreset = 'full' | 'metadata'
+export type PlacementPolicy =
+  | 'in_place'
+  | 'symlink'
+  | 'hardlink'
+  | 'copy'
+  | 'reflink'
+export type ConflictPolicy = 'prefer_first' | 'review' | 'error'
+
+export interface ProviderEndpoints {
+  tmdb: string
+  bangumi: string
+  anilist: string
+  musicbrainz: string
+  openlibrary: string
+  openlibrary_cover: string
+}
+
+export interface WorkspaceSettingsBase {
+  offline: boolean
+  proxy: string | null
+  preferred_locales: string[]
+  timeout_seconds: number
+  auto_accept_confidence: number
+  review_confidence: number
+  output_preset: OutputPreset
+  placement: PlacementPolicy
+  conflict_policy: ConflictPolicy
+  enabled_providers: ProviderId[]
+  provider_endpoints: ProviderEndpoints
+}
+
+export interface SecretStatus {
+  tmdb_api_token_configured: boolean
+  anilist_access_token_configured: boolean
+}
+
+export interface WorkspaceSettings extends WorkspaceSettingsBase {
+  secrets: SecretStatus
+}
+
+export interface UpdateWorkspaceSettingsRequest extends WorkspaceSettingsBase {
+  tmdb_api_token: string | null
+  anilist_access_token: string | null
+  clear_tmdb_api_token: boolean
+  clear_anilist_access_token: boolean
+}
+
+export interface SettingsEnvelope {
+  schema_version: SchemaVersion
+  settings: WorkspaceSettings
+}
+
+export interface RootSummary {
+  id: string
+  label: string
+}
+
+export interface RootsEnvelope {
+  schema_version: SchemaVersion
+  roots: RootSummary[]
+}
+
+export interface LibraryEntry {
+  name: string
+  path: string
+  kind: 'directory' | 'file'
+  size_bytes?: number
+}
+
+export interface LibraryEnvelope {
+  schema_version: SchemaVersion
+  root_id: string
+  path: string
+  entries: LibraryEntry[]
+  truncated: boolean
+}
+
+export interface ListLibraryRequest {
+  rootId: string
+  path?: string
+}
+
+export interface SearchMatch {
+  root_id: string
+  path: string
+  name: string
+}
+
+export interface SearchRequest {
+  mediaKind: MediaKind
+  query: string
+  limit?: number
+}
+
+export interface SearchEnvelope {
+  schema_version: SchemaVersion
+  media_kind: MediaKind
+  results: SearchMatch[]
+  truncated: boolean
+}
+
+export interface ProviderProbeEnvelope {
+  schema_version: SchemaVersion
+  provider: ProviderId
+  ok: boolean
+  category: string
+  message: string
+}
+
+export interface TemplateSample {
+  title: string
+  id: string
+  year: number | null
+  edition: string | null
+}
+
+export interface TemplatePreviewRequest {
+  path_template: string
+  content_template: string
+  sample: TemplateSample
+}
+
+export interface TemplatePreviewEnvelope {
+  schema_version: SchemaVersion
+  path: string
+  content: string
+  content_bytes: number
+}
+
 export interface LoginRequest {
   password: string
 }
@@ -260,6 +397,53 @@ export class ApiClient {
     return this.#request('/providers')
   }
 
+  settings(): Promise<SettingsEnvelope> {
+    return this.#request('/settings')
+  }
+
+  updateSettings(
+    request: UpdateWorkspaceSettingsRequest,
+  ): Promise<SettingsEnvelope> {
+    return this.#request('/settings', { method: 'PUT', body: request })
+  }
+
+  libraryRoots(): Promise<RootsEnvelope> {
+    return this.#request('/library/roots')
+  }
+
+  listLibrary(request: ListLibraryRequest): Promise<LibraryEnvelope> {
+    const query = new URLSearchParams({
+      root_id: request.rootId,
+      path: request.path ?? '',
+    })
+    return this.#request(`/library?${query.toString()}`)
+  }
+
+  search(request: SearchRequest): Promise<SearchEnvelope> {
+    const query = new URLSearchParams({
+      media_kind: request.mediaKind,
+      query: request.query,
+      limit: String(request.limit ?? 25),
+    })
+    return this.#request(`/search?${query.toString()}`)
+  }
+
+  testProvider(provider: ProviderId): Promise<ProviderProbeEnvelope> {
+    return this.#request(`/providers/${encodeURIComponent(provider)}/test`, {
+      method: 'POST',
+      body: {},
+    })
+  }
+
+  previewTemplate(
+    request: TemplatePreviewRequest,
+  ): Promise<TemplatePreviewEnvelope> {
+    return this.#request('/templates/preview', {
+      method: 'POST',
+      body: request,
+    })
+  }
+
   async login(request: LoginRequest): Promise<LoginResponse> {
     const response = await this.#request<LoginResponse>('/auth/login', { method: 'POST', body: request })
     this.#issuedCsrfToken = response.csrf_token
@@ -319,7 +503,7 @@ export class ApiClient {
   async #request<T>(
     path: string,
     options: {
-      method?: 'GET' | 'POST'
+      method?: 'GET' | 'POST' | 'PUT'
       body?: unknown
       headers?: Record<string, string>
     } = {},
