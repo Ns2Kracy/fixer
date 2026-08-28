@@ -90,4 +90,46 @@ describe('ApiClient', () => {
       } satisfies Partial<ApiError>),
     )
   })
+
+  it('requests bounded job lists and reconstructed artifacts with stable query parameters', async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      async () => new Response(
+        JSON.stringify({ schema_version: 1, jobs: [], has_more: false }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+    const client = new ApiClient({ fetch: fetchMock })
+
+    await client.listJobs({ limit: 25, state: 'interrupted' })
+    await client.getJobReview(7, 3)
+    await client.getJobPlan(7)
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/jobs?limit=25&state=interrupted',
+      '/api/v1/jobs/7/review?candidate_index=3',
+      '/api/v1/jobs/7/plan',
+    ])
+  })
+
+  it('retries only through the dedicated mutation endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ schema_version: 1, job: { id: 9 } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    const client = new ApiClient({ fetch: fetchMock, csrfToken: () => 'csrf' })
+
+    await client.retryJob(9)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/jobs/9/retry',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: expect.objectContaining({ 'x-csrf-token': 'csrf' }),
+      }),
+    )
+  })
+
 })

@@ -116,6 +116,101 @@ export interface JobEnvelope {
   job: JobDto
 }
 
+export interface JobListEnvelope {
+  schema_version: SchemaVersion
+  jobs: JobDto[]
+  has_more: boolean
+}
+
+export interface ListJobsRequest {
+  limit?: number
+  state?: JobState
+}
+
+export type MatchEvidenceKind = 'external_id' | 'title' | 'alias' | 'year' | 'sequence'
+
+export interface ExternalIdArtifact {
+  namespace: string
+  value: string
+}
+
+export interface EvidenceArtifact {
+  kind: MatchEvidenceKind
+  points: number
+  detail: string
+}
+
+export interface CandidateArtifact {
+  index: number
+  media_kind: MediaKind
+  provider: string
+  external_id: ExternalIdArtifact
+  title: string
+  year?: number
+  sequence?: string
+  score: number
+  evidence: EvidenceArtifact[]
+  evidence_truncated: boolean
+}
+
+export interface WarningArtifact {
+  code: string
+  message: string
+}
+
+export interface SourceArtifact {
+  provider: string
+  external_id?: ExternalIdArtifact
+  locale?: string
+}
+
+export interface ConflictArtifact {
+  index: number
+  field_path: string
+  message: string
+  providers: string[]
+  providers_truncated: boolean
+  sources: SourceArtifact[]
+  sources_truncated: boolean
+}
+
+export interface ReviewArtifactsEnvelope {
+  schema_version: SchemaVersion
+  job_id: number
+  selected_candidate_index: number
+  candidates: CandidateArtifact[]
+  candidates_truncated: boolean
+  warnings: WarningArtifact[]
+  warnings_truncated: boolean
+  conflicts: ConflictArtifact[]
+  conflicts_truncated: boolean
+}
+
+export type OutputOperationKind =
+  | 'create_directory'
+  | 'write'
+  | 'copy'
+  | 'symlink'
+  | 'hardlink'
+  | 'reflink'
+
+export interface OperationArtifact {
+  index: number
+  kind: OutputOperationKind
+  source: string | null
+  target: string
+  content_bytes?: number
+}
+
+export interface PlanArtifactsEnvelope {
+  schema_version: SchemaVersion
+  job_id: number
+  output_root: string
+  operations: OperationArtifact[]
+  operations_truncated: boolean
+  requires_approval: boolean
+}
+
 export interface ReviewJobRequest {
   candidate_index: number
   accepted_conflict_indexes: number[]
@@ -182,6 +277,27 @@ export class ApiClient {
 
   getJob(id: number): Promise<JobEnvelope> {
     return this.#request(`/jobs/${id}`)
+  }
+
+  listJobs(request: ListJobsRequest = {}): Promise<JobListEnvelope> {
+    const query = new URLSearchParams()
+    if (request.limit !== undefined) query.set('limit', String(request.limit))
+    if (request.state !== undefined) query.set('state', request.state)
+    const suffix = query.size === 0 ? '' : `?${query.toString()}`
+    return this.#request(`/jobs${suffix}`)
+  }
+
+  retryJob(id: number): Promise<JobEnvelope> {
+    return this.#request(`/jobs/${id}/retry`, { method: 'POST' })
+  }
+
+  getJobReview(id: number, candidateIndex?: number): Promise<ReviewArtifactsEnvelope> {
+    const suffix = candidateIndex === undefined ? '' : `?candidate_index=${candidateIndex}`
+    return this.#request(`/jobs/${id}/review${suffix}`)
+  }
+
+  getJobPlan(id: number): Promise<PlanArtifactsEnvelope> {
+    return this.#request(`/jobs/${id}/plan`)
   }
 
   cancelJob(id: number): Promise<JobEnvelope> {
