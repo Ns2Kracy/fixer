@@ -1,18 +1,20 @@
-import { Link, Outlet } from '@tanstack/solid-router'
-import type { JSX } from '@solidjs/web'
+import { Link, Outlet } from "@tanstack/solid-router";
+import type { JSX } from "@solidjs/web";
 
 const navigation = [
-  { to: '/', label: 'Workspace', marker: '01' },
-  { to: '/jobs', label: 'Jobs', marker: '02' },
-] as const
+  { to: "/", label: "Workspace", marker: "01" },
+  { to: "/jobs", label: "Jobs", marker: "02" },
+] as const;
 
 export function AppShell(): JSX.Element {
-  let main!: HTMLElement
+  let main!: HTMLElement;
 
-  const focusWorkspace: JSX.EventHandlerUnion<HTMLAnchorElement, MouseEvent> = (event) => {
-    event.preventDefault()
-    main.focus()
-  }
+  const focusWorkspace: JSX.EventHandlerUnion<HTMLAnchorElement, MouseEvent> = (
+    event,
+  ) => {
+    event.preventDefault();
+    main.focus();
+  };
 
   return (
     <div class="app-frame">
@@ -21,7 +23,9 @@ export function AppShell(): JSX.Element {
       </a>
       <header class="masthead">
         <Link class="brand" to="/" aria-label="Fixer workspace home">
-          <span class="brand-mark" aria-hidden="true">F</span>
+          <span class="brand-mark" aria-hidden="true">
+            F
+          </span>
           <span>
             <strong>Fixer</strong>
             <small>Metadata operations</small>
@@ -40,9 +44,12 @@ export function AppShell(): JSX.Element {
                 <li>
                   <Link
                     to={item.to}
-                    activeOptions={{ exact: item.to === '/' }}
-                    activeProps={{ 'aria-current': 'page', class: 'nav-link active' }}
-                    inactiveProps={{ class: 'nav-link' }}
+                    activeOptions={{ exact: item.to === "/" }}
+                    activeProps={{
+                      "aria-current": "page",
+                      class: "nav-link active",
+                    }}
+                    inactiveProps={{ class: "nav-link" }}
                   >
                     <span aria-hidden="true">{item.marker}</span>
                     {item.label}
@@ -53,7 +60,11 @@ export function AppShell(): JSX.Element {
           </nav>
           <div class="rail-note">
             <span class="status-dot" aria-hidden="true" />
-            <p><strong>Local first</strong><br />Your media stays on this machine.</p>
+            <p>
+              <strong>Local first</strong>
+              <br />
+              Your media stays on this machine.
+            </p>
           </div>
         </aside>
         <main id="workspace" ref={main} tabindex="-1">
@@ -61,5 +72,5 @@ export function AppShell(): JSX.Element {
         </main>
       </div>
     </div>
-  )
+  );
 }

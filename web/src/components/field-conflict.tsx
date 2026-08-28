@@ -1,11 +1,11 @@
-import { For, Show } from 'solid-js'
+import { For, Show } from "solid-js";
 
-import type { ConflictArtifact } from '../lib/api'
+import type { ConflictArtifact } from "../lib/api";
 
 export function FieldConflict(props: {
-  conflict: ConflictArtifact
-  acknowledged: boolean
-  onToggle: (checked: boolean) => void
+  conflict: ConflictArtifact;
+  acknowledged: boolean;
+  onToggle: (checked: boolean) => void;
 }) {
   return (
     <article class="field-conflict">
@@ -18,15 +18,27 @@ export function FieldConflict(props: {
       </div>
       <Show
         when={props.conflict.sources.length > 0}
-        fallback={<p class="source-note">Providers: {props.conflict.providers.join(', ')}</p>}
+        fallback={
+          <p class="source-note">
+            Providers: {props.conflict.providers.join(", ")}
+          </p>
+        }
       >
-        <ul class="source-list" aria-label={`Sources for ${props.conflict.field_path}`}>
+        <ul
+          class="source-list"
+          aria-label={`Sources for ${props.conflict.field_path}`}
+        >
           <For each={props.conflict.sources}>
             {(source) => (
               <li>
-                {source.locale ? `${source.locale} · ` : ''}{source.provider}
+                {source.locale ? `${source.locale} · ` : ""}
+                {source.provider}
                 <Show when={source.external_id}>
-                  {(id) => <small>{id().namespace}:{id().value}</small>}
+                  {(id) => (
+                    <small>
+                      {id().namespace}:{id().value}
+                    </small>
+                  )}
                 </Show>
               </li>
             )}
@@ -34,10 +46,14 @@ export function FieldConflict(props: {
         </ul>
       </Show>
       <Show when={props.conflict.providers_truncated}>
-        <p class="truncation-inline">Additional provider context was omitted by the server.</p>
+        <p class="truncation-inline">
+          Additional provider context was omitted by the server.
+        </p>
       </Show>
       <Show when={props.conflict.sources_truncated}>
-        <p class="truncation-inline">Additional source context was omitted by the server.</p>
+        <p class="truncation-inline">
+          Additional source context was omitted by the server.
+        </p>
       </Show>
       <label class="conflict-acknowledgement">
         <input
@@ -46,8 +62,9 @@ export function FieldConflict(props: {
           aria-label={`Acknowledge conflict ${props.conflict.field_path}`}
           onChange={(event) => props.onToggle(event.currentTarget.checked)}
         />
-        I acknowledge this conflict after reviewing the available source and locale context.
+        I acknowledge this conflict after reviewing the available source and
+        locale context.
       </label>
     </article>
-  )
+  );
 }
