@@ -45,7 +45,7 @@ Search writes ranked candidates as text. Anime and television accept repeatable 
 
 ## Resolve
 
-`resolve` fetches and merges the selected candidate group. Add `--json` for the stable versioned DTO.
+`resolve` searches and merges provider metadata. Movie resolution fetches every ranked candidate; music and book fetch only the deterministic top candidate; television and anime narrow ranked results to one compatible cross-provider group. Add `--json` for the stable versioned DTO.
 
 ```bash
 fixer --local-root ./library --offline resolve movie "Arrival" --year 2016 --json
@@ -53,16 +53,61 @@ fixer --local-root ./library --offline resolve book "The Left Hand of Darkness" 
   --isbn 9780441478125 --json
 ```
 
-The resolve JSON object always includes:
+Every resolve DTO in schema version `1` has these fields:
+
+| Field | JSON type | Contract |
+| --- | --- | --- |
+| `schema_version` | integer | Always `1` for the shapes in this section. |
+| `kind` | string | `anime`, `book`, `movie`, `music`, or `television`. |
+| `id` | string | Resolved work/release-group/series identity. |
+| `title` | string | CLI-selected display title. |
+| `completeness` | number | Resolved completeness score. |
+| `conflicts` | integer | Number of merge conflicts. |
+| `warnings` | array of strings | Human-readable non-fatal resolution warning messages. |
+
+Media-specific top-level fields are:
+
+| `kind` | Additional fields |
+| --- | --- |
+| `movie` | `year: integer or null`, `titles: Title[]` |
+| `television` | `ordering: "aired" \| "dvd" \| "absolute"`, `seasons: integer`, `episodes: integer`, `titles: Title[]` |
+| `anime` | `relation: "original" \| "adaptation" \| "sequel" \| "prequel" \| "side_story" \| "spin_off"`, `cours: integer`, `episodes: integer`, `titles: Title[]` |
+| `music` | `artist: string`, `releases: MusicRelease[]` |
+| `book` | `contributors: BookContributor[]`, `editions: BookEdition[]` |
+
+Nested version 1 objects have these exact fields:
+
+| Object | Fields |
+| --- | --- |
+| `Title` | `locale: string or null`, `value: string` |
+| `BookContributor` | `id: string`, `name: string`, `role: string` (`director`, `writer`, `actor`, `author`, `editor`, `translator`, `performer`, `composer`, or `producer`) |
+| `BookEdition` | `id: string`, `isbn_10: string`, `isbn_13: string`, `publisher: string`, `assets: integer` |
+| `MusicRelease` | `id: string`, `discs: MusicDisc[]` |
+| `MusicDisc` | `number: integer`, `tracks: MusicTrack[]` |
+| `MusicTrack` | `id: string`, `title: string`, `disc: integer`, `track: integer`, `duration_seconds: integer` |
+
+A complete movie object has this shape:
 
 ```json
 {
   "schema_version": 1,
-  "kind": "movie"
+  "kind": "movie",
+  "id": "movie-arrival",
+  "title": "Arrival",
+  "year": 2016,
+  "titles": [
+    {
+      "locale": "en",
+      "value": "Arrival"
+    }
+  ],
+  "completeness": 0.8,
+  "conflicts": 0,
+  "warnings": []
 }
 ```
 
-Media-specific fields follow those two fields. Version 1 includes the resolved identity and title plus hierarchy or edition data, completeness, conflict count, and warnings where applicable. CLI DTOs do not serialize internal SDK structs directly.
+Counts and durations are non-negative JSON integers. CLI DTOs do not serialize internal SDK structs directly; automation should branch on `schema_version` and `kind` before reading media-specific fields.
 
 ## Scan
 

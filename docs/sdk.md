@@ -1,6 +1,6 @@
 # Fixer SDK
 
-`fixer-sdk` provides typed, Tokio-based orchestration over compile-time provider implementations. It searches registered providers concurrently, ranks candidates deterministically, fetches a selected candidate group, merges metadata, and preserves field provenance and non-fatal warnings.
+`fixer-sdk` provides typed, Tokio-based orchestration over compile-time provider implementations. It searches registered providers concurrently, ranks candidates deterministically, fetches ranked metadata, merges it, and preserves field provenance and non-fatal warnings.
 
 ## Run the offline example
 
@@ -59,7 +59,7 @@ println!(
 # }
 ```
 
-`resolve()` chooses the deterministic top candidate group. `search().select(index).fetch_selected()` restricts fetching to one candidate. An invalid index returns `SdkError::CandidateOutOfBounds`.
+`resolve()` searches first. Movie resolution fetches every ranked movie candidate before deterministic merge. Music and book resolution fetch only the deterministic top candidate. Television and anime resolution narrow ranked results to one compatible cross-provider candidate group. `search().select(index).fetch_selected()` restricts fetching to one explicit candidate for every media kind. An invalid index returns `SdkError::CandidateOutOfBounds`.
 
 ## Builder injection points
 
@@ -72,12 +72,12 @@ println!(
 | `http_client(value)` | Replaces the default runtime-neutral `HttpClient`; use it for tests, custom TLS, tracing, or an embedding application's transport. |
 | `offline()` | Skips every provider whose descriptor declares `requires_network = true` and installs a disabled default HTTP client. |
 | `proxy(url)` | Sets one explicit global HTTP, HTTPS, or SOCKS proxy on the default Reqwest transport. |
-| `timeout(duration)` | Replaces the default transport's 30-second request timeout. Zero is rejected when the HTTP client is built. |
-| `build()` | Requires at least one provider and rejects duplicate provider IDs or invalid transport configuration. |
+| `timeout(duration)` | Replaces the online default transport's 30-second request timeout. Zero is rejected only when that default client is built. |
+| `build()` | Requires at least one provider, rejects duplicate provider IDs, and validates transport settings when constructing the online default client. |
 
-A custom `http_client` takes precedence over the default transport. In that case, the custom client owns proxy and timeout behavior; `proxy` and `timeout` do not reconfigure it.
+A custom `http_client` takes precedence over the default transport. In that case, the custom client owns proxy and timeout behavior; `proxy` and `timeout` are accepted but ignored. `offline()` without a custom client installs a disabled transport and likewise does not parse the stored proxy or validate the timeout.
 
-Providers for a media kind are searched concurrently. A failed provider becomes a warning when another provider returns usable candidates or metadata. If every operation fails, the SDK returns `SdkError::AllProvidersFailed`. Offline mode adds an `offline_provider_skipped` warning when it omits a compatible network provider.
+Providers for a media kind are searched concurrently. A failed provider becomes a warning when another provider returns usable candidates or metadata. Search returns `SdkError::NoCandidates` only when the candidate set and warning set are both empty; an empty candidate set with any provider/offline warning returns `SdkError::AllProvidersFailed`. Fetch also returns `AllProvidersFailed` when no metadata document survives. Offline mode adds an `offline_provider_skipped` warning when it omits a compatible network provider.
 
 ## Author a provider
 
@@ -153,6 +153,6 @@ Writers return `fixer_core::OutputPlan`; planning performs no I/O. Prepare, prev
 
 ## Errors and compatibility
 
-`SdkError` and output `ExecutionError` are `#[non_exhaustive]`; downstream matches need a wildcard arm. Domain validation errors enter through `SdkError::Core`, provider failures through `SdkError::Provider`, and builder transport failures through `SdkError::HttpConfig`.
+`SdkError` and output `ExecutionError` are `#[non_exhaustive]`; downstream matches need a wildcard arm. Domain validation errors enter through `SdkError::Core`, and online default-client construction failures use `SdkError::HttpConfig`. Typed query orchestration converts individual provider search/fetch failures into `ResolutionWarning` values when usable output remains. It returns `SdkError::AllProvidersFailed` for an empty warned search or a fetch with no surviving document. Do not rely on receiving `SdkError::Provider` directly from normal query flows.
 
 The SDK's Rust domain structs are not the CLI's stable JSON contract. Automation should consume the CLI versioned DTOs described in [CLI workflows](cli.md), or define an application-owned serialization boundary around SDK values.
