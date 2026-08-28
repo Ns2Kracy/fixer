@@ -72,7 +72,7 @@ Unknown fields fail validation.
 | `output_preset` | `FIXER_OUTPUT_PRESET` | `full` | `full` or `metadata`; see below. |
 | `placement` | `FIXER_PLACEMENT` | `in_place` | `in_place`, `symlink`, `hardlink`, `copy`, or `reflink`. An explicit CLI flag wins. |
 | `conflict_policy` | `FIXER_CONFLICT_POLICY` | `review` | `prefer_first`, `review`, or `error`. |
-| `enabled_providers` | `FIXER_ENABLED_PROVIDERS` | see provider table | Ordered provider allowlist. Environment value is comma-separated. Unknown or empty lists fail validation. |
+| `enabled_providers` | `FIXER_ENABLED_PROVIDERS` | see provider table | Provider allowlist. Environment value is comma-separated. Unknown or empty lists fail validation. |
 
 Boolean environment values accept `1`, `true`, `yes`, `on`, `0`, `false`, `no`, and `off`, without case sensitivity.
 
@@ -105,7 +105,7 @@ The CLI validates and reports both confidence thresholds so the schema can remai
 | `musicbrainz` | music | yes | yes |
 | `openlibrary` | book | yes | yes |
 
-Set `enabled_providers` to restrict registration. Duplicates are removed while preserving first occurrence order. If no explicit allowlist exists, legacy `anilist_enabled: true` adds AniList. With an explicit allowlist, include `anilist` to enable it.
+Set `enabled_providers` to restrict registration. Duplicates are removed while preserving first occurrence order in the effective configuration summary, but the CLI registers allowed providers in fixed order: local, TMDB, Bangumi, MusicBrainz, Open Library, then AniList. Reordering the allowlist does not change merge precedence. If no explicit allowlist exists, legacy `anilist_enabled: true` adds AniList. With an explicit allowlist, include `anilist` to enable it.
 
 `anilist_enabled` and `FIXER_ANILIST_ENABLED` remain supported for compatibility. Prefer `enabled_providers` for new configuration.
 
