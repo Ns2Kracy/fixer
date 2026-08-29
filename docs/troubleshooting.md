@@ -138,6 +138,28 @@ Common failures:
 
 A missing `web/dist` does not block server startup; API health can pass while browser routes return 404. Build Web assets with `pnpm --dir web build`. Use `curl -i http://127.0.0.1:3000/api/v1/health` to separate API startup from static Web issues.
 
+## Docker deployment fails
+
+Start with the rendered configuration and current container state:
+
+```bash
+docker info
+docker compose --env-file .env.docker config
+docker compose --env-file .env.docker ps
+docker compose --env-file .env.docker logs --tail=200 fixer
+docker inspect --format '{{json .State.Health}}' \
+  "$(docker compose --env-file .env.docker ps -q fixer)"
+```
+
+- **Docker daemon unavailable:** `docker info` must succeed. Start Docker Desktop or the host Docker service before building or starting Fixer.
+- **Missing required value:** Compose rejects empty `FIXER_SERVER_PASSWORD` or `FIXER_MEDIA_PATH`. Copy `.env.docker.example`, use a nonempty test or production password, and pass `--env-file .env.docker` to every Compose command.
+- **Invalid media path:** `FIXER_MEDIA_PATH` must be absolute, must exist as a directory, and must be shared with Docker Desktop when applicable. Resolve symlinks with `realpath` if the daemon reports a mount-source error.
+- **Permission denied:** the process runs as UID 10001. Grant that UID search/read/write access appropriate to the host media tree, then verify with `docker compose --env-file .env.docker exec -T fixer test -w /media`. Also test `/data`; a failure there points to the named volume rather than the bind mount.
+- **Unhealthy container:** inspect the health output and logs, then run `curl --fail http://127.0.0.1:3000/api/v1/health`. Startup configuration, SQLite, or media-root failures appear in the service log.
+- **Port already allocated:** stop the conflicting listener or choose another `FIXER_PORT`. Update `FIXER_SERVER_ALLOWED_ORIGINS` to the same exact host port before recreating the service.
+
+Do not use `docker compose down --volumes` while troubleshooting. It deletes the SQLite volume and removes the state needed to diagnose or recover jobs.
+
 ## Browser receives `cors_origin_denied`
 
 Add the browser's exact scheme, host, and port to `FIXER_SERVER_ALLOWED_ORIGINS`. Do not include a trailing path or wildcard. Restart the server after changing environment configuration.

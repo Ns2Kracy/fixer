@@ -46,6 +46,19 @@ cargo run -p fixer-sdk --example sdk_movie
 
 The [SDK guide](docs/sdk.md) covers typed resolution, explicit search/select/fetch, custom HTTP clients, provider precedence, offline behavior, output execution, and compile-time provider authoring.
 
+## Docker quick start
+
+Copy the deployment template and replace its password with the output of `openssl rand -hex 32`. Set `FIXER_MEDIA_PATH` to an absolute, existing media directory and keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open.
+
+```bash
+cp .env.docker.example .env.docker
+$EDITOR .env.docker
+docker compose --env-file .env.docker up --build -d
+docker compose --env-file .env.docker ps
+```
+
+Wait until the `fixer` status includes `(healthy)`, then open the configured origin. The template uses `http://127.0.0.1:3000`. See [Docker deployment](docs/server.md#docker-deployment) for permissions, persistence, upgrades, reverse proxies, and recovery.
+
 ## Server and Web development
 
 Run Axum and Vite in separate terminals. The server requires a password, at least one existing absolute media root, and the exact Vite browser origin:

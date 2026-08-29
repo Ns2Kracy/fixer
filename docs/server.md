@@ -40,6 +40,85 @@ Browser state-changing requests include an `Origin` header. Add every exact brow
 FIXER_SERVER_MEDIA_ROOTS='/srv/movies:/srv/music'
 ```
 
+## Docker deployment
+
+The repository image packages `fixer-server` and `web/dist`. It listens on container port 3000, stores SQLite at `/data/fixer.sqlite3`, and treats `/media` as the only media root.
+
+### Configure and start
+
+Create a private environment file. Generate a password with `openssl rand -hex 32`, paste the output into `FIXER_SERVER_PASSWORD`, and set `FIXER_MEDIA_PATH` to an absolute existing directory.
+
+```bash
+cp .env.docker.example .env.docker
+$EDITOR .env.docker
+docker compose --env-file .env.docker config
+docker compose --env-file .env.docker up --build -d
+docker compose --env-file .env.docker ps
+```
+
+Compose rejects missing password and media-path values before startup. Wait until `ps` reports `(healthy)`, then check the public health route and open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`:
+
+```bash
+curl --fail http://127.0.0.1:3000/api/v1/health
+docker inspect --format '{{json .State.Health}}' \
+  "$(docker compose --env-file .env.docker ps -q fixer)"
+```
+
+The default port publishes only on `127.0.0.1`. Change `FIXER_PORT` and the allowed origin together when choosing another host port.
+
+### Storage and permissions
+
+Compose mounts the `fixer-data` named volume at `/data`. Docker prefixes the volume name with the Compose project name. `docker compose down` preserves this volume, so `/data/fixer.sqlite3` survives service recreation and image upgrades.
+
+`FIXER_MEDIA_PATH` is a writable bind mount at `/media`; Compose does not copy or manage that host directory. The image runs as UID and GID 10001. On Linux, grant UID 10001 search permission on parent directories and the read/write permissions required for the selected media tree. Use a dedicated group or ACL for shared libraries instead of broad world-write permissions. Check both mounts from the running container:
+
+```bash
+docker compose --env-file .env.docker exec -T fixer id
+docker compose --env-file .env.docker exec -T fixer test -w /data
+docker compose --env-file .env.docker exec -T fixer test -w /media
+```
+
+The container root filesystem is read-only. `/tmp` is a 64 MiB tmpfs; only `/data` and the explicit `/media` bind persist writes.
+
+### Operate and upgrade
+
+```bash
+docker compose --env-file .env.docker logs --tail=200 -f fixer
+docker compose --env-file .env.docker stop
+docker compose --env-file .env.docker up -d --wait
+
+# After updating the checkout:
+docker compose --env-file .env.docker build --pull
+docker compose --env-file .env.docker up -d --wait
+
+# Remove containers and networks but retain SQLite:
+docker compose --env-file .env.docker down
+```
+
+`docker compose --env-file .env.docker down --volumes` deletes the named volume and the SQLite database. Use it only when you intend to destroy all persisted Fixer state and have a tested backup.
+
+For a reverse proxy, keep `FIXER_BIND_IP=127.0.0.1`, set `FIXER_SERVER_ALLOWED_ORIGINS` to the public HTTPS origin, and set `FIXER_SERVER_HTTPS_TERMINATION=true`. The existing trusted-proxy rules in [Reverse proxy deployment](#reverse-proxy-deployment) still apply.
+
+### Standalone Docker
+
+A standalone container needs the same secret, exact origin, named SQLite volume, writable media bind, loopback port, and hardening controls. Replace the media source before running:
+
+```bash
+docker run --name fixer --detach --restart unless-stopped \
+  --env-file .env.docker \
+  --publish 127.0.0.1:3000:3000 \
+  --mount type=volume,source=fixer-data,target=/data \
+  --mount type=bind,source=/absolute/path/to/media,target=/media \
+  --read-only \
+  --tmpfs /tmp:rw,size=64m,mode=1777 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --user 10001:10001 \
+  fixer:local
+```
+
+The image supplies the server bind, database, media-root, Web-root, health check, and `tini` defaults. Do not pass secrets as build arguments.
+
 ## Reverse proxy deployment
 
 Keep Axum on loopback when a reverse proxy terminates TLS:
