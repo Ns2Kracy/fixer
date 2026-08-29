@@ -14,6 +14,7 @@ rustc-ice-*.txt
 .env
 .env.*
 !.env.example
+!.env.docker.example
 
 # Local databases and provider caches
 *.db
