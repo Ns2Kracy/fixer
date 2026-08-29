@@ -104,9 +104,7 @@ fn ambiguous_anime_candidates_are_visible_and_cannot_trigger_a_broad_write() {
             .count(),
         2
     );
-    assert!(
-        String::from_utf8_lossy(&search.stderr).contains("ambiguous_candidates")
-    );
+    assert!(String::from_utf8_lossy(&search.stderr).contains("ambiguous_candidates"));
 
     let scrape = fixer()
         .arg("--offline")
@@ -117,8 +115,7 @@ fn ambiguous_anime_candidates_are_visible_and_cannot_trigger_a_broad_write() {
         .unwrap();
     assert_eq!(scrape.status.code(), Some(2));
     assert!(
-        String::from_utf8_lossy(&scrape.stderr)
-            .contains("ambiguous anime input: found 2 series")
+        String::from_utf8_lossy(&scrape.stderr).contains("ambiguous anime input: found 2 series")
     );
     assert_eq!(snapshot(&library), before);
 }

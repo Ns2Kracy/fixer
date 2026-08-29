@@ -1,6 +1,6 @@
 use axum::Router;
 
-use crate::{auth::AuthState, jobs::JobRuntime, WorkspaceState};
+use crate::{WorkspaceState, auth::AuthState, jobs::JobRuntime};
 
 /// Builds the stateless HTTP router without opening a listener.
 pub fn app() -> Router {

@@ -27,7 +27,11 @@ async fn reopening_the_server_store_interrupts_active_jobs() {
         let job = store
             .create_job(JobInputDto::new(
                 JobMediaKind::Movie,
-                directory.path().join("Fixture Movie.mkv").display().to_string(),
+                directory
+                    .path()
+                    .join("Fixture Movie.mkv")
+                    .display()
+                    .to_string(),
                 false,
             ))
             .await
@@ -49,10 +53,7 @@ async fn reopening_the_server_store_interrupts_active_jobs() {
     let recovered = restarted.get_job(job_id).await.unwrap();
     assert_eq!(recovered.state(), JobState::Interrupted);
 
-    let router = job_app(JobRuntime::new(
-        restarted,
-        NonZeroUsize::new(8).unwrap(),
-    ));
+    let router = job_app(JobRuntime::new(restarted, NonZeroUsize::new(8).unwrap()));
     let response = router
         .oneshot(
             Request::get(format!("/api/v1/jobs/{}", job_id.get()))

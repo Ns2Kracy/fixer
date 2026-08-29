@@ -60,8 +60,8 @@ fn is_content_hashed_asset(path: &str) -> bool {
             let bytes = stem.as_bytes();
             bytes.len() >= 9
                 && bytes[bytes.len() - 9] == b'-'
-                && bytes[bytes.len() - 8..].iter().all(|byte| {
-                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
-                })
+                && bytes[bytes.len() - 8..]
+                    .iter()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
         })
 }
