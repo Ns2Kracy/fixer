@@ -31,6 +31,7 @@ EXPOSE 3000
 VOLUME ["/data"]
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \
     CMD ["curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:3000/api/v1/health"]
+STOPSIGNAL SIGINT
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["fixer-server"]

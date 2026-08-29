@@ -51,12 +51,14 @@ Create a private environment file. Generate a password with `openssl rand -hex 3
 ```bash
 cp .env.docker.example .env.docker
 $EDITOR .env.docker
-docker compose --env-file .env.docker config
+docker compose --env-file .env.docker config --quiet
 docker compose --env-file .env.docker up --build -d
 docker compose --env-file .env.docker ps
 ```
 
-Compose rejects missing password and media-path values before startup. Wait until `ps` reports `(healthy)`, then check the public health route and open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`:
+Compose rejects missing password and media-path values before startup and refuses to create a missing bind source. Docker Compose still resolves an existing relative bind source against the project directory, so verify that `FIXER_MEDIA_PATH` starts with `/`; relative media paths are outside this deployment contract.
+
+Wait until `ps` reports `(healthy)`, then check the public health route and open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`:
 
 ```bash
 curl --fail http://127.0.0.1:3000/api/v1/health
