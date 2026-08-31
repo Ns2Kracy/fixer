@@ -1,0 +1,6 @@
+services:
+  fixer:
+    build:
+      context: .
+    image: fixer:local
+    pull_policy: build

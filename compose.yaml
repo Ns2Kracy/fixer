@@ -1,8 +1,7 @@
 services:
   fixer:
-    build:
-      context: .
-    image: fixer:local
+    image: "${FIXER_IMAGE:-ghcr.io/ns2kracy/fixer:latest}"
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "${FIXER_BIND_IP:-127.0.0.1}:${FIXER_PORT:-3000}:3000"
