@@ -151,12 +151,32 @@ docker inspect --format '{{json .State.Health}}' \
   "$(docker compose --env-file .env.docker ps -q fixer)"
 ```
 
-- **Docker daemon unavailable:** `docker info` must succeed. Start Docker Desktop or the host Docker service before building or starting Fixer.
+- **Docker daemon unavailable:** `docker info` must succeed. Start Docker Desktop or the host Docker service before pulling, building, or starting Fixer.
 - **Missing required value:** Compose rejects empty `FIXER_SERVER_PASSWORD` or `FIXER_MEDIA_PATH`. Copy `.env.docker.example`, use a nonempty test or production password, and pass `--env-file .env.docker` to every Compose command.
 - **Invalid media path:** `FIXER_MEDIA_PATH` must be absolute, must exist as a directory, and must be shared with Docker Desktop when applicable. Compose resolves an existing relative source against the project directory instead of rejecting it, so verify that the value starts with `/`. Resolve symlinks with `realpath` if the daemon reports a mount-source error.
 - **Permission denied:** the process runs as UID 10001. Grant that UID search/read/write access appropriate to the host media tree, then verify with `docker compose --env-file .env.docker exec -T fixer test -w /media`. Also test `/data`; a failure there points to the named volume rather than the bind mount.
 - **Unhealthy container:** inspect the health output and logs, then run `curl --fail http://127.0.0.1:3000/api/v1/health`. Startup configuration, SQLite, or media-root failures appear in the service log.
 - **Port already allocated:** stop the conflicting listener or choose another `FIXER_PORT`. Update `FIXER_SERVER_ALLOWED_ORIGINS` to the same exact host port before recreating the service.
+
+### Registry image cannot be pulled
+
+Inspect the published manifest and pull the image selected by `FIXER_IMAGE`:
+
+```bash
+docker buildx imagetools inspect ghcr.io/ns2kracy/fixer:latest
+docker buildx imagetools inspect ghcr.io/ns2kracy/fixer:edge
+docker compose --env-file .env.docker pull
+```
+
+- **`manifest unknown` for `latest`:** no stable release tag exists before the first versioned release. To test published development builds, set `FIXER_IMAGE=ghcr.io/ns2kracy/fixer:edge` in `.env.docker`, then pull and start again.
+- **`denied` or authentication error:** the GHCR package may still be private. A maintainer must complete the Public visibility step in [server deployment](server.md#maintainer-release-setup). Public-image users should not log in or store a GHCR token.
+- **Unsupported architecture or incomplete manifest list:** the manifest should include `linux/amd64` and `linux/arm64`. Use `docker buildx imagetools inspect` to confirm both entries. Use a supported host or the [source-build override](server.md#source-build-deployment) if the host platform is absent.
+- **Stale local tag:** run `docker compose pull` through the configured environment file, then recreate the service:
+
+```bash
+docker compose --env-file .env.docker pull
+docker compose --env-file .env.docker up -d --wait
+```
 
 Do not use `docker compose down --volumes` while troubleshooting. It deletes the SQLite volume and removes the state needed to diagnose or recover jobs.
 

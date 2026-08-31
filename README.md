@@ -48,16 +48,26 @@ The [SDK guide](docs/sdk.md) covers typed resolution, explicit search/select/fet
 
 ## Docker quick start
 
-Copy the deployment template and replace its password with the output of `openssl rand -hex 32`. Set `FIXER_MEDIA_PATH` to an absolute, existing media directory and keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open.
+Deploy the stable image in a new directory without cloning the repository:
 
 ```bash
+mkdir -p fixer-deployment
+cd fixer-deployment
+curl --fail --location --output compose.yaml \
+  https://raw.githubusercontent.com/Ns2Kracy/fixer/main/compose.yaml
+curl --fail --location --output .env.docker.example \
+  https://raw.githubusercontent.com/Ns2Kracy/fixer/main/.env.docker.example
 cp .env.docker.example .env.docker
+mkdir -p media
+printf 'media path: %s\n' "$PWD/media"
+openssl rand -hex 32
 $EDITOR .env.docker
-docker compose --env-file .env.docker up --build -d
-docker compose --env-file .env.docker ps
+docker compose --env-file .env.docker up -d --wait
 ```
 
-Wait until the `fixer` status includes `(healthy)`, then open the configured origin. The template uses `http://127.0.0.1:3000`. See [Docker deployment](docs/server.md#docker-deployment) for permissions, persistence, upgrades, reverse proxies, and recovery.
+Set `FIXER_SERVER_PASSWORD` to the generated password and `FIXER_MEDIA_PATH` to the printed absolute path before startup. Keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open; the template uses `http://127.0.0.1:3000`.
+
+`latest` is the stable channel and `edge` tracks `main`. Set `FIXER_IMAGE=ghcr.io/ns2kracy/fixer:0.1.0` to pin a release, or use `FIXER_IMAGE=ghcr.io/ns2kracy/fixer@sha256:<manifest-digest>` for an immutable deployment. See [Docker deployment](docs/server.md#docker-deployment) for image channels, permissions, persistence, source builds, upgrades, reverse proxies, and recovery.
 
 ## Server and Web development
 

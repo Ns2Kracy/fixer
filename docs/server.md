@@ -42,23 +42,31 @@ FIXER_SERVER_MEDIA_ROOTS='/srv/movies:/srv/music'
 
 ## Docker deployment
 
-The repository image packages `fixer-server` and `web/dist`. It listens on container port 3000, stores SQLite at `/data/fixer.sqlite3`, and treats `/media` as the only media root.
+The registry deployment uses `ghcr.io/ns2kracy/fixer` and expects the GHCR package to have Public visibility. Public packages pull anonymously, so operators do not need `docker login` or registry credentials. The image packages `fixer-server` and `web/dist`, listens on container port 3000, stores SQLite at `/data/fixer.sqlite3`, and treats `/media` as the only media root.
 
-### Configure and start
+### Registry deployment
 
-Create a private environment file. Generate a password with `openssl rand -hex 32`, paste the output into `FIXER_SERVER_PASSWORD`, and set `FIXER_MEDIA_PATH` to an absolute existing directory.
+Download the two deployment files into a new directory. Generate a strong password, set `FIXER_MEDIA_PATH` to the printed absolute directory, and keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open.
 
 ```bash
+mkdir -p fixer-deployment
+cd fixer-deployment
+curl --fail --location --output compose.yaml \
+  https://raw.githubusercontent.com/Ns2Kracy/fixer/main/compose.yaml
+curl --fail --location --output .env.docker.example \
+  https://raw.githubusercontent.com/Ns2Kracy/fixer/main/.env.docker.example
 cp .env.docker.example .env.docker
+mkdir -p media
+printf 'media path: %s\n' "$PWD/media"
+openssl rand -hex 32
 $EDITOR .env.docker
 docker compose --env-file .env.docker config --quiet
-docker compose --env-file .env.docker up --build -d
-docker compose --env-file .env.docker ps
+docker compose --env-file .env.docker up -d --wait
 ```
 
 Compose rejects missing password and media-path values before startup and refuses to create a missing bind source. Docker Compose still resolves an existing relative bind source against the project directory, so verify that `FIXER_MEDIA_PATH` starts with `/`; relative media paths are outside this deployment contract.
 
-Wait until `ps` reports `(healthy)`, then check the public health route and open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`:
+After Compose reports a healthy service, check the public health route and open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`:
 
 ```bash
 curl --fail http://127.0.0.1:3000/api/v1/health
@@ -68,11 +76,71 @@ docker inspect --format '{{json .State.Health}}' \
 
 The default port publishes only on `127.0.0.1`. Change `FIXER_PORT` and the allowed origin together when choosing another host port.
 
+### Image channels and pinning
+
+| Selector | Update policy |
+| --- | --- |
+| `latest` | Stable channel, updated by a version release. |
+| `0.1.0`, `0.1`, `0` | Semantic-version release tags; use the full version when reproducibility matters. |
+| `edge` | Development channel, updated from `main`. |
+| `sha-<short-sha>` | Traceable tag for one published source commit. |
+| `@sha256:<manifest-digest>` | Immutable multi-platform manifest. |
+
+The template selects `ghcr.io/ns2kracy/fixer:latest`. To pin the image, replace its `FIXER_IMAGE` line with one of these values:
+
+```dotenv
+FIXER_IMAGE=ghcr.io/ns2kracy/fixer:0.1.0
+# Or pin the manifest itself:
+FIXER_IMAGE=ghcr.io/ns2kracy/fixer@sha256:<manifest-digest>
+```
+
+Tags can move according to the table; a digest does not.
+
+### Registry upgrades and operation
+
+Run `docker compose pull` with the deployment environment file before recreating a registry deployment. The explicit pull reports registry failures before Compose changes the running service.
+
+```bash
+docker compose --env-file .env.docker logs --tail=200 -f fixer
+docker compose --env-file .env.docker stop
+docker compose --env-file .env.docker up -d --wait
+
+# Pull the selected FIXER_IMAGE, then recreate if it changed:
+docker compose --env-file .env.docker pull
+docker compose --env-file .env.docker up -d --wait
+
+# Remove containers and networks but retain SQLite:
+docker compose --env-file .env.docker down
+```
+
+Compose allows 30 seconds for graceful shutdown. Close Web/API event streams before maintenance so the server can drain connections and stop workers.
+
+### Source-build deployment
+
+A local source build requires a repository checkout. `compose.yaml` never builds an image by itself; add `compose.build.yaml` for every source-build Compose command.
+
+```bash
+git clone https://github.com/Ns2Kracy/fixer.git
+cd fixer
+cp .env.docker.example .env.docker
+mkdir -p media
+printf 'media path: %s\n' "$PWD/media"
+openssl rand -hex 32
+$EDITOR .env.docker
+docker compose \
+  -f compose.yaml \
+  -f compose.build.yaml \
+  --env-file .env.docker \
+  up --build -d --wait
+```
+
+Repeat both `-f` arguments when rebuilding after source changes. The override selects `fixer:local`; registry upgrades use the base file without the override.
+
 ### Storage and permissions
 
 Compose mounts the `fixer-data` named volume at `/data`. Docker prefixes the volume name with the Compose project name. `docker compose down` preserves this volume, so `/data/fixer.sqlite3` survives service recreation and image upgrades.
 
-`FIXER_MEDIA_PATH` is a writable bind mount at `/media`; Compose does not copy or manage that host directory. The image runs as UID and GID 10001. On Linux, grant UID 10001 search permission on parent directories and the read/write permissions required for the selected media tree. Use a dedicated group or ACL for shared libraries instead of broad world-write permissions. Check both mounts from the running container:
+`FIXER_MEDIA_PATH` is a writable bind mount at `/media`; Compose does not copy or manage that host directory. The image runs as UID and GID 10001. On Linux, grant UID 10001 search permission on parent directories and the read/write permissions required for the selected media tree. Use a dedicated group or ACL for shared libraries instead of broad world-write permissions. Check both mounts from a registry deployment with:
 
 ```bash
 docker compose --env-file .env.docker exec -T fixer id
@@ -80,22 +148,7 @@ docker compose --env-file .env.docker exec -T fixer test -w /data
 docker compose --env-file .env.docker exec -T fixer test -w /media
 ```
 
-The container root filesystem is read-only. `/tmp` is a 64 MiB tmpfs; only `/data` and the explicit `/media` bind persist writes.
-
-### Operate and upgrade
-
-```bash
-docker compose --env-file .env.docker logs --tail=200 -f fixer
-docker compose --env-file .env.docker stop
-docker compose --env-file .env.docker up -d --wait
-
-# After updating the checkout:
-docker compose --env-file .env.docker build --pull
-docker compose --env-file .env.docker up -d --wait
-
-# Remove containers and networks but retain SQLite:
-docker compose --env-file .env.docker down
-```
+Source-build deployments can run the same checks with both Compose file arguments. The container root filesystem is read-only. `/tmp` is a 64 MiB tmpfs; only `/data` and the explicit `/media` bind persist writes.
 
 `docker compose --env-file .env.docker down --volumes` deletes the named volume and the SQLite database. Use it only when you intend to destroy all persisted Fixer state and have a tested backup.
 
@@ -103,7 +156,7 @@ For a reverse proxy, keep `FIXER_BIND_IP=127.0.0.1`, set `FIXER_SERVER_ALLOWED_O
 
 ### Standalone Docker
 
-A standalone container needs the same secret, exact origin, named SQLite volume, writable media bind, loopback port, and hardening controls. Replace the media source before running:
+A standalone container uses the registry image directly and needs the same secret, exact origin, named SQLite volume, writable media bind, loopback port, and hardening controls. Replace the media source before running:
 
 ```bash
 docker run --name fixer --detach --restart unless-stopped \
@@ -116,10 +169,14 @@ docker run --name fixer --detach --restart unless-stopped \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --user 10001:10001 \
-  fixer:local
+  ghcr.io/ns2kracy/fixer:latest
 ```
 
-The image supplies the server bind, database, media-root, Web-root, health check, and `tini` defaults. Do not pass secrets as build arguments.
+Replace the final image reference with a semantic version or digest when pinning. The image supplies the server bind, database, media-root, Web-root, health check, and `tini` defaults. Do not pass secrets as build arguments.
+
+### Maintainer release setup
+
+The first successful publish creates the GHCR package. Before announcing registry deployment, a maintainer must open the `Ns2Kracy/fixer` package settings, choose **Change visibility**, set the package to **Public**, and verify an anonymous pull. This one-time package setting enables the operator flow documented here; workflow `packages: write` permission does not make the package public.
 
 ## Reverse proxy deployment
 
