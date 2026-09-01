@@ -1,5 +1,9 @@
 import { Link, Outlet } from "@tanstack/solid-router";
 import type { JSX } from "@solidjs/web";
+import { createSignal, onCleanup } from "solid-js";
+
+import { createThemeController, type ThemePreference } from "../lib/theme";
+import { ThemeSelect } from "./ui/theme-select";
 
 const navigation = [
   { to: "/", label: "Workspace", marker: "01" },
@@ -14,6 +18,14 @@ const navigation = [
 
 export function AppShell(): JSX.Element {
   let main!: HTMLElement;
+  const [themePreference, setThemePreference] = createSignal<ThemePreference>(
+    "system",
+    { ownedWrite: true },
+  );
+  const themeController = createThemeController(({ preference }) =>
+    setThemePreference(preference),
+  );
+  onCleanup(() => themeController.dispose());
 
   const focusWorkspace: JSX.EventHandlerUnion<HTMLAnchorElement, MouseEvent> = (
     event,
@@ -37,8 +49,16 @@ export function AppShell(): JSX.Element {
             <small>Metadata operations</small>
           </span>
         </Link>
-        <div class="environment" aria-label="Current environment">
-          <span aria-hidden="true" /> Local workspace
+        <div class="flex items-center gap-4">
+          <div class="environment" aria-label="Current environment">
+            <span aria-hidden="true" /> Local workspace
+          </div>
+          <ThemeSelect
+            value={themePreference()}
+            onChange={(preference) =>
+              themeController.setPreference(preference)
+            }
+          />
         </div>
       </header>
       <div class="workspace-grid">
