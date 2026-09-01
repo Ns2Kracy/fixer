@@ -74,25 +74,54 @@ async fn api_tokens_are_shown_once_but_only_sha256_digests_are_persisted() {
 }
 
 #[tokio::test]
-async fn password_login_issues_expiring_digest_only_sessions_with_csrf_secrets() {
+async fn first_administrator_registration_is_atomic_and_sessions_store_only_digests() {
     let root = tempfile::tempdir().unwrap();
     let database = root.path().join("sessions.sqlite3");
     let store = SqliteJobStore::open(&database).await.unwrap();
-    let encoded = hash_password("session password").unwrap();
-    store.set_password_hash(&encoded).await.unwrap();
 
+    assert!(!store.has_registered_user().await.unwrap());
+
+    let encoded = hash_password("session password").unwrap();
     assert!(
         store
-            .verify_single_user_password("session password")
+            .register_single_user("admin", &encoded)
+            .await
+            .unwrap()
+    );
+    assert!(store.has_registered_user().await.unwrap());
+    assert!(
+        store
+            .verify_single_user_credentials("admin", "session password")
             .await
             .unwrap()
     );
     assert!(
         !store
-            .verify_single_user_password("wrong password")
+            .verify_single_user_credentials("other", "session password")
             .await
             .unwrap()
     );
+    assert!(
+        !store
+            .verify_single_user_credentials("admin", "wrong password")
+            .await
+            .unwrap()
+    );
+
+    let replacement = hash_password("replacement password").unwrap();
+    assert!(
+        !store
+            .register_single_user("second-admin", &replacement)
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .verify_single_user_credentials("admin", "session password")
+            .await
+            .unwrap()
+    );
+
     let issued = store
         .create_session(std::time::Duration::from_secs(60))
         .await
@@ -127,11 +156,12 @@ async fn password_login_issues_expiring_digest_only_sessions_with_csrf_secrets()
     )
     .await
     .unwrap();
-    let password: String = sqlx::query_scalar("SELECT password_hash FROM single_user_auth")
+    let row = sqlx::query("SELECT username, password_hash FROM single_user_auth")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(password, encoded.as_str());
+    assert_eq!(row.get::<String, _>("username"), "admin");
+    assert_eq!(row.get::<String, _>("password_hash"), encoded.as_str());
     let session_columns = sqlx::query("PRAGMA table_info(auth_sessions)")
         .fetch_all(&pool)
         .await

@@ -84,6 +84,58 @@ impl SqliteJobStore {
             .map_err(Into::into)
     }
 
+    pub async fn has_registered_user(&self) -> Result<bool, StoreError> {
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM single_user_auth WHERE id = 1 AND username IS NOT NULL)",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(exists != 0)
+    }
+
+    pub async fn register_single_user(
+        &self,
+        username: &str,
+        password_hash: &PasswordHashValue,
+    ) -> Result<bool, StoreError> {
+        let result = sqlx::query(
+            "INSERT INTO single_user_auth (id, username, password_hash, updated_at_ms) \
+             VALUES (1, ?, ?, ?) \
+             ON CONFLICT(id) DO UPDATE SET \
+               username = excluded.username, \
+               password_hash = excluded.password_hash, \
+               updated_at_ms = excluded.updated_at_ms \
+             WHERE single_user_auth.username IS NULL",
+        )
+        .bind(username)
+        .bind(password_hash.as_str())
+        .bind(timestamp_ms()?)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn verify_single_user_credentials(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<bool, StoreError> {
+        let Some(encoded) = sqlx::query_scalar::<_, String>(
+            "SELECT password_hash FROM single_user_auth WHERE id = 1 AND username = ?",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(false);
+        };
+        let encoded = PasswordHashValue::parse(encoded)?;
+        let password = password.to_owned();
+        tokio::task::spawn_blocking(move || verify_password(&password, &encoded))
+            .await?
+            .map_err(Into::into)
+    }
+
     pub async fn create_session(&self, lifetime: Duration) -> Result<IssuedSession, StoreError> {
         let lifetime_ms =
             i64::try_from(lifetime.as_millis()).map_err(|_| StoreError::TimestampOverflow)?;
