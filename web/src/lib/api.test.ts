@@ -40,19 +40,75 @@ describe('ApiClient', () => {
     )
   })
 
+  it('loads auth status and registers the first administrator', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            schema_version: 1,
+            registration_required: true,
+            authenticated: false,
+            username: null,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            schema_version: 1,
+            username: 'admin',
+            csrf_token: 'fixer_csrf_register',
+            expires_at_ms: 99,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+    const client = new ApiClient({ fetch: fetchMock })
+
+    await expect(client.authStatus()).resolves.toEqual(
+      expect.objectContaining({ registration_required: true, authenticated: false }),
+    )
+    await client.register({ username: 'admin', password: 'correct horse battery staple' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/auth/status',
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/auth/register',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          username: 'admin',
+          password: 'correct horse battery staple',
+        }),
+      }),
+    )
+  })
+
   it('reuses the login CSRF token for authenticated mutations', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ schema_version: 1, csrf_token: 'fixer_csrf_login', expires_at_ms: 99 }),
+          JSON.stringify({
+            schema_version: 1,
+            username: 'admin',
+            csrf_token: 'fixer_csrf_login',
+            expires_at_ms: 99,
+          }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
     const client = new ApiClient({ fetch: fetchMock })
 
-    await client.login({ password: 'correct horse battery staple' })
+    await client.login({ username: 'admin', password: 'correct horse battery staple' })
     await client.logout()
 
     expect(fetchMock).toHaveBeenLastCalledWith(

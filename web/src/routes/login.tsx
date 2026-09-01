@@ -14,9 +14,10 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
+  const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
   const login = useMutation(() => ({
-    mutationFn: () => api.login({ password: password() }),
+    mutationFn: () => api.login({ username: username().trim(), password: password() }),
     onSuccess: async () => {
       await navigate({ to: "/" });
     },
@@ -24,7 +25,7 @@ function LoginPage() {
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (password()) login.mutate();
+    if (username().trim() && password()) login.mutate();
   }
 
   return (
@@ -55,7 +56,17 @@ function LoginPage() {
           </p>
         </div>
         <form class="grid content-start gap-5" onSubmit={submit}>
-          <FormField label="Workspace password">
+          <FormField label="Username">
+            <input
+              type="text"
+              required
+              autocomplete="username"
+              value={username()}
+              disabled={login.isPending}
+              onInput={(event) => setUsername(event.currentTarget.value)}
+            />
+          </FormField>
+          <FormField label="Password">
             <input
               type="password"
               required
@@ -68,7 +79,7 @@ function LoginPage() {
           <Button
             class="justify-self-start max-[700px]:w-full"
             type="submit"
-            disabled={login.isPending || !password()}
+            disabled={login.isPending || !username().trim() || !password()}
           >
             {login.isPending ? "Signing in…" : "Sign in"}
           </Button>

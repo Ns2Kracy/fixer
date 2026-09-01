@@ -38,6 +38,7 @@ describe("server session login", () => {
         if (url === "/api/v1/auth/login") {
           return json({
             schema_version: 1,
+            username: "admin",
             csrf_token: "csrf-browser-session",
             expires_at_ms: 4_102_444_800_000,
           });
@@ -52,8 +53,9 @@ describe("server session login", () => {
     const user = userEvent.setup();
     renderApp("/login");
 
+    await user.type(await screen.findByLabelText("Username"), "admin");
     await user.type(
-      await screen.findByLabelText("Workspace password"),
+      screen.getByLabelText("Password"),
       "local-development-password",
     );
     await user.click(screen.getByRole("button", { name: "Sign in" }));
@@ -64,7 +66,10 @@ describe("server session login", () => {
         expect.objectContaining({
           method: "POST",
           credentials: "same-origin",
-          body: JSON.stringify({ password: "local-development-password" }),
+          body: JSON.stringify({
+            username: "admin",
+            password: "local-development-password",
+          }),
         }),
       ),
     );

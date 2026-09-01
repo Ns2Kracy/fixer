@@ -183,12 +183,21 @@ export interface TemplatePreviewEnvelope {
   content_bytes: number
 }
 
-export interface LoginRequest {
+export interface AuthStatusResponse {
+  schema_version: SchemaVersion
+  registration_required: boolean
+  authenticated: boolean
+  username: string | null
+}
+
+export interface CredentialsRequest {
+  username: string
   password: string
 }
 
-export interface LoginResponse {
+export interface SessionResponse {
   schema_version: SchemaVersion
+  username: string
   csrf_token: string
   expires_at_ms: number
 }
@@ -447,8 +456,25 @@ export class ApiClient {
     })
   }
 
-  async login(request: LoginRequest): Promise<LoginResponse> {
-    const response = await this.#request<LoginResponse>('/auth/login', { method: 'POST', body: request })
+  authStatus(): Promise<AuthStatusResponse> {
+    return this.#request('/auth/status')
+  }
+
+  async register(request: CredentialsRequest): Promise<SessionResponse> {
+    const response = await this.#request<SessionResponse>('/auth/register', {
+      method: 'POST',
+      body: request,
+    })
+    this.#issuedCsrfToken = response.csrf_token
+    this.#csrfTokenChanged(response.csrf_token)
+    return response
+  }
+
+  async login(request: CredentialsRequest): Promise<SessionResponse> {
+    const response = await this.#request<SessionResponse>('/auth/login', {
+      method: 'POST',
+      body: request,
+    })
     this.#issuedCsrfToken = response.csrf_token
     this.#csrfTokenChanged(response.csrf_token)
     return response
