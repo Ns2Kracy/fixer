@@ -1,9 +1,14 @@
-import { For, Show, createSignal } from "solid-js";
 import { useMutation, useQuery } from "@tanstack/solid-query";
 import { createFileRoute } from "@tanstack/solid-router";
+import { For, Show, createSignal } from "solid-js";
 
 import { ProviderStatus } from "../components/provider-status";
 import { RequestError } from "../components/request-error";
+import { CountBadge } from "../components/ui/count-badge";
+import { EmptyState } from "../components/ui/empty-state";
+import { LoadingState } from "../components/ui/loading-state";
+import { PageHeader } from "../components/ui/page-header";
+import { SectionHeader } from "../components/ui/section-header";
 import { api, type ProviderId, type ProviderProbeEnvelope } from "../lib/api";
 
 export const Route = createFileRoute("/providers")({
@@ -41,30 +46,27 @@ function ProvidersPage() {
   }
 
   return (
-    <div class="workspace-page providers-page">
-      <header class="workspace-heading">
-        <div>
-          <p class="eyebrow">Providers / Connectivity</p>
-          <h1>Provider readiness</h1>
-        </div>
-        <p>
-          Verify one source at a time. Results expose actionable categories,
-          never credentials or endpoint details.
-        </p>
-      </header>
+    <div class="mx-auto max-w-[1180px]">
+      <PageHeader
+        eyebrow="Providers / Connectivity"
+        title="Provider readiness"
+        description="Verify one source at a time. Results expose actionable categories, never credentials or endpoint details."
+      />
 
-      <section class="provider-ledger" aria-labelledby="provider-ledger-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Registered sources</p>
-            <h2 id="provider-ledger-title">Connectivity ledger</h2>
-          </div>
-          <span class="count">
-            {catalog.data?.providers.length ?? 0} providers
-          </span>
-        </div>
+      <section class="mt-12" aria-labelledby="provider-ledger-title">
+        <SectionHeader
+          class="pb-6"
+          eyebrow="Registered sources"
+          title="Connectivity ledger"
+          titleId="provider-ledger-title"
+          meta={
+            <CountBadge>
+              {catalog.data?.providers.length ?? 0} providers
+            </CountBadge>
+          }
+        />
         <Show when={catalog.isPending || settings.isPending}>
-          <p class="loading-line">Loading provider configuration…</p>
+          <LoadingState>Loading provider configuration…</LoadingState>
         </Show>
         <Show when={catalog.isError}>
           <RequestError error={catalog.error} />
@@ -76,15 +78,13 @@ function ProvidersPage() {
           <RequestError error={probe.error} />
         </Show>
         <Show when={catalog.isSuccess && catalog.data?.providers.length === 0}>
-          <div class="empty-inline">
-            <div>
-              <h3>No providers registered</h3>
-              <p>The server did not advertise any metadata sources.</p>
-            </div>
-          </div>
+          <EmptyState
+            title="No providers registered"
+            description="The server did not advertise any metadata sources."
+          />
         </Show>
         <Show when={catalog.isSuccess && settings.isSuccess}>
-          <div class="provider-rows">
+          <div class="border-t-2 border-ink">
             <For each={catalog.data?.providers ?? []}>
               {(provider) => (
                 <ProviderStatus

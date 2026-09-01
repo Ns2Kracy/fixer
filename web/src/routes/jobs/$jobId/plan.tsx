@@ -1,9 +1,12 @@
-import { Show, createSignal } from "solid-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { Link, createFileRoute } from "@tanstack/solid-router";
+import { Show, createSignal } from "solid-js";
 
 import { OutputDiff } from "../../../components/output-diff";
 import { RequestError } from "../../../components/request-error";
+import { Button } from "../../../components/ui/button";
+import { LoadingState } from "../../../components/ui/loading-state";
+import { PageHeader } from "../../../components/ui/page-header";
 import { api } from "../../../lib/api";
 
 export const Route = createFileRoute("/jobs/$jobId/plan")({
@@ -34,26 +37,22 @@ function PlanPage() {
   }));
 
   return (
-    <div class="plan-page">
+    <div class="mx-auto max-w-[1180px]">
       <Link
-        class="back-link"
+        class="mb-8 inline-block text-xs font-bold uppercase tracking-[0.06em] text-muted underline decoration-1 underline-offset-4 hover:text-moss"
         to="/jobs/$jobId/review"
         params={{ jobId: params().jobId }}
       >
         ← Metadata review
       </Link>
-      <header class="page-heading">
-        <div>
-          <p class="eyebrow">Job / #{params().jobId} / Filesystem</p>
-          <h1>Output plan</h1>
-          <p>
-            Review targets and operation types. File contents stay server-owned
-            and are never returned here.
-          </p>
-        </div>
-      </header>
+      <PageHeader
+        variant="detail"
+        eyebrow={<>Job / #{params().jobId} / Filesystem</>}
+        title="Output plan"
+        description="Review targets and operation types. File contents stay server-owned and are never returned here."
+      />
       <Show when={plan.isPending || job.isPending}>
-        <p class="loading-line">Loading output operations…</p>
+        <LoadingState>Loading output operations…</LoadingState>
       </Show>
       <Show when={plan.isError}>
         <RequestError error={plan.error} />
@@ -69,12 +68,15 @@ function PlanPage() {
               outputRoot={data().output_root}
             />
             <Show when={data().operations_truncated}>
-              <p class="truncation-note" role="alert">
+              <p
+                class="my-4 border-l-[3px] border-coral bg-danger-surface px-4 py-3"
+                role="alert"
+              >
                 The operation list is incomplete. Execution is disabled.
               </p>
             </Show>
             <Show when={job.data && !job.data.job.input.apply}>
-              <p class="preview-only">
+              <p class="mt-8 border-l-[3px] border-success bg-success-surface px-4 py-3">
                 This is a dry-run job. The plan cannot be executed.
               </p>
             </Show>
@@ -85,20 +87,25 @@ function PlanPage() {
                 job.data.job.state !== "planning"
               }
             >
-              <p class="preview-only">
+              <p class="mt-8 border-l-[3px] border-success bg-success-surface px-4 py-3">
                 Execution is unavailable while the job is {job.data?.job.state}.
               </p>
             </Show>
-            <div class="execution-gate">
+            <div class="mt-16 grid grid-cols-[minmax(0,1fr)_auto] gap-x-12 gap-y-6 border-t-4 border-coral bg-code p-8 text-code-ink max-[640px]:grid-cols-1 max-[640px]:p-6">
               <div>
-                <p class="eyebrow">Final gate</p>
-                <h2>Filesystem approval</h2>
-                <p>
+                <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-code-muted">
+                  Final gate
+                </p>
+                <h2 class="m-0 font-serif text-3xl font-medium">
+                  Filesystem approval
+                </h2>
+                <p class="mt-2 mb-0 text-code-muted">
                   This authorizes only the bounded server-owned plan shown here.
                 </p>
               </div>
-              <label>
+              <label class="flex max-w-[340px] self-center items-start gap-3 text-sm">
                 <input
+                  class="mt-[0.15rem] size-[1.05rem] shrink-0 accent-coral"
                   type="checkbox"
                   checked={approved()}
                   disabled={
@@ -112,8 +119,9 @@ function PlanPage() {
                 />
                 I approve these filesystem operations
               </label>
-              <button
-                class="button primary danger"
+              <Button
+                class="col-start-2 justify-self-end max-[640px]:col-start-1 max-[640px]:w-full"
+                variant="danger"
                 type="button"
                 disabled={
                   !approved() ||
@@ -130,10 +138,13 @@ function PlanPage() {
                   : execute.isSuccess
                     ? "Execution requested"
                     : "Execute approved plan"}
-              </button>
+              </Button>
             </div>
             <Show when={execute.isSuccess}>
-              <p class="success-note" role="status">
+              <p
+                class="mt-8 border-l-[3px] border-success bg-success-surface px-4 py-3"
+                role="status"
+              >
                 Execution was accepted. Live progress is available on the job
                 page.
               </p>

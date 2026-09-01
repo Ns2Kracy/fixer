@@ -1,8 +1,9 @@
-import { createSignal } from "solid-js";
 import { useMutation } from "@tanstack/solid-query";
 import { createFileRoute } from "@tanstack/solid-router";
+import { createSignal } from "solid-js";
 
 import { TemplatePreview } from "../components/template-preview";
+import { PageHeader } from "../components/ui/page-header";
 import { api, type TemplatePreviewRequest } from "../lib/api";
 
 export const Route = createFileRoute("/templates")({
@@ -40,17 +41,12 @@ function TemplatesPage() {
   }
 
   return (
-    <div class="workspace-page templates-page">
-      <header class="workspace-heading">
-        <div>
-          <p class="eyebrow">Templates / Dry render</p>
-          <h1>Template studio</h1>
-        </div>
-        <p>
-          Shape relative paths and text sidecars against a sample. Every preview
-          is validated and no-write.
-        </p>
-      </header>
+    <div class="mx-auto max-w-[1180px]">
+      <PageHeader
+        eyebrow="Templates / Dry render"
+        title="Template studio"
+        description="Shape relative paths and text sidecars against a sample. Every preview is validated and no-write."
+      />
       <TemplatePreview
         pathTemplate={pathTemplate()}
         contentTemplate={contentTemplate()}

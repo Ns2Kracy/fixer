@@ -1,8 +1,11 @@
-import { Show, createSignal } from "solid-js";
 import { useMutation } from "@tanstack/solid-query";
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
+import { Show, createSignal } from "solid-js";
 
 import { RequestError } from "../components/request-error";
+import { Button } from "../components/ui/button";
+import { FormField } from "../components/ui/form-field";
+import { PageHeader } from "../components/ui/page-header";
 import { api } from "../lib/api";
 
 export const Route = createFileRoute("/login")({
@@ -25,30 +28,34 @@ function LoginPage() {
   }
 
   return (
-    <div class="workspace-page login-page">
-      <header class="workspace-heading">
-        <div>
-          <p class="eyebrow">Session / Single user</p>
-          <h1>Unlock workspace</h1>
-        </div>
-        <p>
-          Authenticate to create jobs and approve filesystem changes. The
-          password is sent only to this Fixer server.
-        </p>
-      </header>
+    <div class="mx-auto max-w-[1180px]">
+      <PageHeader
+        eyebrow="Session / Single user"
+        title="Unlock workspace"
+        description="Authenticate to create jobs and approve filesystem changes. The password is sent only to this Fixer server."
+      />
 
-      <section class="login-panel" aria-labelledby="login-panel-title">
+      <section
+        class="mt-12 grid grid-cols-[minmax(220px,0.7fr)_minmax(300px,1.3fr)] gap-[clamp(2rem,7vw,7rem)] border-t-2 border-ink py-10 max-[700px]:grid-cols-1"
+        aria-labelledby="login-panel-title"
+      >
         <div>
-          <p class="eyebrow">Protected operations</p>
-          <h2 id="login-panel-title">Start a server session</h2>
-          <p>
+          <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
+            Protected operations
+          </p>
+          <h2
+            class="m-0 font-serif text-2xl font-medium"
+            id="login-panel-title"
+          >
+            Start a server session
+          </h2>
+          <p class="mt-3 mb-0 text-sm text-muted">
             Your session cookie is HTTP-only. CSRF state stays in this browser
             tab and is cleared when the session ends.
           </p>
         </div>
-        <form onSubmit={submit}>
-          <label>
-            <span>Workspace password</span>
+        <form class="grid content-start gap-5" onSubmit={submit}>
+          <FormField label="Workspace password">
             <input
               type="password"
               required
@@ -57,14 +64,14 @@ function LoginPage() {
               disabled={login.isPending}
               onInput={(event) => setPassword(event.currentTarget.value)}
             />
-          </label>
-          <button
-            class="button primary"
+          </FormField>
+          <Button
+            class="justify-self-start max-[700px]:w-full"
             type="submit"
             disabled={login.isPending || !password()}
           >
             {login.isPending ? "Signing in…" : "Sign in"}
-          </button>
+          </Button>
           <Show when={login.isError}>
             <RequestError error={login.error} fallback="Sign-in failed" />
           </Show>
