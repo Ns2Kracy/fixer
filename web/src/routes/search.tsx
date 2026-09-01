@@ -7,6 +7,7 @@ import { Button } from "../components/ui/button";
 import { CountBadge } from "../components/ui/count-badge";
 import { EmptyState } from "../components/ui/empty-state";
 import { FormField } from "../components/ui/form-field";
+import { Notice } from "../components/ui/notice";
 import { PageHeader } from "../components/ui/page-header";
 import { SectionHeader } from "../components/ui/section-header";
 import { api, type MediaKind, type SearchRequest } from "../lib/api";
@@ -157,9 +158,9 @@ function SearchPage() {
           </For>
         </div>
         <Show when={search.data?.truncated}>
-          <p class="my-4 border-l-[3px] border-coral bg-danger-surface px-4 py-3">
+          <Notice class="my-4" tone="danger">
             Results were capped. Refine the search to inspect a smaller set.
-          </p>
+          </Notice>
         </Show>
       </section>
     </div>

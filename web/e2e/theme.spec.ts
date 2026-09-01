@@ -32,6 +32,11 @@ test("theme follows the system, persists overrides, and stays responsive", async
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("body")).toHaveCSS(
+    "background-color",
+    "rgb(23, 26, 22)",
+  );
+  await expect(page.locator("body")).toHaveCSS("color", "rgb(241, 238, 230)");
   await expect(page.getByLabel("Theme")).toHaveValue("system");
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
     "content",
@@ -40,6 +45,11 @@ test("theme follows the system, persists overrides, and stays responsive", async
 
   await page.getByLabel("Theme").selectOption("light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator("body")).toHaveCSS(
+    "background-color",
+    "rgb(243, 240, 232)",
+  );
+  await expect(page.locator("body")).toHaveCSS("color", "rgb(29, 33, 28)");
   await page.reload();
   await expect(page.getByLabel("Theme")).toHaveValue("light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");

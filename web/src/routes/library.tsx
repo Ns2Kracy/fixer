@@ -7,6 +7,7 @@ import { CountBadge } from "../components/ui/count-badge";
 import { EmptyState } from "../components/ui/empty-state";
 import { FormField } from "../components/ui/form-field";
 import { LoadingState } from "../components/ui/loading-state";
+import { Notice } from "../components/ui/notice";
 import { PageHeader } from "../components/ui/page-header";
 import { SectionHeader } from "../components/ui/section-header";
 import { api } from "../lib/api";
@@ -197,9 +198,9 @@ function LibraryPage() {
           </For>
         </div>
         <Show when={listing.data?.truncated}>
-          <p class="my-4 border-l-[3px] border-coral bg-danger-surface px-4 py-3">
+          <Notice class="my-4" tone="danger">
             This directory was capped at the server browsing limit.
-          </p>
+          </Notice>
         </Show>
       </section>
     </div>

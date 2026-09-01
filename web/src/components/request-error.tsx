@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 
 import { ApiError } from "../lib/api";
+import { Notice } from "./ui/notice";
 
 export function RequestError(props: {
   error: Error | null;
@@ -12,10 +13,7 @@ export function RequestError(props: {
       : [];
 
   return (
-    <div
-      class="my-4 border-l-[3px] border-coral bg-danger-surface px-4 py-3 text-ink"
-      role="alert"
-    >
+    <Notice class="my-4" tone="danger" role="alert">
       <strong>
         {props.error?.message ??
           props.fallback ??
@@ -33,6 +31,6 @@ export function RequestError(props: {
           Request {(props.error as ApiError).requestId}
         </small>
       </Show>
-    </div>
+    </Notice>
   );
 }

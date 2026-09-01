@@ -2,6 +2,7 @@ import { For, Show } from "solid-js";
 
 import type { JobState, ProgressSummary } from "../lib/api";
 import { jobStateLabel } from "./job-status";
+import { Notice } from "./ui/notice";
 
 const stages = [
   ["queued", "Queued"],
@@ -74,17 +75,14 @@ export function ProgressTimeline(props: {
         </For>
       </ol>
       <Show when={terminalStates.has(props.state)}>
-        <p
-          class="mt-8 border-l-[3px] border-coral bg-danger-surface px-4 py-3"
-          role="status"
-        >
+        <Notice class="mt-8" tone="danger" role="status">
           <strong>{jobStateLabel(props.state)}.</strong>{" "}
           {props.state === "interrupted"
             ? "No writes resume automatically; retry starts the scan again."
             : props.state === "cancelled"
               ? "Processing stopped before another stage could begin."
               : "The job stopped without claiming successful completion."}
-        </p>
+        </Notice>
       </Show>
     </div>
   );

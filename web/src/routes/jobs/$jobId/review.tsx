@@ -8,6 +8,7 @@ import { RequestError } from "../../../components/request-error";
 import { Button } from "../../../components/ui/button";
 import { CountBadge } from "../../../components/ui/count-badge";
 import { LoadingState } from "../../../components/ui/loading-state";
+import { Notice } from "../../../components/ui/notice";
 import { PageHeader } from "../../../components/ui/page-header";
 import { SectionHeader } from "../../../components/ui/section-header";
 import { api, type ReviewJobRequest } from "../../../lib/api";
@@ -88,7 +89,7 @@ function ReviewPage() {
           <>
             <Show when={data().warnings.length > 0}>
               <section
-                class="my-12 grid grid-cols-[minmax(180px,0.45fr)_minmax(0,1.55fr)] gap-8 border-l-4 border-coral bg-warning-surface p-6 max-[900px]:grid-cols-1"
+                class="my-12 grid grid-cols-[minmax(180px,0.45fr)_minmax(0,1.55fr)] gap-8 border border-warning bg-warning-surface p-6 max-[900px]:grid-cols-1"
                 aria-labelledby="warnings-title"
               >
                 <div>
@@ -125,10 +126,10 @@ function ReviewPage() {
               onSelect={selectCandidate}
             />
             <Show when={data().candidates_truncated}>
-              <p class="my-4 border-l-[3px] border-coral bg-danger-surface px-4 py-3">
+              <Notice class="my-4" tone="danger">
                 Additional candidates were omitted by the server. Compare and
                 select only from the bounded candidates shown.
-              </p>
+              </Notice>
             </Show>
             <section class="mb-28" aria-labelledby="conflicts-title">
               <SectionHeader
@@ -154,10 +155,10 @@ function ReviewPage() {
                 )}
               </For>
               <Show when={data().conflicts_truncated}>
-                <p class="my-4 border-l-[3px] border-coral bg-danger-surface px-4 py-3">
+                <Notice class="my-4" tone="danger">
                   The server omitted additional conflicts; execution remains
                   blocked until a complete review is available.
-                </p>
+                </Notice>
               </Show>
             </section>
             <div class="sticky bottom-4 z-5 flex items-center justify-between gap-8 border border-ink bg-overlay px-5 py-4 shadow-[0_10px_30px_var(--color-shadow)] max-[640px]:static max-[640px]:flex-col max-[640px]:items-stretch">

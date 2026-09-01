@@ -6,6 +6,7 @@ import { OutputDiff } from "../../../components/output-diff";
 import { RequestError } from "../../../components/request-error";
 import { Button } from "../../../components/ui/button";
 import { LoadingState } from "../../../components/ui/loading-state";
+import { Notice } from "../../../components/ui/notice";
 import { PageHeader } from "../../../components/ui/page-header";
 import { api } from "../../../lib/api";
 
@@ -68,17 +69,14 @@ function PlanPage() {
               outputRoot={data().output_root}
             />
             <Show when={data().operations_truncated}>
-              <p
-                class="my-4 border-l-[3px] border-coral bg-danger-surface px-4 py-3"
-                role="alert"
-              >
+              <Notice class="my-4" tone="danger" role="alert">
                 The operation list is incomplete. Execution is disabled.
-              </p>
+              </Notice>
             </Show>
             <Show when={job.data && !job.data.job.input.apply}>
-              <p class="mt-8 border-l-[3px] border-success bg-success-surface px-4 py-3">
+              <Notice class="mt-8" tone="success">
                 This is a dry-run job. The plan cannot be executed.
-              </p>
+              </Notice>
             </Show>
             <Show
               when={
@@ -87,9 +85,9 @@ function PlanPage() {
                 job.data.job.state !== "planning"
               }
             >
-              <p class="mt-8 border-l-[3px] border-success bg-success-surface px-4 py-3">
+              <Notice class="mt-8" tone="success">
                 Execution is unavailable while the job is {job.data?.job.state}.
-              </p>
+              </Notice>
             </Show>
             <div class="mt-16 grid grid-cols-[minmax(0,1fr)_auto] gap-x-12 gap-y-6 border-t-4 border-coral bg-code p-8 text-code-ink max-[640px]:grid-cols-1 max-[640px]:p-6">
               <div>
@@ -141,13 +139,10 @@ function PlanPage() {
               </Button>
             </div>
             <Show when={execute.isSuccess}>
-              <p
-                class="mt-8 border-l-[3px] border-success bg-success-surface px-4 py-3"
-                role="status"
-              >
+              <Notice class="mt-8" tone="success" role="status">
                 Execution was accepted. Live progress is available on the job
                 page.
-              </p>
+              </Notice>
             </Show>
             <Show when={execute.isError}>
               <RequestError error={execute.error} />

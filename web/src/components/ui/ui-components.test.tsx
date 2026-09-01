@@ -7,6 +7,7 @@ import { CountBadge } from "./count-badge";
 import { EmptyState } from "./empty-state";
 import { FormField } from "./form-field";
 import { LoadingState } from "./loading-state";
+import { Notice } from "./notice";
 import { PageHeader } from "./page-header";
 import { SectionHeader } from "./section-header";
 
@@ -66,6 +67,18 @@ describe("shared UI components", () => {
 
     expect(screen.getByRole("textbox", { name: "Proxy URL" })).toBeVisible();
     expect(screen.getByText("HTTP, HTTPS, or SOCKS proxy.")).toBeVisible();
+  });
+
+  it("renders reusable notices with semantic tone and roles", () => {
+    render(() => (
+      <Notice tone="danger" role="alert">
+        The bounded response was truncated.
+      </Notice>
+    ));
+
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("The bounded response was truncated.");
+    expect(notice).toHaveClass("border-danger", "bg-danger-surface");
   });
 
   it("announces loading and empty states", () => {

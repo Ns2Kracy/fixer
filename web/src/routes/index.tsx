@@ -4,6 +4,7 @@ import { Show } from "solid-js";
 
 import { CountBadge } from "../components/ui/count-badge";
 import { EmptyState } from "../components/ui/empty-state";
+import { Notice } from "../components/ui/notice";
 import { SectionHeader } from "../components/ui/section-header";
 import { buttonStyles } from "../components/ui/button";
 import { ApiError, api } from "../lib/api";
@@ -29,7 +30,7 @@ function Workspace() {
             Workspace / Overview
           </p>
           <h1
-            class="m-0 max-w-[800px] font-serif text-[clamp(3.1rem,7vw,6.7rem)] leading-[0.91] font-medium tracking-[-0.055em] max-[480px]:text-[3.15rem]"
+            class="m-0 max-w-[800px] font-serif text-[clamp(3.1rem,7vw,6rem)] leading-[0.91] font-medium tracking-[-0.04em] max-[480px]:text-[3.15rem]"
             id="workspace-title"
             aria-label="Metadata work, without guesswork."
           >
@@ -118,7 +119,7 @@ function ApiFailure(props: { error: Error | null }) {
     props.error instanceof ApiError ? props.error.requestId : undefined;
 
   return (
-    <div class="border-l-[3px] border-coral pl-4" role="alert">
+    <Notice tone="danger" role="alert">
       <strong>
         {props.error?.message ?? "The server could not be reached"}
       </strong>
@@ -126,6 +127,6 @@ function ApiFailure(props: { error: Error | null }) {
       <Show when={requestId()}>
         {(id) => <code class="text-xs">Request {id()}</code>}
       </Show>
-    </div>
+    </Notice>
   );
 }

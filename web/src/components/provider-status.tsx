@@ -63,7 +63,7 @@ export function ProviderStatus(props: ProviderStatusProps): JSX.Element {
       <Show when={props.result}>
         {(result) => (
           <p
-            class={`col-start-2 col-end-[-1] -mt-4 mb-4 grid grid-cols-[130px_minmax(0,1fr)] gap-4 border-l-[3px] px-4 py-2.5 text-xs max-[700px]:col-start-2 max-[700px]:row-auto max-[700px]:mt-0 max-[700px]:grid-cols-1 ${result().ok ? resultClasses.ready : resultClasses.attention}`}
+            class={`col-start-2 col-end-[-1] -mt-4 mb-4 grid grid-cols-[130px_minmax(0,1fr)] gap-4 border px-4 py-2.5 text-xs max-[700px]:col-start-2 max-[700px]:row-auto max-[700px]:mt-0 max-[700px]:grid-cols-1 ${result().ok ? resultClasses.ready : resultClasses.attention}`}
             role="status"
           >
             <strong class="capitalize">
