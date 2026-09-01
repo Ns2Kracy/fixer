@@ -16,7 +16,10 @@ export function OutputDiff(props: {
   outputRoot: string;
 }) {
   return (
-    <div class="my-12 border-t-2 border-ink">
+    <section
+      class="my-12 border-t-2 border-ink"
+      aria-label="Filesystem operations"
+    >
       <p class="m-0 grid grid-cols-[140px_minmax(0,1fr)] gap-4 border-b border-line py-4 max-[640px]:grid-cols-1">
         <span class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-muted">
           Output root
@@ -47,6 +50,6 @@ export function OutputDiff(props: {
           )}
         </For>
       </ol>
-    </div>
+    </section>
   );
 }

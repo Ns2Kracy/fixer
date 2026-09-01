@@ -86,13 +86,13 @@ test("user reviews a local candidate and approves its bounded write", async ({
   await expect(
     page.getByRole("heading", { name: "Output plan" }),
   ).toBeVisible();
-  const outputDiff = page.locator(".output-diff");
-  await expect(outputDiff.locator(".output-root code")).toHaveText(mediaPath);
+  const outputDiff = page.getByRole("region", {
+    name: "Filesystem operations",
+  });
+  await expect(outputDiff.getByText(mediaPath, { exact: true })).toBeVisible();
   const operations = outputDiff.locator("ol > li");
   await expect(operations).toHaveCount(1);
-  await expect(operations.locator(".operation-kind")).toHaveText(
-    "Write metadata",
-  );
+  await expect(operations.getByText("Write metadata")).toBeVisible();
   await expect(operations.locator("code")).toHaveText("movie.json");
   await expect(operations.locator("small")).toHaveText(/\d+ bytes prepared/);
   await page
