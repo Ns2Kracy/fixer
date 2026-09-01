@@ -1,8 +1,11 @@
-import { Link, Outlet } from "@tanstack/solid-router";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
+import { Link, Outlet, useNavigate } from "@tanstack/solid-router";
 import type { JSX } from "@solidjs/web";
 import { createSignal, onCleanup } from "solid-js";
 
+import { api } from "../lib/api";
 import { createThemeController, type ThemePreference } from "../lib/theme";
+import { Button } from "./ui/button";
 import { ThemeSelect } from "./ui/theme-select";
 
 const navigation = [
@@ -17,6 +20,8 @@ const navigation = [
 
 export function AppShell(): JSX.Element {
   let main!: HTMLElement;
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [themePreference, setThemePreference] = createSignal<ThemePreference>(
     "system",
     { ownedWrite: true },
@@ -25,6 +30,18 @@ export function AppShell(): JSX.Element {
     setThemePreference(preference),
   );
   onCleanup(() => themeController.dispose());
+  const logout = useMutation(() => ({
+    mutationFn: () => api.logout(),
+    onSuccess: async () => {
+      queryClient.setQueryData(["auth", "status"], {
+        schema_version: 1,
+        registration_required: false,
+        authenticated: false,
+        username: null,
+      });
+      await navigate({ to: "/login", replace: true });
+    },
+  }));
 
   const focusWorkspace: JSX.EventHandlerUnion<HTMLAnchorElement, MouseEvent> = (
     event,
@@ -78,6 +95,15 @@ export function AppShell(): JSX.Element {
               themeController.setPreference(preference)
             }
           />
+          <Button
+            class="min-h-9 px-3 py-2 text-sm"
+            type="button"
+            variant="secondary"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate()}
+          >
+            {logout.isPending ? "Signing out…" : "Sign out"}
+          </Button>
         </div>
       </header>
       <div class="grid min-h-[calc(100vh-86px)] grid-cols-[230px_minmax(0,1fr)] max-[800px]:min-h-[calc(100vh-86px)] max-[800px]:grid-cols-1 max-[480px]:min-h-[calc(100vh-72px)]">

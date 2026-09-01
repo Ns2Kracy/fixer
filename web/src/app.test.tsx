@@ -133,6 +133,35 @@ describe('Fixer workspace', () => {
     expect(alert).toHaveTextContent('req-0000000000000001')
   })
 
+  it('signs out from the header and returns to the login page', async () => {
+    sessionStorage.setItem('fixer.csrf-token', 'csrf-sign-out')
+    const fetchMock = authenticatedFetch((url) => {
+      if (url === '/api/v1/health') {
+        return json({ schema_version: 1, status: 'ok', version: '0.1.0' })
+      }
+      if (url === '/api/v1/auth/logout') return new Response(null, { status: 204 })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderApp()
+
+    await screen.findByRole('heading', { name: 'Metadata work, without guesswork.' })
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/auth/logout',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'x-csrf-token': 'csrf-sign-out' }),
+        }),
+      ),
+    )
+    expect(await screen.findByRole('heading', { name: 'Unlock workspace' })).toBeVisible()
+    expect(sessionStorage.getItem('fixer.csrf-token')).toBeNull()
+  })
+
   it('offers a keyboard skip link that moves focus to main content', async () => {
     vi.stubGlobal(
       'fetch',
