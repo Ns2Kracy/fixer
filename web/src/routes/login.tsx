@@ -8,7 +8,15 @@ import { FormField } from "../components/ui/form-field";
 import { PageHeader } from "../components/ui/page-header";
 import { api } from "../lib/api";
 
+interface LoginSearch {
+  redirect?: string;
+}
+
 export const Route = createFileRoute("/login")({
+  validateSearch: (search: Record<string, unknown>): LoginSearch => {
+    const redirect = search.redirect;
+    return typeof redirect === "string" && redirect ? { redirect } : {};
+  },
   component: LoginPage,
 });
 

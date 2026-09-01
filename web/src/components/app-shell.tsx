@@ -13,7 +13,6 @@ const navigation = [
   { to: "/providers", label: "Providers", marker: "05" },
   { to: "/settings", label: "Settings", marker: "06" },
   { to: "/templates", label: "Templates", marker: "07" },
-  { to: "/login", label: "Sign in", marker: "08" },
 ] as const;
 
 export function AppShell(): JSX.Element {

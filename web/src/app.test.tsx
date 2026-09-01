@@ -7,6 +7,30 @@ import { describe, expect, it, vi } from 'vitest'
 import { App } from './app'
 import { createAppRouter } from './router'
 
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+function authenticatedFetch(
+  handler: (url: string) => Response | Promise<Response>,
+) {
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url === '/api/v1/auth/status') {
+      return json({
+        schema_version: 1,
+        registration_required: false,
+        authenticated: true,
+        username: 'admin',
+      })
+    }
+    return handler(url)
+  })
+}
+
 function renderApp(initialEntry = '/') {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -22,26 +46,55 @@ function renderApp(initialEntry = '/') {
 }
 
 describe('Fixer workspace', () => {
+  it('redirects unauthenticated workspace visits before loading protected data', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/v1/auth/status') {
+        return json({
+          schema_version: 1,
+          registration_required: false,
+          authenticated: false,
+          username: null,
+        })
+      }
+      throw new Error(`Unexpected request: ${String(input)}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderApp()
+
+    expect(await screen.findByRole('heading', { name: 'Unlock workspace' })).toBeVisible()
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/v1/health', expect.anything())
+  })
+
   it('mounts the workspace dashboard', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ schema_version: 1, status: 'ok', version: '0.1.0' }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      ),
+      authenticatedFetch((url) => {
+        if (url === '/api/v1/health') {
+          return json({ schema_version: 1, status: 'ok', version: '0.1.0' })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
     )
 
     renderApp()
 
     expect(await screen.findByRole('heading', { name: 'Metadata work, without guesswork.' })).toBeVisible()
     expect(await screen.findByText('Server connected')).toBeVisible()
+    expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Review workspace' })).toHaveAttribute('href', '#activity-title')
   })
 
   it('recovers from an unknown route through client-side navigation', async () => {
-    vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal(
+      'fetch',
+      authenticatedFetch((url) => {
+        if (url === '/api/v1/health') {
+          return json({ schema_version: 1, status: 'ok', version: '0.1.0' })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
     const user = userEvent.setup()
     renderApp('/missing')
 
@@ -56,18 +109,21 @@ describe('Fixer workspace', () => {
   it('shows the structured API error instead of a generic failure', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            error: {
-              code: 'authentication_required',
-              message: 'Authentication is required',
-              request_id: 'req-0000000000000001',
+      authenticatedFetch((url) => {
+        if (url === '/api/v1/health') {
+          return json(
+            {
+              error: {
+                code: 'authentication_required',
+                message: 'Authentication is required',
+                request_id: 'req-0000000000000001',
+              },
             },
-          }),
-          { status: 401, headers: { 'content-type': 'application/json' } },
-        ),
-      ),
+            401,
+          )
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
     )
 
     renderApp()
@@ -80,12 +136,12 @@ describe('Fixer workspace', () => {
   it('offers a keyboard skip link that moves focus to main content', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ schema_version: 1, status: 'ok', version: '0.1.0' }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      ),
+      authenticatedFetch((url) => {
+        if (url === '/api/v1/health') {
+          return json({ schema_version: 1, status: 'ok', version: '0.1.0' })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
     )
     const user = userEvent.setup()
     renderApp()

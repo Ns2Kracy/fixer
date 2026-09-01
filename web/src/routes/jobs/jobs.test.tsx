@@ -55,6 +55,12 @@ function renderApp(initialEntry: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  queryClient.setQueryData(["auth", "status"], {
+    schema_version: 1,
+    registration_required: false,
+    authenticated: true,
+    username: "admin",
+  });
   const router = createAppRouter({
     history: createMemoryHistory({ initialEntries: [initialEntry] }),
     queryClient,

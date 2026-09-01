@@ -35,6 +35,14 @@ describe("server session login", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, _init?: RequestInit) => {
         const url = String(input);
+        if (url === "/api/v1/auth/status") {
+          return json({
+            schema_version: 1,
+            registration_required: false,
+            authenticated: true,
+            username: "admin",
+          });
+        }
         if (url === "/api/v1/auth/login") {
           return json({
             schema_version: 1,
@@ -53,6 +61,9 @@ describe("server session login", () => {
     const user = userEvent.setup();
     renderApp("/login");
 
+    expect(
+      screen.queryByRole("complementary", { name: "Workspace navigation" }),
+    ).not.toBeInTheDocument();
     await user.type(await screen.findByLabelText("Username"), "admin");
     await user.type(
       screen.getByLabelText("Password"),

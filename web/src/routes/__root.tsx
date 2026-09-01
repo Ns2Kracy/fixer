@@ -1,11 +1,31 @@
 import type { QueryClient } from "@tanstack/solid-query";
-import { Link, createRootRouteWithContext } from "@tanstack/solid-router";
+import {
+  Link,
+  Outlet,
+  createRootRouteWithContext,
+  isRedirect,
+  redirect,
+  useLocation,
+} from "@tanstack/solid-router";
+import { Show } from "solid-js";
 
 import { AppShell } from "../components/app-shell";
 import { buttonStyles } from "../components/ui/button";
+import { authStatusQuery } from "../lib/auth";
 
 export interface RouterContext {
   queryClient: QueryClient;
+}
+
+function RootLayout() {
+  const isLogin = useLocation({
+    select: (location) => location.pathname === "/login",
+  });
+  return (
+    <Show when={!isLogin()} fallback={<Outlet />}>
+      <AppShell />
+    </Show>
+  );
 }
 
 function NotFound() {
@@ -31,6 +51,28 @@ function NotFound() {
 }
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  component: AppShell,
+  beforeLoad: async ({ context, location }) => {
+    if (location.pathname === "/login") return;
+    try {
+      const status = await context.queryClient.ensureQueryData(
+        authStatusQuery(),
+      );
+      if (!status.authenticated) {
+        throw redirect({
+          to: "/login",
+          search: { redirect: location.href },
+          replace: true,
+        });
+      }
+    } catch (error) {
+      if (isRedirect(error)) throw error;
+      throw redirect({
+        to: "/login",
+        search: { redirect: location.href },
+        replace: true,
+      });
+    }
+  },
+  component: RootLayout,
   notFoundComponent: NotFound,
 });
