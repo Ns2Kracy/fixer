@@ -54,35 +54,6 @@ impl SqliteJobStore {
         Ok(store)
     }
 
-    pub async fn set_password_hash(
-        &self,
-        password_hash: &PasswordHashValue,
-    ) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT INTO fixer_users (id, password_hash, updated_at_ms) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET password_hash = excluded.password_hash, updated_at_ms = excluded.updated_at_ms",
-        )
-        .bind(password_hash.as_str())
-        .bind(timestamp_ms()?)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn verify_single_user_password(&self, password: &str) -> Result<bool, StoreError> {
-        let Some(encoded) =
-            sqlx::query_scalar::<_, String>("SELECT password_hash FROM fixer_users WHERE id = 1")
-                .fetch_optional(&self.pool)
-                .await?
-        else {
-            return Ok(false);
-        };
-        let encoded = PasswordHashValue::parse(encoded)?;
-        let password = password.to_owned();
-        tokio::task::spawn_blocking(move || verify_password(&password, &encoded))
-            .await?
-            .map_err(Into::into)
-    }
-
     pub async fn has_registered_user(&self) -> Result<bool, StoreError> {
         let exists = sqlx::query_scalar::<_, i64>(
             "SELECT EXISTS(SELECT 1 FROM fixer_users WHERE id = 1 AND username IS NOT NULL)",

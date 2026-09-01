@@ -32,23 +32,12 @@ const DEFAULT_BIND_ADDR: SocketAddr =
 const DEFAULT_DATABASE_PATH: &str = "fixer.sqlite3";
 const DEFAULT_EVENT_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 const DEFAULT_WORKER_COUNT: NonZeroUsize = NonZeroUsize::new(2).unwrap();
-const MAX_PASSWORD_BYTES: usize = 1024;
-
-#[derive(Clone, PartialEq, Eq)]
-struct ServerPassword(String);
-
-impl fmt::Debug for ServerPassword {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("[REDACTED]")
-    }
-}
 
 /// Validated network, authentication, filesystem, and persistence configuration.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     bind_addr: SocketAddr,
     database_path: PathBuf,
-    password: Option<ServerPassword>,
     media_policy: Option<FsPolicy>,
     https_termination: bool,
     allowed_origins: Vec<String>,
@@ -61,7 +50,6 @@ impl fmt::Debug for ServerConfig {
             .debug_struct("ServerConfig")
             .field("bind_addr", &self.bind_addr)
             .field("database_path", &self.database_path)
-            .field("password", &self.password)
             .field("media_policy", &self.media_policy)
             .field("https_termination", &self.https_termination)
             .field("allowed_origins", &self.allowed_origins)
@@ -71,25 +59,12 @@ impl fmt::Debug for ServerConfig {
 }
 
 impl ServerConfig {
-    /// Creates an unauthenticated loopback-only configuration for validation and tests.
+    /// Creates a configuration whose administrator credentials are stored in SQLite.
     pub fn new(bind_addr: SocketAddr) -> Result<Self, ServerConfigError> {
-        if !bind_addr.ip().is_loopback() {
-            return Err(ServerConfigError::AuthenticationRequired);
-        }
         Ok(Self::base(bind_addr))
     }
 
-    /// Creates a configuration with the single-user password required for any bind address.
-    pub fn authenticated(
-        bind_addr: SocketAddr,
-        password: impl Into<String>,
-    ) -> Result<Self, ServerConfigError> {
-        let mut config = Self::base(bind_addr);
-        config.password = Some(validate_password(password.into())?);
-        Ok(config)
-    }
-
-    /// Parses an unauthenticated loopback bind address.
+    /// Parses a server bind address.
     pub fn parse(value: &str) -> Result<Self, ServerConfigError> {
         Self::new(parse_bind(value)?)
     }
@@ -98,7 +73,6 @@ impl ServerConfig {
         Self {
             bind_addr,
             database_path: PathBuf::from(DEFAULT_DATABASE_PATH),
-            password: None,
             media_policy: None,
             https_termination: false,
             allowed_origins: Vec::new(),
@@ -161,22 +135,7 @@ impl ServerConfig {
             Err(env::VarError::NotPresent) => DEFAULT_BIND_ADDR,
             Err(source) => return Err(ServerConfigError::InvalidBindEnvironment(source)),
         };
-        let mut config = match env::var("FIXER_SERVER_PASSWORD") {
-            Ok(password) => Self::authenticated(bind, password)?,
-            Err(env::VarError::NotPresent) => {
-                if bind.ip().is_loopback() {
-                    Self::new(bind)?
-                } else {
-                    return Err(ServerConfigError::AuthenticationRequired);
-                }
-            }
-            Err(source) => {
-                return Err(ServerConfigError::InvalidEnvironment {
-                    name: "FIXER_SERVER_PASSWORD",
-                    source,
-                });
-            }
-        };
+        let mut config = Self::new(bind)?;
         if let Some(path) = optional_env("FIXER_SERVER_DATABASE")? {
             config = config.with_database_path(path)?;
         }
@@ -203,9 +162,6 @@ impl ServerConfig {
     }
 
     pub fn validate_for_serve(&self) -> Result<(), ServerConfigError> {
-        if self.password.is_none() {
-            return Err(ServerConfigError::MissingPassword);
-        }
         if self.media_policy.is_none() {
             return Err(ServerConfigError::MissingMediaRoots);
         }
@@ -247,12 +203,6 @@ impl Default for ServerConfig {
 
 #[derive(Debug, Error)]
 pub enum ServerConfigError {
-    #[error("non-loopback binding requires authentication")]
-    AuthenticationRequired,
-    #[error("server authentication password is required")]
-    MissingPassword,
-    #[error("server authentication password must contain between 1 and {MAX_PASSWORD_BYTES} bytes")]
-    InvalidPassword,
     #[error("at least one allowed media root is required")]
     MissingMediaRoots,
     #[error("invalid server bind address `{value}`: {source}")]
@@ -289,10 +239,6 @@ pub enum ServeError {
     Config(#[from] ServerConfigError),
     #[error("failed to open persistent job store: {0}")]
     Store(#[from] store::StoreError),
-    #[error("password hashing failed: {0}")]
-    Password(#[from] auth::password::PasswordError),
-    #[error("password hashing worker failed: {0}")]
-    PasswordTask(#[from] tokio::task::JoinError),
     #[error("workspace initialization failed: {0}")]
     Workspace(#[from] WorkspaceStateError),
     #[error("server I/O failed: {0}")]
@@ -303,16 +249,6 @@ pub enum ServeError {
 pub async fn serve(config: ServerConfig, web_root: impl AsRef<Path>) -> Result<(), ServeError> {
     config.validate_for_serve()?;
     let store = SqliteJobStore::open(config.database_path()).await?;
-    let password = config
-        .password
-        .as_ref()
-        .expect("validated production configuration has a password")
-        .0
-        .clone();
-    let password_hash =
-        tokio::task::spawn_blocking(move || auth::password::hash_password(&password)).await??;
-    store.set_password_hash(&password_hash).await?;
-
     let fs_policy = config
         .media_policy
         .clone()
@@ -348,13 +284,6 @@ fn parse_bind(value: &str) -> Result<SocketAddr, ServerConfigError> {
             value: value.to_owned(),
             source,
         })
-}
-
-fn validate_password(password: String) -> Result<ServerPassword, ServerConfigError> {
-    if password.is_empty() || password.len() > MAX_PASSWORD_BYTES {
-        return Err(ServerConfigError::InvalidPassword);
-    }
-    Ok(ServerPassword(password))
 }
 
 fn optional_env(name: &'static str) -> Result<Option<String>, ServerConfigError> {
