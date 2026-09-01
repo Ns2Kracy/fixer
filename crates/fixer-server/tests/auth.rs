@@ -49,7 +49,7 @@ async fn api_tokens_are_shown_once_but_only_sha256_digests_are_persisted() {
     )
     .await
     .unwrap();
-    let row = sqlx::query("SELECT name, token_digest FROM api_tokens WHERE id = ?")
+    let row = sqlx::query("SELECT name, token_digest FROM fixer_api_tokens WHERE id = ?")
         .bind(issued.id())
         .fetch_one(&pool)
         .await
@@ -58,7 +58,7 @@ async fn api_tokens_are_shown_once_but_only_sha256_digests_are_persisted() {
     let digest = row.get::<Vec<u8>, _>("token_digest");
     assert_eq!(digest.len(), 32);
     assert_ne!(digest, presented.as_bytes());
-    let schema = sqlx::query("SELECT sql FROM sqlite_schema WHERE name = 'api_tokens'")
+    let schema = sqlx::query("SELECT sql FROM sqlite_schema WHERE name = 'fixer_api_tokens'")
         .fetch_one(&pool)
         .await
         .unwrap()
@@ -82,12 +82,7 @@ async fn first_administrator_registration_is_atomic_and_sessions_store_only_dige
     assert!(!store.has_registered_user().await.unwrap());
 
     let encoded = hash_password("session password").unwrap();
-    assert!(
-        store
-            .register_single_user("admin", &encoded)
-            .await
-            .unwrap()
-    );
+    assert!(store.register_single_user("admin", &encoded).await.unwrap());
     assert!(store.has_registered_user().await.unwrap());
     assert!(
         store
@@ -156,13 +151,13 @@ async fn first_administrator_registration_is_atomic_and_sessions_store_only_dige
     )
     .await
     .unwrap();
-    let row = sqlx::query("SELECT username, password_hash FROM single_user_auth")
+    let row = sqlx::query("SELECT username, password_hash FROM fixer_users")
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(row.get::<String, _>("username"), "admin");
     assert_eq!(row.get::<String, _>("password_hash"), encoded.as_str());
-    let session_columns = sqlx::query("PRAGMA table_info(auth_sessions)")
+    let session_columns = sqlx::query("PRAGMA table_info(fixer_sessions)")
         .fetch_all(&pool)
         .await
         .unwrap()
@@ -191,13 +186,13 @@ use serde_json::{Value, json};
 use std::num::NonZeroUsize;
 use tower::ServiceExt;
 
-async fn secure_app(secure_cookie: bool) -> (tempfile::TempDir, SqliteJobStore, axum::Router) {
+async fn unregistered_secure_app(
+    secure_cookie: bool,
+) -> (tempfile::TempDir, SqliteJobStore, axum::Router) {
     let root = tempfile::tempdir().unwrap();
     let store = SqliteJobStore::open(root.path().join("http-auth.sqlite3"))
         .await
         .unwrap();
-    let password = hash_password("web password").unwrap();
-    store.set_password_hash(&password).await.unwrap();
     let runtime = JobRuntime::new(store.clone(), NonZeroUsize::new(8).unwrap());
     let auth = AuthState::new(store.clone())
         .with_secure_cookie(secure_cookie)
@@ -205,6 +200,18 @@ async fn secure_app(secure_cookie: bool) -> (tempfile::TempDir, SqliteJobStore, 
         .unwrap();
     let workspace = WorkspaceState::new([root.path()]).unwrap();
     (root, store, secure_workspace_app(runtime, auth, workspace))
+}
+
+async fn secure_app(secure_cookie: bool) -> (tempfile::TempDir, SqliteJobStore, axum::Router) {
+    let (root, store, router) = unregistered_secure_app(secure_cookie).await;
+    let password = hash_password("web password").unwrap();
+    assert!(
+        store
+            .register_single_user("admin", &password)
+            .await
+            .unwrap()
+    );
+    (root, store, router)
 }
 
 async fn json_body(response: axum::response::Response) -> Value {
@@ -218,7 +225,9 @@ async fn login(router: &axum::Router) -> (String, String) {
         .oneshot(
             Request::post("/api/v1/auth/login")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({"password": "web password"}).to_string()))
+                .body(Body::from(
+                    json!({"username": "admin", "password": "web password"}).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -231,6 +240,122 @@ async fn login(router: &axum::Router) -> (String, String) {
     let cookie = set_cookie.split(';').next().unwrap().to_owned();
     let body = json_body(response).await;
     (cookie, body["csrf_token"].as_str().unwrap().to_owned())
+}
+
+#[tokio::test]
+async fn registration_initializes_the_only_administrator_and_reports_session_status() {
+    let (_root, _store, router) = unregistered_secure_app(false).await;
+
+    let status = router
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/auth/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+    assert_eq!(status.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(
+        json_body(status).await,
+        json!({
+            "schema_version": 1,
+            "registration_required": true,
+            "authenticated": false,
+            "username": null
+        })
+    );
+
+    let invalid = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/auth/register")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"username": "ab", "password": "short"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let invalid_body = json_body(invalid).await;
+    assert_eq!(invalid_body["error"]["code"], "invalid_registration");
+
+    let registered = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/auth/register")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "username": "admin",
+                        "password": "long enough password"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(registered.status(), StatusCode::OK);
+    let set_cookie = registered.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(set_cookie.contains("HttpOnly"));
+    assert!(set_cookie.contains("SameSite=Strict"));
+    let cookie = set_cookie.split(';').next().unwrap().to_owned();
+    let registered_body = json_body(registered).await;
+    assert_eq!(registered_body["username"], "admin");
+    assert!(
+        registered_body["csrf_token"]
+            .as_str()
+            .unwrap()
+            .starts_with("fixer_csrf_")
+    );
+
+    let authenticated = router
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/auth/status")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        json_body(authenticated).await,
+        json!({
+            "schema_version": 1,
+            "registration_required": false,
+            "authenticated": true,
+            "username": "admin"
+        })
+    );
+
+    let second = router
+        .oneshot(
+            Request::post("/api/v1/auth/register")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "username": "second-admin",
+                        "password": "another long password"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json_body(second).await["error"]["code"],
+        "registration_closed"
+    );
 }
 
 #[tokio::test]
@@ -252,7 +377,9 @@ async fn login_sets_strict_http_only_cookie_and_protects_api_routes() {
         .oneshot(
             Request::post("/api/v1/auth/login")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({"password": "wrong"}).to_string()))
+                .body(Body::from(
+                    json!({"username": "admin", "password": "wrong"}).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -264,7 +391,9 @@ async fn login_sets_strict_http_only_cookie_and_protects_api_routes() {
         .oneshot(
             Request::post("/api/v1/auth/login")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({"password": "web password"}).to_string()))
+                .body(Body::from(
+                    json!({"username": "admin", "password": "web password"}).to_string(),
+                ))
                 .unwrap(),
         )
         .await

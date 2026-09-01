@@ -59,7 +59,7 @@ impl SqliteJobStore {
         password_hash: &PasswordHashValue,
     ) -> Result<(), StoreError> {
         sqlx::query(
-            "INSERT INTO single_user_auth (id, password_hash, updated_at_ms) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET password_hash = excluded.password_hash, updated_at_ms = excluded.updated_at_ms",
+            "INSERT INTO fixer_users (id, password_hash, updated_at_ms) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET password_hash = excluded.password_hash, updated_at_ms = excluded.updated_at_ms",
         )
         .bind(password_hash.as_str())
         .bind(timestamp_ms()?)
@@ -69,11 +69,10 @@ impl SqliteJobStore {
     }
 
     pub async fn verify_single_user_password(&self, password: &str) -> Result<bool, StoreError> {
-        let Some(encoded) = sqlx::query_scalar::<_, String>(
-            "SELECT password_hash FROM single_user_auth WHERE id = 1",
-        )
-        .fetch_optional(&self.pool)
-        .await?
+        let Some(encoded) =
+            sqlx::query_scalar::<_, String>("SELECT password_hash FROM fixer_users WHERE id = 1")
+                .fetch_optional(&self.pool)
+                .await?
         else {
             return Ok(false);
         };
@@ -86,7 +85,7 @@ impl SqliteJobStore {
 
     pub async fn has_registered_user(&self) -> Result<bool, StoreError> {
         let exists = sqlx::query_scalar::<_, i64>(
-            "SELECT EXISTS(SELECT 1 FROM single_user_auth WHERE id = 1 AND username IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM fixer_users WHERE id = 1 AND username IS NOT NULL)",
         )
         .fetch_one(&self.pool)
         .await?;
@@ -99,13 +98,13 @@ impl SqliteJobStore {
         password_hash: &PasswordHashValue,
     ) -> Result<bool, StoreError> {
         let result = sqlx::query(
-            "INSERT INTO single_user_auth (id, username, password_hash, updated_at_ms) \
+            "INSERT INTO fixer_users (id, username, password_hash, updated_at_ms) \
              VALUES (1, ?, ?, ?) \
              ON CONFLICT(id) DO UPDATE SET \
                username = excluded.username, \
                password_hash = excluded.password_hash, \
                updated_at_ms = excluded.updated_at_ms \
-             WHERE single_user_auth.username IS NULL",
+             WHERE fixer_users.username IS NULL",
         )
         .bind(username)
         .bind(password_hash.as_str())
@@ -115,15 +114,21 @@ impl SqliteJobStore {
         Ok(result.rows_affected() == 1)
     }
 
+    pub async fn registered_username(&self) -> Result<Option<String>, StoreError> {
+        sqlx::query_scalar("SELECT username FROM fixer_users WHERE id = 1 AND username IS NOT NULL")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn verify_single_user_credentials(
         &self,
         username: &str,
         password: &str,
     ) -> Result<bool, StoreError> {
-        let Some(encoded) = sqlx::query_scalar::<_, String>(
-            "SELECT password_hash FROM single_user_auth WHERE id = 1 AND username = ?",
+        let Some((registered_username, encoded)) = sqlx::query_as::<_, (String, String)>(
+            "SELECT username, password_hash FROM fixer_users WHERE id = 1 AND username IS NOT NULL",
         )
-        .bind(username)
         .fetch_optional(&self.pool)
         .await?
         else {
@@ -131,9 +136,9 @@ impl SqliteJobStore {
         };
         let encoded = PasswordHashValue::parse(encoded)?;
         let password = password.to_owned();
-        tokio::task::spawn_blocking(move || verify_password(&password, &encoded))
-            .await?
-            .map_err(Into::into)
+        let password_valid =
+            tokio::task::spawn_blocking(move || verify_password(&password, &encoded)).await??;
+        Ok(registered_username == username && password_valid)
     }
 
     pub async fn create_session(&self, lifetime: Duration) -> Result<IssuedSession, StoreError> {
@@ -150,7 +155,7 @@ impl SqliteJobStore {
             .ok_or(StoreError::TimestampOverflow)?;
         let secrets = issue_session_secrets()?;
         sqlx::query(
-            "INSERT INTO auth_sessions (token_digest, csrf_digest, created_at_ms, expires_at_ms) VALUES (?, ?, ?, ?)",
+            "INSERT INTO fixer_sessions (token_digest, csrf_digest, created_at_ms, expires_at_ms) VALUES (?, ?, ?, ?)",
         )
         .bind(secrets.token_digest.as_slice())
         .bind(secrets.csrf_digest.as_slice())
@@ -175,7 +180,7 @@ impl SqliteJobStore {
         }
         let csrf_digest = csrf_token.map(digest);
         let authenticated: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM auth_sessions WHERE token_digest = ? AND expires_at_ms > ? AND (? IS NULL OR csrf_digest = ?))",
+            "SELECT EXISTS(SELECT 1 FROM fixer_sessions WHERE token_digest = ? AND expires_at_ms > ? AND (? IS NULL OR csrf_digest = ?))",
         )
         .bind(digest(token).as_slice())
         .bind(timestamp_ms()?)
@@ -190,7 +195,7 @@ impl SqliteJobStore {
         if !token.starts_with("fixer_session_") {
             return Ok(false);
         }
-        let result = sqlx::query("DELETE FROM auth_sessions WHERE token_digest = ?")
+        let result = sqlx::query("DELETE FROM fixer_sessions WHERE token_digest = ?")
             .bind(digest(token).as_slice())
             .execute(&self.pool)
             .await?;
@@ -206,7 +211,7 @@ impl SqliteJobStore {
         }
         let token = issue_secret("fixer_pat_")?;
         let result = sqlx::query(
-            "INSERT INTO api_tokens (name, token_digest, created_at_ms) VALUES (?, ?, ?)",
+            "INSERT INTO fixer_api_tokens (name, token_digest, created_at_ms) VALUES (?, ?, ?)",
         )
         .bind(name)
         .bind(digest(&token).as_slice())
@@ -221,7 +226,7 @@ impl SqliteJobStore {
             return Ok(None);
         }
         sqlx::query_scalar(
-            "SELECT id FROM api_tokens WHERE token_digest = ? AND revoked_at_ms IS NULL",
+            "SELECT id FROM fixer_api_tokens WHERE token_digest = ? AND revoked_at_ms IS NULL",
         )
         .bind(digest(token).as_slice())
         .fetch_optional(&self.pool)
@@ -234,7 +239,7 @@ impl SqliteJobStore {
             return Ok(false);
         }
         let result = sqlx::query(
-            "UPDATE api_tokens SET revoked_at_ms = ? WHERE id = ? AND revoked_at_ms IS NULL",
+            "UPDATE fixer_api_tokens SET revoked_at_ms = ? WHERE id = ? AND revoked_at_ms IS NULL",
         )
         .bind(timestamp_ms()?)
         .bind(id)
