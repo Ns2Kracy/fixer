@@ -50,6 +50,12 @@ test("theme follows the system, persists overrides, and stays responsive", async
     "rgb(243, 240, 232)",
   );
   await expect(page.locator("body")).toHaveCSS("color", "rgb(29, 33, 28)");
+  const reviewWorkspace = page.getByRole("link", { name: "Review workspace" });
+  await expect(reviewWorkspace).toHaveCSS(
+    "background-color",
+    "rgb(29, 33, 28)",
+  );
+  await expect(reviewWorkspace).toHaveCSS("color", "rgb(243, 240, 232)");
   await page.reload();
   await expect(page.getByLabel("Theme")).toHaveValue("light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");

@@ -77,10 +77,6 @@ textarea {
   font: inherit;
 }
 
-a {
-  color: inherit;
-}
-
 ::placeholder {
   color: var(--color-muted);
   opacity: 1;
