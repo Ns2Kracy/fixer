@@ -5,11 +5,11 @@ export type ButtonVariant = "primary" | "secondary" | "danger";
 
 const buttonVariants: Record<ButtonVariant, string> = {
   primary:
-    "border-ink bg-ink text-paper hover:border-moss hover:bg-moss hover:text-white",
+    "border-ink bg-ink text-paper hover:border-moss hover:bg-moss hover:text-paper",
   secondary:
-    "border-ink bg-transparent text-ink hover:border-moss hover:bg-moss hover:text-white",
+    "border-ink bg-transparent text-ink hover:border-moss hover:bg-moss hover:text-paper",
   danger:
-    "border-coral bg-coral text-white hover:border-ink hover:bg-ink hover:text-paper",
+    "border-coral bg-coral text-paper hover:border-ink hover:bg-ink hover:text-paper",
 };
 
 export function buttonStyles(
