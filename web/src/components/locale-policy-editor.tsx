@@ -23,9 +23,10 @@ export function LocalePolicyEditor(
   }
 
   return (
-    <label class="locale-policy-editor">
+    <label class="grid gap-2 text-sm font-medium text-muted">
       <span>Preferred locales</span>
       <input
+        class="min-h-11 border border-line bg-surface px-3 py-2.5 text-ink outline-none transition-colors focus-visible:border-coral"
         type="text"
         value={props.value.join(", ")}
         disabled={props.disabled}
@@ -33,7 +34,10 @@ export function LocalePolicyEditor(
         aria-describedby="locale-policy-help"
         onInput={(event) => update(event.currentTarget.value)}
       />
-      <small id="locale-policy-help">
+      <small
+        class="font-normal leading-relaxed text-muted"
+        id="locale-policy-help"
+      >
         Ordered BCP 47 tags, separated by commas. Earlier locales win when
         metadata overlaps.
       </small>

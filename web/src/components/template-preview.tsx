@@ -1,8 +1,13 @@
-import { Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
+import { Show } from "solid-js";
 
 import type { TemplatePreviewEnvelope } from "../lib/api";
 import { RequestError } from "./request-error";
+import { Button } from "./ui/button";
+import { CountBadge } from "./ui/count-badge";
+import { EmptyState } from "./ui/empty-state";
+import { FormField } from "./ui/form-field";
+import { SectionHeader } from "./ui/section-header";
 
 interface TemplatePreviewProps {
   pathTemplate: string;
@@ -25,12 +30,16 @@ interface TemplatePreviewProps {
 
 export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
   return (
-    <div class="template-workbench">
-      <form class="template-form" onSubmit={props.onSubmit}>
-        <div class="template-block">
-          <p class="eyebrow">01 / Output path</p>
-          <label>
-            <span>Path template</span>
+    <div class="mt-12 grid grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)] gap-[clamp(2rem,6vw,6rem)] max-[1000px]:grid-cols-1">
+      <form class="grid gap-10" onSubmit={props.onSubmit}>
+        <div class="border-t-2 border-ink pt-4">
+          <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
+            01 / Output path
+          </p>
+          <FormField
+            label="Path template"
+            hint="Variables: title, id, year, edition. Filters: sanitize, lower, upper."
+          >
             <input
               type="text"
               value={props.pathTemplate}
@@ -40,18 +49,16 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
                 props.onPathTemplate(event.currentTarget.value)
               }
             />
-          </label>
-          <small>
-            Variables: title, id, year, edition. Filters: sanitize, lower,
-            upper.
-          </small>
+          </FormField>
         </div>
 
-        <div class="template-block">
-          <p class="eyebrow">02 / Sidecar content</p>
-          <label>
-            <span>Content template</span>
+        <div class="border-t-2 border-ink pt-4">
+          <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
+            02 / Sidecar content
+          </p>
+          <FormField label="Content template">
             <textarea
+              class="w-full resize-y font-mono text-sm leading-relaxed"
               rows="8"
               value={props.contentTemplate}
               required
@@ -60,31 +67,33 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
                 props.onContentTemplate(event.currentTarget.value)
               }
             />
-          </label>
+          </FormField>
         </div>
 
-        <fieldset class="sample-fields" disabled={props.pending}>
-          <legend>Preview sample</legend>
-          <label>
-            <span>Sample title</span>
+        <fieldset
+          class="grid grid-cols-2 gap-4 border-0 p-0 max-[700px]:grid-cols-1"
+          disabled={props.pending}
+        >
+          <legend class="col-span-full mb-4 w-full border-b border-line pb-3 font-serif text-lg font-medium">
+            Preview sample
+          </legend>
+          <FormField label="Sample title">
             <input
               type="text"
               value={props.title}
               required
               onInput={(event) => props.onTitle(event.currentTarget.value)}
             />
-          </label>
-          <label>
-            <span>Sample ID</span>
+          </FormField>
+          <FormField label="Sample ID">
             <input
               type="text"
               value={props.id}
               required
               onInput={(event) => props.onId(event.currentTarget.value)}
             />
-          </label>
-          <label>
-            <span>Sample year</span>
+          </FormField>
+          <FormField label="Sample year">
             <input
               type="number"
               min="0"
@@ -92,65 +101,67 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
               value={props.year}
               onInput={(event) => props.onYear(event.currentTarget.value)}
             />
-          </label>
-          <label>
-            <span>Sample edition</span>
+          </FormField>
+          <FormField label="Sample edition">
             <input
               type="text"
               value={props.edition}
               placeholder="Director's cut"
               onInput={(event) => props.onEdition(event.currentTarget.value)}
             />
-          </label>
+          </FormField>
         </fieldset>
 
-        <button class="button primary" type="submit" disabled={props.pending}>
+        <Button class="justify-self-start" type="submit" disabled={props.pending}>
           {props.pending ? "Rendering…" : "Preview template"}
-        </button>
+        </Button>
         <Show when={props.error}>
           {(error) => <RequestError error={error()} />}
         </Show>
       </form>
 
       <section
-        class="template-output"
+        class="sticky top-4 self-start border-t-2 border-ink pt-4 max-[1000px]:static"
         aria-labelledby="template-output-title"
         aria-live="polite"
       >
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">No-write render</p>
-            <h2 id="template-output-title">Preview</h2>
-          </div>
-          <Show when={props.preview}>
-            {(preview) => (
-              <span class="count">{preview().content_bytes} bytes</span>
-            )}
-          </Show>
-        </div>
+        <SectionHeader
+          eyebrow="No-write render"
+          title="Preview"
+          titleId="template-output-title"
+          meta={
+            <Show when={props.preview}>
+              {(preview) => (
+                <CountBadge>{preview().content_bytes} bytes</CountBadge>
+              )}
+            </Show>
+          }
+        />
         <Show
           when={props.preview}
           fallback={
-            <div class="empty-inline template-empty">
-              <div>
-                <h3>Nothing rendered yet</h3>
-                <p>
-                  Preview validates the relative path and content without
-                  touching disk.
-                </p>
-              </div>
-            </div>
+            <EmptyState
+              class="min-h-[220px]"
+              title="Nothing rendered yet"
+              description="Preview validates the relative path and content without touching disk."
+            />
           }
         >
           {(preview) => (
-            <div class="rendered-preview">
-              <div>
-                <span>Relative output path</span>
-                <code>{preview().path}</code>
+            <div class="mt-8 border-t border-line">
+              <div class="grid gap-3 border-b border-line py-5">
+                <span class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-muted">
+                  Relative output path
+                </span>
+                <code class="wrap-anywhere text-sm">{preview().path}</code>
               </div>
-              <div>
-                <span>Rendered content</span>
-                <pre>{preview().content}</pre>
+              <div class="grid gap-3 border-b border-line py-5">
+                <span class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-muted">
+                  Rendered content
+                </span>
+                <pre class="m-0 min-h-[150px] whitespace-pre-wrap bg-code p-4 font-mono text-sm leading-relaxed wrap-anywhere text-code-ink">
+                  {preview().content}
+                </pre>
               </div>
             </div>
           )}

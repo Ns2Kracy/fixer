@@ -20,6 +20,18 @@ const terminalStates = new Set<JobState>([
   "interrupted",
 ]);
 
+const stageClasses = {
+  complete: "font-bold text-ink",
+  current: "font-bold text-ink",
+  upcoming: "text-muted",
+} as const;
+
+const markerClasses = {
+  complete: "border-moss bg-moss",
+  current: "border-[3px] border-coral bg-paper",
+  upcoming: "border-muted bg-paper",
+} as const;
+
 export function ProgressTimeline(props: {
   state: JobState;
   progress: ProgressSummary | undefined;
@@ -34,29 +46,38 @@ export function ProgressTimeline(props: {
   };
 
   return (
-    <div class="progress-timeline" aria-label="Job progress">
-      <ol>
+    <div class="mt-10" aria-label="Job progress">
+      <ol class="m-0 grid list-none grid-cols-8 p-0 max-[900px]:grid-cols-4 max-[900px]:gap-y-6 max-[640px]:grid-cols-2">
         <For each={stages}>
-          {([state, label], index) => (
-            <li
-              data-stage={state}
-              class={
-                index() < currentIndex()
-                  ? "complete"
-                  : index() === currentIndex() &&
-                      !terminalStates.has(props.state)
-                    ? "current"
-                    : ""
-              }
-            >
-              <span class="timeline-marker" aria-hidden="true" />
-              <span>{label}</span>
-            </li>
-          )}
+          {([state, label], index) => {
+            const stageState = () =>
+              index() < currentIndex()
+                ? "complete"
+                : index() === currentIndex() &&
+                    !terminalStates.has(props.state)
+                  ? "current"
+                  : "upcoming";
+
+            return (
+              <li
+                data-stage={state}
+                class={`relative grid gap-3 pr-3 text-[0.7rem] before:absolute before:top-[5px] before:right-0 before:left-3 before:h-px before:bg-line before:content-[''] ${stageClasses[stageState()]}`}
+              >
+                <span
+                  class={`z-1 size-[11px] rounded-full border ${markerClasses[stageState()]}`}
+                  aria-hidden="true"
+                />
+                <span>{label}</span>
+              </li>
+            );
+          }}
         </For>
       </ol>
       <Show when={terminalStates.has(props.state)}>
-        <p class="terminal-note" role="status">
+        <p
+          class="mt-8 border-l-[3px] border-coral bg-danger-surface px-4 py-3"
+          role="status"
+        >
           <strong>{jobStateLabel(props.state)}.</strong>{" "}
           {props.state === "interrupted"
             ? "No writes resume automatically; retry starts the scan again."
