@@ -1,0 +1,32 @@
+[package]
+name = "fixer-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+config.workspace = true
+dotenvy.workspace = true
+fixer-core = { path = "../fixer-core" }
+fixer-http = { path = "../fixer-http" }
+fixer-provider-anilist = { path = "../fixer-provider-anilist" }
+fixer-provider-bangumi = { path = "../fixer-provider-bangumi" }
+fixer-provider-local = { path = "../fixer-provider-local" }
+fixer-provider-musicbrainz = { path = "../fixer-provider-musicbrainz" }
+fixer-provider-openlibrary = { path = "../fixer-provider-openlibrary" }
+fixer-provider-tmdb = { path = "../fixer-provider-tmdb" }
+fixer-sdk = { path = "../fixer-sdk" }
+fixer-writer-local = { path = "../fixer-writer-local" }
+http.workspace = true
+ipnet.workspace = true
+language-tags.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

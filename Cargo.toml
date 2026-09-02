@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-cli", "crates/fixer-provider-tmdb", "crates/fixer-provider-bangumi", "crates/fixer-provider-anilist", "crates/fixer-provider-musicbrainz", "crates/fixer-provider-openlibrary", "crates/fixer-server"]
+members = ["crates/fixer-core", "crates/fixer-sdk", "crates/fixer-http", "crates/fixer-provider-local", "crates/fixer-writer-local", "crates/fixer-runtime", "crates/fixer-cli", "crates/fixer-provider-tmdb", "crates/fixer-provider-bangumi", "crates/fixer-provider-anilist", "crates/fixer-provider-musicbrainz", "crates/fixer-provider-openlibrary", "crates/fixer-server"]
 resolver = "3"
 
 [workspace.package]
@@ -13,6 +13,11 @@ language-tags = { version = "0.3.2", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.20"
+config = "=0.15.19"
+dotenvy = "0.15.7"
+toml = "1.1.4"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time"] }
 trybuild = "1.0.119"
 futures-lite = "2.6.1"
@@ -31,6 +36,7 @@ argon2 = "0.5.3"
 base64 = "0.22.1"
 getrandom = "0.4.3"
 tower = "0.5.3"
+http = "1.4.0"
 http-body-util = "0.1.5"
 ipnet = "2.12.0"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }

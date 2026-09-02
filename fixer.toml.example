@@ -1,0 +1,48 @@
+# Shared Fixer configuration for both CLI and Web Server.
+# Copy this file to fixer.toml. Keep real credentials in .env or another
+# secret-injection mechanism; fixer.toml is ignored by Git.
+
+offline = false
+preferred_locales = ["zh-Hans", "zh-Hant", "ja", "en", "und"]
+timeout_seconds = 30
+auto_accept_confidence = 0.9
+review_confidence = 0.6
+output_preset = "full"
+placement = "in_place"
+conflict_policy = "review"
+enabled_providers = ["local", "tmdb", "bangumi", "musicbrainz", "openlibrary"]
+
+[providers.tmdb]
+base_url = "https://api.themoviedb.org/3"
+# api_token_env = "TMDB_API_TOKEN"
+
+[providers.bangumi]
+base_url = "https://api.bgm.tv"
+
+[providers.anilist]
+base_url = "https://graphql.anilist.co"
+# access_token_env = "ANILIST_ACCESS_TOKEN"
+
+[providers.musicbrainz]
+base_url = "https://musicbrainz.org/ws/2"
+
+[providers.openlibrary]
+base_url = "https://openlibrary.org"
+cover_base_url = "https://covers.openlibrary.org/b/"
+
+[server]
+bind = "127.0.0.1:3000"
+database = "fixer.sqlite3"
+media_roots = []
+web_root = "web/dist"
+allowed_origins = ["http://127.0.0.1:3000"]
+https_termination = false
+worker_count = 2
+
+[server.trusted_proxy]
+ranges = []
+header = "x-forwarded-for"
+
+[logging]
+filter = "fixer_server=info,tower_http=info"
+format = "pretty"
