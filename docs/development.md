@@ -104,7 +104,6 @@ cargo run -p fixer-sdk --example sdk_movie
 Run Axum and Vite in separate terminals:
 
 ```bash
-FIXER_SERVER_PASSWORD='local-development-password' \
 FIXER_SERVER_MEDIA_ROOTS='/absolute/path/to/media' \
 FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:5173' \
 cargo run -p fixer-server
@@ -132,7 +131,7 @@ The harness:
 - copies the committed movie fixture to a canonical temporary media root;
 - builds Web assets and the Cargo-reported `fixer-server` executable;
 - creates isolated SQLite/auth/origin/media settings;
-- signs in, creates and reviews a job, approves one bounded write, and verifies output/source bytes;
+- registers the temporary administrator, creates and reviews a job, approves one bounded write, and verifies output/source bytes;
 - terminates browser/server processes and removes temporary state.
 
 It can take longer than 60 seconds on a cold Cargo or browser cache. Test runners need an explicit timeout that covers builds and browser provisioning.
@@ -143,7 +142,7 @@ Use an installed system Chrome only when Playwright Chromium cannot run:
 FIXER_E2E_BROWSER_CHANNEL=chrome scripts/e2e-local.sh
 ```
 
-`FIXER_E2E_PORT` pins the port for debugging. Without it, the harness chooses a new ephemeral port and retries early bind failures.
+`FIXER_E2E_USERNAME` and `FIXER_E2E_PASSWORD` override the temporary administrator credentials. `FIXER_E2E_PORT` pins the port for debugging. Without it, the harness chooses a new ephemeral port and retries early bind failures.
 
 ## Fixture policy
 

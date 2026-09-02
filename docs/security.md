@@ -9,7 +9,7 @@ It is not a multi-tenant authorization system, public metadata proxy, or sandbox
 Fixer relies on five boundaries:
 
 1. The listener and reverse proxy limit who can reach the service.
-2. Password sessions or bearer API tokens authenticate protected API calls.
+2. Administrator sessions or bearer API tokens authenticate protected API calls.
 3. exact-origin CORS and CSRF checks protect browser sessions.
 4. `FsPolicy` confines server reads and writes to canonical media roots.
 5. planning, explicit approval, idempotency, no-overwrite, and stale-state checks constrain filesystem mutation.
@@ -18,17 +18,17 @@ Each boundary covers a different threat. CORS does not replace authentication; t
 
 ## Bind and authentication defaults
 
-The default listener is `127.0.0.1:3000`. `ServerConfig::new` supports unauthenticated loopback routers for tests and embedding, but the production `serve` path requires both a password and at least one media root for every bind address. Non-loopback configuration without authentication is rejected earlier.
+The default listener is `127.0.0.1:3000`. `ServerConfig::new` supports unauthenticated loopback routers for tests and embedding. The production `serve` path requires at least one media root and persistent SQLite authentication state, but it does not read a password from the environment. Keep the listener private unless a trusted reverse proxy or private network controls access.
 
-Set `FIXER_SERVER_PASSWORD` to a long, unique value supplied through the process environment or a service secret mechanism. The current startup accepts 1 to 1024 bytes; the minimum is a validation bound, not a strength recommendation.
+A new database has no administrator. `GET /api/v1/auth/status` reports `registration_required: true`, and `POST /api/v1/auth/register` atomically creates the single administrator account. Registration is unavailable as soon as that account exists, so complete first-run setup from a trusted client before making the listener broadly reachable.
 
-The server hashes the password with Argon2id and a random salt in a blocking worker, then stores the PHC hash in SQLite. Startup writes a fresh hash for the configured password. Debug output redacts the password and hash.
+Registration hashes the chosen password with Argon2id and a random salt in a blocking worker, then stores the username and PHC hash in `fixer_users`. Startup never rewrites the stored credential. Debug output redacts password material.
 
-Login failures return one generic `invalid_credentials` response. There is currently no built-in login rate limiter or account lockout. Keep the listener private and apply connection/login limits at a trusted reverse proxy when other users can reach the network.
+Login requires both username and password. Failures return one generic `invalid_credentials` response. There is currently no built-in login rate limiter, account lockout, password reset, or password rotation flow. Keep the listener private and apply connection/login limits at a trusted reverse proxy when other users can reach the network.
 
 ## Browser sessions and CSRF
 
-A successful `POST /api/v1/auth/login` creates a 12-hour session and returns:
+A successful `POST /api/v1/auth/register` or `POST /api/v1/auth/login` creates a 12-hour session and returns:
 
 - an opaque `fixer_session` cookie scoped to `/api`, marked `HttpOnly` and `SameSite=Strict`;
 - a separate CSRF token in the versioned JSON response;
@@ -116,7 +116,7 @@ The default HTTP client buffers response bodies and has no application-specific 
 
 ## Data at rest
 
-SQLite contains library paths, job inputs, review decisions, plan counts/fingerprints, execution counts, password hashes, and token/session digests. It does not persist full output operation bytes or plaintext server passwords, issued session tokens, CSRF tokens, or API tokens. A database leak still exposes operational metadata and material for offline password guessing. Restoring or rotating the password does not revoke unexpired sessions or unrevoked API tokens.
+SQLite contains library paths, job inputs, review decisions, plan counts/fingerprints, execution counts, the administrator username and password hash, and token/session digests. It does not persist full output operation bytes or plaintext administrator passwords, issued session tokens, CSRF tokens, or API tokens. A database leak still exposes operational metadata and material for offline password guessing. Restoring the database also restores its administrator account, unexpired sessions, and unrevoked API tokens.
 
 Web workspace provider settings and plaintext provider tokens live in process memory only and reset on restart. CLI secrets can come from environment-backed references. Configuration validation and debug output redact secret values.
 
@@ -124,7 +124,8 @@ Protect the database and backups with restrictive ownership, encrypted storage, 
 
 ## Known limits
 
-- Fixer provides one password identity, not per-user accounts or role-based permissions.
+- Fixer provides one administrator account, not multiple users or role-based permissions.
+- There is no built-in password reset, password rotation, or administrator-management command.
 - There is no built-in request, login, or provider rate limiter except MusicBrainz request pacing.
 - API token issuance/revocation has no operator CLI or HTTP route.
 - Workspace settings are not persisted.
@@ -143,7 +144,7 @@ Place compensating controls at the process, filesystem, reverse proxy, firewall,
 ## Deployment checklist
 
 - Bind to loopback or a private interface behind authenticated network access.
-- Use a long unique password and HTTPS for every non-local browser.
+- Complete first-run registration from a trusted client, choose a long unique administrator password, and use HTTPS for every non-local browser.
 - Set `FIXER_SERVER_HTTPS_TERMINATION=true` behind HTTPS.
 - List exact browser origins and test a rejected origin.
 - Configure trusted proxy CIDRs/header only when client identity is needed.

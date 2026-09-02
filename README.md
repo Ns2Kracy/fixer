@@ -60,21 +60,19 @@ curl --fail --location --output .env.docker.example \
 cp .env.docker.example .env.docker
 mkdir -p media
 printf 'media path: %s\n' "$PWD/media"
-openssl rand -hex 32
 $EDITOR .env.docker
 docker compose --env-file .env.docker up -d --wait
 ```
 
-Set `FIXER_SERVER_PASSWORD` to the generated password and `FIXER_MEDIA_PATH` to the printed absolute path before startup. Keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open; the template uses `http://127.0.0.1:3000`.
+Set `FIXER_MEDIA_PATH` to the printed absolute path before startup. Keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open; the template uses `http://127.0.0.1:3000`. When the service is healthy, open that URL. A new database redirects unauthenticated visitors to `/login`, where **Sign up** creates the single administrator account; later visits use **Sign in** with that username and password.
 
 `latest` is the stable channel and `edge` tracks `main`. Set `FIXER_IMAGE=ghcr.io/ns2kracy/fixer:0.1.0` to pin a release, or use `FIXER_IMAGE=ghcr.io/ns2kracy/fixer@sha256:<manifest-digest>` for an immutable deployment. See [Docker deployment](docs/server.md#docker-deployment) for image channels, permissions, persistence, source builds, upgrades, reverse proxies, and recovery.
 
 ## Server and Web development
 
-Run Axum and Vite in separate terminals. The server requires a password, at least one existing absolute media root, and the exact Vite browser origin:
+Run Axum and Vite in separate terminals. The server requires at least one existing absolute media root and the exact Vite browser origin. Use a disposable database when testing first-run registration:
 
 ```bash
-FIXER_SERVER_PASSWORD='local-development-password' \
 FIXER_SERVER_DATABASE='/tmp/fixer-development.sqlite3' \
 FIXER_SERVER_MEDIA_ROOTS='/absolute/path/to/media' \
 FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:5173' \
@@ -91,7 +89,6 @@ For the production filesystem layout, build the Web app before starting the serv
 
 ```bash
 pnpm --dir web build
-export FIXER_SERVER_PASSWORD="${FIXER_SERVER_PASSWORD:?load a long random password from your secret manager}"
 FIXER_SERVER_MEDIA_ROOTS='/absolute/path/to/media' \
 FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:3000' \
 cargo run -p fixer-server

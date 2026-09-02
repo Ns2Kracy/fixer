@@ -119,7 +119,6 @@ Run with explicit values and inspect stderr:
 
 ```bash
 FIXER_SERVER_BIND='127.0.0.1:3000' \
-FIXER_SERVER_PASSWORD='local-development-password' \
 FIXER_SERVER_DATABASE='/absolute/state/fixer.sqlite3' \
 FIXER_SERVER_MEDIA_ROOTS='/absolute/media' \
 FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:3000' \
@@ -128,9 +127,7 @@ cargo run -p fixer-server
 
 Common failures:
 
-- missing/empty/over-1024-byte password;
 - missing media roots or a root that is absent/not a directory;
-- non-loopback bind without authentication;
 - malformed exact origin or trusted proxy CIDR/header;
 - only one of the two trusted proxy variables is set;
 - database parent is not writable;
@@ -152,7 +149,7 @@ docker inspect --format '{{json .State.Health}}' \
 ```
 
 - **Docker daemon unavailable:** `docker info` must succeed. Start Docker Desktop or the host Docker service before pulling, building, or starting Fixer.
-- **Missing required value:** Compose rejects empty `FIXER_SERVER_PASSWORD` or `FIXER_MEDIA_PATH`. Copy `.env.docker.example`, use a nonempty test or production password, and pass `--env-file .env.docker` to every Compose command.
+- **Missing required value:** Compose rejects an empty `FIXER_MEDIA_PATH`. Copy `.env.docker.example`, set an absolute existing media directory, and pass `--env-file .env.docker` to every Compose command.
 - **Invalid media path:** `FIXER_MEDIA_PATH` must be absolute, must exist as a directory, and must be shared with Docker Desktop when applicable. Compose resolves an existing relative source against the project directory instead of rejecting it, so verify that the value starts with `/`. Resolve symlinks with `realpath` if the daemon reports a mount-source error.
 - **Permission denied:** the process runs as UID 10001. Grant that UID search/read/write access appropriate to the host media tree, then verify with `docker compose --env-file .env.docker exec -T fixer test -w /media`. Also test `/data`; a failure there points to the named volume rather than the bind mount.
 - **Unhealthy container:** inspect the health output and logs, then run `curl --fail http://127.0.0.1:3000/api/v1/health`. Startup configuration, SQLite, or media-root failures appear in the service log.
@@ -188,8 +185,10 @@ Direct cross-origin `PUT /api/v1/settings` is currently blocked because the serv
 
 Static Web files are outside API CORS middleware; loading HTML successfully does not prove API origin configuration is correct.
 
-## Login succeeds but API calls fail
+## Registration, login, or authenticated API calls fail
 
+- `409 registration_unavailable`: the database already contains the administrator account. Select **Sign in** instead of **Sign up**.
+- `401 invalid_credentials`: the username or password is wrong. Login requires both fields and intentionally does not reveal which one failed.
 - `401 authentication_required`: the cookie/token is missing, expired, revoked, or scoped to another origin/path.
 - `403 csrf_validation_failed`: a state-changing cookie request omitted/staled `X-CSRF-Token`.
 - Secure cookie is never returned over HTTP: `FIXER_SERVER_HTTPS_TERMINATION=true` was set without HTTPS at the browser.
@@ -209,7 +208,7 @@ Open event streams can delay graceful Ctrl-C. Close Web tabs/automation SSE clie
 
 Always stop the server before copying SQLite. Set an absolute database path so the restored process opens the intended file. Restore media roots at the same canonical paths or job inputs can become invalid.
 
-Starting with a new password replaces the password hash but does not revoke restored unexpired sessions or API tokens. Use trusted backups. Session rows expire after their 12-hour lifetime; API tokens require revocation through an embedding that uses `SqliteJobStore`, or a fresh database when retaining old jobs/auth state is not required.
+A restored database keeps its administrator username and password hash; startup does not replace them. It also restores unexpired sessions and API tokens. Use trusted backups. Session rows expire after their 12-hour lifetime; API tokens require revocation through an embedding that uses `SqliteJobStore`, or a fresh database when retaining old jobs/auth state is not required. There is currently no built-in password-reset command.
 
 See [backup and restore](server.md#backup-and-restore).
 
@@ -239,7 +238,7 @@ If Playwright Chromium cannot run but system Chrome is installed:
 FIXER_E2E_BROWSER_CHANNEL=chrome scripts/e2e-local.sh
 ```
 
-The harness prints the last server log lines on failure and cleans temporary state. Set `FIXER_E2E_PORT` only for debugging; a fixed occupied port disables automatic port retry.
+The harness prints the last server log lines on failure and cleans temporary state. Override its temporary administrator with `FIXER_E2E_USERNAME` and `FIXER_E2E_PASSWORD`. Set `FIXER_E2E_PORT` only for debugging; a fixed occupied port disables automatic port retry.
 
 ## Collect safe diagnostics
 

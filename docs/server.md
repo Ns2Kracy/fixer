@@ -10,20 +10,18 @@ Build the Web application before starting a production-layout server:
 pnpm --dir web install --frozen-lockfile
 pnpm --dir web build
 
-FIXER_SERVER_PASSWORD='replace-with-a-long-random-password' \
 FIXER_SERVER_MEDIA_ROOTS='/srv/media' \
 FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:3000' \
 cargo run -p fixer-server
 ```
 
-The server validates configuration, opens and migrates SQLite, hashes the startup password, canonicalizes media roots, starts workers, binds the listener, and serves `web/dist`. Startup fails before binding when required security or filesystem settings are invalid.
+The server validates configuration, opens and migrates SQLite, canonicalizes media roots, starts workers, binds the listener, and serves `web/dist`. Startup fails before binding when required filesystem or network settings are invalid. Authentication state belongs to SQLite: a new database enables first-run registration, while an initialized database keeps its existing administrator credentials.
 
 ## Environment variables
 
 | Variable | Default | Behavior |
 | --- | --- | --- |
-| `FIXER_SERVER_BIND` | `127.0.0.1:3000` | Listener socket. Non-loopback values require a configured password; production serving requires a password for every bind. |
-| `FIXER_SERVER_PASSWORD` | none | Required by `serve`; 1 to 1024 bytes. The value is Argon2id-hashed and never printed. |
+| `FIXER_SERVER_BIND` | `127.0.0.1:3000` | Listener socket. Keep the default loopback bind unless a trusted reverse proxy or private network controls access. |
 | `FIXER_SERVER_DATABASE` | `fixer.sqlite3` | SQLite file path, relative to the process working directory unless absolute. |
 | `FIXER_SERVER_MEDIA_ROOTS` | none | Required platform path-list of existing directories (`:` on Unix, `;` on Windows). Roots are canonicalized and deduplicated. |
 | `FIXER_SERVER_HTTPS_TERMINATION` | `false` | Set exactly `true` when the browser reaches Fixer through HTTPS. Adds `Secure` to the session cookie; it does not configure TLS. |
@@ -46,7 +44,7 @@ The registry deployment uses `ghcr.io/ns2kracy/fixer` and expects the GHCR packa
 
 ### Registry deployment
 
-Download the two deployment files into a new directory. Generate a strong password, set `FIXER_MEDIA_PATH` to the printed absolute directory, and keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open.
+Download the two deployment files into a new directory. Set `FIXER_MEDIA_PATH` to the printed absolute directory and keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open.
 
 ```bash
 mkdir -p fixer-deployment
@@ -58,21 +56,22 @@ curl --fail --location --output .env.docker.example \
 cp .env.docker.example .env.docker
 mkdir -p media
 printf 'media path: %s\n' "$PWD/media"
-openssl rand -hex 32
 $EDITOR .env.docker
 docker compose --env-file .env.docker config --quiet
 docker compose --env-file .env.docker up -d --wait
 ```
 
-Compose rejects missing password and media-path values before startup and refuses to create a missing bind source. Docker Compose still resolves an existing relative bind source against the project directory, so verify that `FIXER_MEDIA_PATH` starts with `/`; relative media paths are outside this deployment contract.
+Compose rejects a missing media-path value before startup and refuses to create a missing bind source. Docker Compose still resolves an existing relative bind source against the project directory, so verify that `FIXER_MEDIA_PATH` starts with `/`; relative media paths are outside this deployment contract.
 
-After Compose reports a healthy service, check the public health route and open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`:
+After Compose reports a healthy service, check the public health route and container health state:
 
 ```bash
 curl --fail http://127.0.0.1:3000/api/v1/health
 docker inspect --format '{{json .State.Health}}' \
   "$(docker compose --env-file .env.docker ps -q fixer)"
 ```
+
+Open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`. With a new database, the login page enables **Sign up**; create the single administrator account before making the listener broadly reachable. Existing databases require **Sign in** with the stored username and password.
 
 The default port publishes only on `127.0.0.1`. Change `FIXER_PORT` and the allowed origin together when choosing another host port.
 
@@ -125,7 +124,6 @@ cd fixer
 cp .env.docker.example .env.docker
 mkdir -p media
 printf 'media path: %s\n' "$PWD/media"
-openssl rand -hex 32
 $EDITOR .env.docker
 docker compose \
   -f compose.yaml \
@@ -156,7 +154,7 @@ For a reverse proxy, keep `FIXER_BIND_IP=127.0.0.1`, set `FIXER_SERVER_ALLOWED_O
 
 ### Standalone Docker
 
-A standalone container uses the registry image directly and needs the same secret, exact origin, named SQLite volume, writable media bind, loopback port, and hardening controls. Replace the media source before running:
+A standalone container uses the registry image directly and needs the same exact origin, named SQLite volume, writable media bind, loopback port, and hardening controls. Replace the media source before running:
 
 ```bash
 docker run --name fixer --detach --restart unless-stopped \
@@ -184,7 +182,6 @@ Keep Axum on loopback when a reverse proxy terminates TLS:
 
 ```bash
 FIXER_SERVER_BIND='127.0.0.1:3000' \
-FIXER_SERVER_PASSWORD='replace-with-a-long-random-password' \
 FIXER_SERVER_DATABASE='/var/lib/fixer/fixer.sqlite3' \
 FIXER_SERVER_MEDIA_ROOTS='/srv/media' \
 FIXER_SERVER_HTTPS_TERMINATION=true \
@@ -225,7 +222,8 @@ The workspace library browser skips symlinks during traversal and bounds directo
 
 The production process serves:
 
-- `GET /api/v1/health` and `POST /api/v1/auth/login` without an existing session;
+- `GET /api/v1/health`, `GET /api/v1/auth/status`, and `POST /api/v1/auth/login` without an existing session;
+- `POST /api/v1/auth/register` only while the database has no administrator account;
 - authenticated provider, workspace, template, job, review, plan, execution, retry, cancellation, and event routes under `/api/v1`;
 - hashed static assets under `/assets` with immutable caching;
 - `index.html` and client routes with revalidation so new builds are picked up.
@@ -260,8 +258,8 @@ The default database is `./fixer.sqlite3` in the process working directory. Set 
 SQLite stores:
 
 - jobs, progress, review decisions, plan counts/fingerprints, execution counts, and idempotency reservations;
-- the current password hash;
-- session token/CSRF digests and expiration times;
+- the single administrator username and Argon2id password hash in `fixer_users`;
+- session token/CSRF digests and expiration times in `fixer_sessions`;
 - API token names, digests, and revocation state.
 
 The server acquires an exclusive process lease for the database identity. A second Fixer process cannot open the same database concurrently. Migrations run automatically at open.
@@ -292,9 +290,9 @@ Restore with the server stopped:
 1. Place the SQLite copy at the configured database path with ownership limited to the server account.
 2. Restore or remount the same media roots and verify their canonical paths.
 3. Restore the Web build or run `pnpm --dir web build`.
-4. Start with the intended `FIXER_SERVER_PASSWORD`; startup replaces the stored password hash with this value. Existing unexpired sessions and unrevoked API tokens from the restored database remain valid because password rotation does not revoke them. The current operator surface cannot revoke all restored credentials; use a trusted backup, wait for sessions to expire, and use the embedding store API to revoke API tokens when required.
-5. Verify `/api/v1/health`, sign in, inspect interrupted jobs, and recreate in-memory workspace settings.
+4. Start the server normally. The restored administrator account, unexpired sessions, and unrevoked API tokens remain valid because startup no longer replaces credentials. Use a trusted backup, wait for sessions to expire, and use the embedding store API to revoke API tokens when required.
+5. Verify `/api/v1/health`, sign in with the restored administrator username and password, inspect interrupted jobs, and recreate in-memory workspace settings.
 
-The database contains library paths, job inputs, review decisions, plan summaries/fingerprints, password hashes, and token/session digests. Full operation paths/bytes are not persisted in the plan summary. Encrypt backups and restrict access even though plaintext passwords and tokens are not stored.
+The database contains library paths, job inputs, review decisions, plan summaries/fingerprints, the administrator username and password hash, and token/session digests. Full operation paths/bytes are not persisted in the plan summary. Encrypt backups and restrict access even though plaintext passwords and tokens are not stored.
 
 See [Security model](security.md) before exposing the service outside one trusted host.
