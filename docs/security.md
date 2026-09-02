@@ -20,7 +20,7 @@ Each boundary covers a different threat. CORS does not replace authentication; t
 
 The default listener is `127.0.0.1:3000`. `ServerConfig::new` supports unauthenticated loopback routers for tests and embedding. The production `serve` path requires at least one media root and persistent SQLite authentication state, but it does not read a password from the environment. Keep the listener private unless a trusted reverse proxy or private network controls access.
 
-A new database has no administrator. `GET /api/v1/auth/status` reports `registration_required: true`, and `POST /api/v1/auth/register` atomically creates the single administrator account. Registration is unavailable as soon as that account exists, so complete first-run setup from a trusted client before making the listener broadly reachable.
+A new database, or a password-only database upgraded from the earlier startup-password schema, has no registered administrator. `GET /api/v1/auth/status` reports `registration_required: true`, and `POST /api/v1/auth/register` atomically creates the single administrator account. Registration is unavailable as soon as that account exists, so complete first-run setup from a trusted client before making the listener broadly reachable.
 
 Registration hashes the chosen password with Argon2id and a random salt in a blocking worker, then stores the username and PHC hash in `fixer_users`. Startup never rewrites the stored credential. Debug output redacts password material.
 

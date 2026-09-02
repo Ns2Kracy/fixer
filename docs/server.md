@@ -15,7 +15,7 @@ FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:3000' \
 cargo run -p fixer-server
 ```
 
-The server validates configuration, opens and migrates SQLite, canonicalizes media roots, starts workers, binds the listener, and serves `web/dist`. Startup fails before binding when required filesystem or network settings are invalid. Authentication state belongs to SQLite: a new database enables first-run registration, while an initialized database keeps its existing administrator credentials.
+The server validates configuration, opens and migrates SQLite, canonicalizes media roots, starts workers, binds the listener, and serves `web/dist`. Startup fails before binding when required filesystem or network settings are invalid. Authentication state belongs to SQLite: a database without a registered administrator enables first-run registration, including an upgrade from the old password-only schema, while an initialized administrator keeps its existing credentials.
 
 ## Environment variables
 
@@ -71,7 +71,7 @@ docker inspect --format '{{json .State.Health}}' \
   "$(docker compose --env-file .env.docker ps -q fixer)"
 ```
 
-Open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`. With a new database, the login page enables **Sign up**; create the single administrator account before making the listener broadly reachable. Existing databases require **Sign in** with the stored username and password.
+Open the exact URL in `FIXER_SERVER_ALLOWED_ORIGINS`. When the database has no registered administrator, the login page enables **Sign up**; this includes databases upgraded from the old startup-password release. Create the administrator before making the listener broadly reachable. Databases that already have an administrator require **Sign in** with the stored username and password.
 
 The default port publishes only on `127.0.0.1`. Change `FIXER_PORT` and the allowed origin together when choosing another host port.
 

@@ -64,7 +64,7 @@ $EDITOR .env.docker
 docker compose --env-file .env.docker up -d --wait
 ```
 
-Set `FIXER_MEDIA_PATH` to the printed absolute path before startup. Keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open; the template uses `http://127.0.0.1:3000`. When the service is healthy, open that URL. A new database redirects unauthenticated visitors to `/login`, where **Sign up** creates the single administrator account; later visits use **Sign in** with that username and password.
+Set `FIXER_MEDIA_PATH` to the printed absolute path before startup. Keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open; the template uses `http://127.0.0.1:3000`. When the service is healthy, open that URL. A database without a registered administrator—including one upgraded from the old startup-password release—redirects unauthenticated visitors to `/login`, where **Sign up** creates the single administrator account; later visits use **Sign in** with that username and password.
 
 `latest` is the stable channel and `edge` tracks `main`. Set `FIXER_IMAGE=ghcr.io/ns2kracy/fixer:0.1.0` to pin a release, or use `FIXER_IMAGE=ghcr.io/ns2kracy/fixer@sha256:<manifest-digest>` for an immutable deployment. See [Docker deployment](docs/server.md#docker-deployment) for image channels, permissions, persistence, source builds, upgrades, reverse proxies, and recovery.
 
