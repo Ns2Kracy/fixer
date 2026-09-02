@@ -121,6 +121,56 @@ fn current_directory_dotenv_is_loaded_when_process_environment_is_absent() {
 }
 
 #[test]
+fn legacy_cli_json_is_normalized_below_environment_overrides() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("legacy.json"),
+        r#"{
+  "proxy": "http://file-proxy.example",
+  "api_key": "file-tmdb-token",
+  "tmdb_base_url": "https://file-tmdb.example/3",
+  "anilist_enabled": true,
+  "anilist_endpoint": "https://file-anilist.example/graphql",
+  "anilist_token": "file-anilist-token",
+  "secret_references": {
+    "bangumi_access_token": "FILE_BANGUMI_TOKEN"
+  }
+}"#,
+    )
+    .unwrap();
+
+    let loaded = ConfigLoader::new(root.path())
+        .with_config_path("legacy.json")
+        .with_environment(env(&[
+            ("FIXER_PROXY", "http://env-proxy.example"),
+            ("TMDB_API_TOKEN", "env-tmdb-token"),
+            ("FIXER_BANGUMI_ACCESS_TOKEN", "env-bangumi-token"),
+        ]))
+        .load()
+        .unwrap();
+    let config = loaded.config();
+
+    assert_eq!(config.proxy.as_deref(), Some("http://env-proxy.example"));
+    assert_eq!(
+        config.providers.tmdb.base_url,
+        "https://file-tmdb.example/3"
+    );
+    assert_eq!(
+        config.providers.tmdb.resolved_api_token(),
+        Some("env-tmdb-token")
+    );
+    assert_eq!(
+        config.providers.anilist.base_url,
+        "https://file-anilist.example/graphql"
+    );
+    assert_eq!(
+        config.providers.anilist.resolved_access_token(),
+        Some("file-anilist-token")
+    );
+    assert!(config.provider_enabled("anilist"));
+}
+
+#[test]
 fn malformed_dotenv_and_unknown_toml_fields_fail_closed() {
     let malformed = tempfile::tempdir().unwrap();
     fs::write(malformed.path().join(".env"), "NOT VALID\n").unwrap();

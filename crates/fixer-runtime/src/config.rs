@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use config::{Config as ConfigBuilder, Environment, File, Map};
+use config::{Config as ConfigBuilder, Environment, File, Map, Source, Value, ValueKind};
 use fixer_core::{LanguageTag, ProviderId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -601,7 +601,7 @@ impl ConfigLoader {
         let secret_environment_keys = secret_environment_keys(&selected, &self.environment)?;
         let mut builder = ConfigBuilder::builder();
         if selected.is_file() {
-            builder = builder.add_source(File::from(selected.clone()));
+            builder = builder.add_source(CompatibleFile::new(selected.clone()));
         }
         builder = builder.add_source(
             Environment::with_prefix("FIXER")
@@ -658,6 +658,178 @@ impl ConfigLoader {
             path
         } else {
             self.cwd.join(path)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CompatibleFile {
+    path: PathBuf,
+}
+
+impl CompatibleFile {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl Source for CompatibleFile {
+    fn clone_into_box(&self) -> Box<dyn Source + Send + Sync> {
+        Box::new(self.clone())
+    }
+
+    fn collect(&self) -> Result<Map<String, Value>, config::ConfigError> {
+        let file = ConfigBuilder::builder()
+            .add_source(File::from(self.path.clone()))
+            .build()?;
+        let mut values = file.collect()?;
+        normalize_legacy_file(&mut values)?;
+        Ok(values)
+    }
+}
+
+fn normalize_legacy_file(values: &mut Map<String, Value>) -> Result<(), config::ConfigError> {
+    move_legacy_value(
+        values,
+        &["api_key", "tmdb_api_token"],
+        &["providers", "tmdb", "api_token"],
+    );
+    move_legacy_value(
+        values,
+        &["tmdb_base_url"],
+        &["providers", "tmdb", "base_url"],
+    );
+    move_legacy_value(
+        values,
+        &["bangumi_base_url"],
+        &["providers", "bangumi", "base_url"],
+    );
+    move_legacy_value(
+        values,
+        &["musicbrainz_base_url"],
+        &["providers", "musicbrainz", "base_url"],
+    );
+    move_legacy_value(
+        values,
+        &["openlibrary_base_url"],
+        &["providers", "openlibrary", "base_url"],
+    );
+    move_legacy_value(
+        values,
+        &["openlibrary_cover_base_url"],
+        &["providers", "openlibrary", "cover_base_url"],
+    );
+    move_legacy_value(
+        values,
+        &["anilist_endpoint"],
+        &["providers", "anilist", "base_url"],
+    );
+    move_legacy_value(
+        values,
+        &["anilist_token", "anilist_access_token"],
+        &["providers", "anilist", "access_token"],
+    );
+
+    if let Some(enabled) = take_legacy_value(values, &["anilist_enabled"])
+        && !contains_nested(values, &["enabled_providers"])
+    {
+        let enabled = enabled.into_bool()?;
+        let mut providers = DEFAULT_PROVIDERS
+            .iter()
+            .map(|provider| (*provider).to_owned())
+            .collect::<Vec<_>>();
+        if enabled {
+            providers.push("anilist".to_owned());
+        }
+        insert_nested_if_absent(values, &["enabled_providers"], Value::new(None, providers));
+    }
+
+    values.remove("bangumi_access_token");
+    if let Some(references) = values.remove("secret_references") {
+        match references.kind {
+            ValueKind::Table(mut references) => {
+                references.remove("bangumi_access_token");
+                move_legacy_value(
+                    &mut references,
+                    &["tmdb_api_token"],
+                    &["providers", "tmdb", "api_token_env"],
+                );
+                move_legacy_value(
+                    &mut references,
+                    &["anilist_access_token"],
+                    &["providers", "anilist", "access_token_env"],
+                );
+                merge_nested(values, references);
+            }
+            kind => {
+                values.insert("secret_references".to_owned(), Value::new(None, kind));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn take_legacy_value(values: &mut Map<String, Value>, aliases: &[&str]) -> Option<Value> {
+    let mut selected = None;
+    for alias in aliases {
+        let value = values.remove(*alias);
+        if selected.is_none() {
+            selected = value;
+        }
+    }
+    selected
+}
+
+fn move_legacy_value(values: &mut Map<String, Value>, aliases: &[&str], target: &[&str]) {
+    if let Some(value) = take_legacy_value(values, aliases) {
+        insert_nested_if_absent(values, target, value);
+    }
+}
+
+fn contains_nested(values: &Map<String, Value>, path: &[&str]) -> bool {
+    let Some((head, tail)) = path.split_first() else {
+        return true;
+    };
+    let Some(value) = values.get(*head) else {
+        return false;
+    };
+    if tail.is_empty() {
+        return true;
+    }
+    match &value.kind {
+        ValueKind::Table(table) => contains_nested(table, tail),
+        _ => false,
+    }
+}
+
+fn insert_nested_if_absent(values: &mut Map<String, Value>, path: &[&str], value: Value) {
+    let Some((head, tail)) = path.split_first() else {
+        return;
+    };
+    if tail.is_empty() {
+        values.entry((*head).to_owned()).or_insert(value);
+        return;
+    }
+    let entry = values
+        .entry((*head).to_owned())
+        .or_insert_with(|| Value::new(None, Map::<String, Value>::new()));
+    if let ValueKind::Table(table) = &mut entry.kind {
+        insert_nested_if_absent(table, tail, value);
+    }
+}
+
+fn merge_nested(values: &mut Map<String, Value>, incoming: Map<String, Value>) {
+    for (key, value) in incoming {
+        match (values.get_mut(&key), value.kind) {
+            (Some(existing), ValueKind::Table(incoming)) => {
+                if let ValueKind::Table(existing) = &mut existing.kind {
+                    merge_nested(existing, incoming);
+                }
+            }
+            (None, kind) => {
+                values.insert(key, Value::new(None, kind));
+            }
+            (Some(_), _) => {}
         }
     }
 }
@@ -727,6 +899,7 @@ fn filtered_environment(
         "FIXER_CONFIG",
         "FIXER_API_KEY",
         "FIXER_ANILIST_ENABLED",
+        "FIXER_BANGUMI_ACCESS_TOKEN",
         "FIXER_SERVER_BIND",
         "FIXER_SERVER_DATABASE",
         "FIXER_SERVER_MEDIA_ROOTS",
