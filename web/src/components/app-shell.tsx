@@ -71,7 +71,7 @@ export function AppShell(): JSX.Element {
           >
             F
           </span>
-          <span>
+          <span class="max-[480px]:hidden">
             <strong class="block font-serif text-lg font-bold">Fixer</strong>
             <small class="block text-[0.68rem] uppercase tracking-[0.08em] text-muted">
               Metadata operations
@@ -91,9 +91,7 @@ export function AppShell(): JSX.Element {
           </div>
           <ThemeSelect
             value={themePreference()}
-            onChange={(preference) =>
-              themeController.setPreference(preference)
-            }
+            onChange={(preference) => themeController.setPreference(preference)}
           />
           <Button
             class="min-h-9 px-3 py-2 text-sm"
