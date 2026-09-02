@@ -14,6 +14,7 @@ function requiredEnvironment(name: string): string {
 test("user reviews a local candidate and approves its bounded write", async ({
   page,
 }) => {
+  const username = requiredEnvironment("FIXER_E2E_USERNAME");
   const password = requiredEnvironment("FIXER_E2E_PASSWORD");
   const mediaPath = requiredEnvironment("FIXER_E2E_MEDIA_PATH");
   const outputPath = requiredEnvironment("FIXER_E2E_OUTPUT_PATH");
@@ -37,15 +38,35 @@ test("user reviews a local candidate and approves its bounded write", async ({
     browserProblems.push(`pageerror: ${error.message}`);
   });
 
+  const statusResponse = await page.request.get("/api/v1/auth/status");
+  expect(statusResponse.ok()).toBe(true);
+  const status = (await statusResponse.json()) as {
+    registration_required: boolean;
+  };
+
   await page.goto("/login");
-  await page.getByLabel("Workspace password").fill(password);
-  const loginResponse = page.waitForResponse(
+  await expect(
+    page.getByRole("complementary", { name: "Workspace navigation" }),
+  ).toHaveCount(0);
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+
+  const endpoint = status.registration_required
+    ? "/api/v1/auth/register"
+    : "/api/v1/auth/login";
+  const authenticationResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
-      response.url().endsWith("/api/v1/auth/login"),
+      response.url().endsWith(endpoint),
   );
-  await page.getByRole("button", { name: "Sign in" }).click();
-  expect((await loginResponse).ok()).toBe(true);
+  if (status.registration_required) {
+    await page.getByLabel("Confirm password").fill(password);
+    await page.getByRole("button", { name: "Create administrator" }).click();
+  } else {
+    await page.getByRole("tab", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Sign in" }).click();
+  }
+  expect((await authenticationResponse).ok()).toBe(true);
   await expect(page).toHaveURL(/\/$/);
 
   await page.getByRole("link", { name: "Jobs" }).click();

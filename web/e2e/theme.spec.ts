@@ -1,4 +1,12 @@
+/// <reference types="node" />
+
 import { expect, test } from "@playwright/test";
+
+function requiredEnvironment(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} must be set by the E2E harness`);
+  return value;
+}
 
 const viewportWidths = [320, 768, 1024, 1440] as const;
 
@@ -19,6 +27,21 @@ test.beforeEach(async ({ page }) => {
 test("theme follows the system, persists overrides, and stays responsive", async ({
   page,
 }) => {
+  const username = requiredEnvironment("FIXER_E2E_USERNAME");
+  const password = requiredEnvironment("FIXER_E2E_PASSWORD");
+  const statusResponse = await page.request.get("/api/v1/auth/status");
+  expect(statusResponse.ok()).toBe(true);
+  const status = (await statusResponse.json()) as {
+    registration_required: boolean;
+  };
+  const authResponse = await page.request.post(
+    status.registration_required
+      ? "/api/v1/auth/register"
+      : "/api/v1/auth/login",
+    { data: { username, password } },
+  );
+  expect(authResponse.ok()).toBe(true);
+
   const browserProblems: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error" || message.type() === "warning") {
