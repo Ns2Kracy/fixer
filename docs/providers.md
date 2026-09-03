@@ -25,7 +25,7 @@ See [configuration](configuration.md) for file discovery, precedence, all endpoi
 
 ## Credentials
 
-TMDB requires a non-empty token. Prefer an environment-backed secret reference or `TMDB_API_TOKEN` rather than a token in `fixer.json`:
+TMDB requires a non-empty token. Prefer `providers.tmdb.api_token_env` in `fixer.toml` or the direct runtime-only `TMDB_API_TOKEN` variable rather than a plaintext token in the file:
 
 ```bash
 export TMDB_API_TOKEN='...'

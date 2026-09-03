@@ -5,13 +5,25 @@ services:
     restart: unless-stopped
     ports:
       - "${FIXER_BIND_IP:-127.0.0.1}:${FIXER_PORT:-3000}:3000"
+    env_file:
+      - .env.secrets
     environment:
-      FIXER_SERVER_ALLOWED_ORIGINS: "${FIXER_SERVER_ALLOWED_ORIGINS:-http://127.0.0.1:3000}"
-      FIXER_SERVER_HTTPS_TERMINATION: "${FIXER_SERVER_HTTPS_TERMINATION:-false}"
+      FIXER_CONFIG: /data/fixer.toml
+      FIXER_SERVER__BIND: 0.0.0.0:3000
+      FIXER_SERVER__DATABASE: /data/fixer.sqlite3
+      FIXER_SERVER__MEDIA_ROOTS: /media
+      FIXER_SERVER__WEB_ROOT: /app/web/dist
+      FIXER_SERVER__ALLOWED_ORIGINS: >-
+        ${FIXER_SERVER__ALLOWED_ORIGINS:-http://127.0.0.1:3000}
+      FIXER_SERVER__HTTPS_TERMINATION: >-
+        ${FIXER_SERVER__HTTPS_TERMINATION:-false}
+      FIXER_LOGGING__FILTER: >-
+        ${FIXER_LOGGING__FILTER:-fixer_server=info}
+      FIXER_LOGGING__FORMAT: "${FIXER_LOGGING__FORMAT:-json}"
     volumes:
       - fixer-data:/data
       - type: bind
-        source: "${FIXER_MEDIA_PATH:?set FIXER_MEDIA_PATH to an absolute existing directory}"
+        source: "${FIXER_MEDIA_PATH:?set an absolute FIXER_MEDIA_PATH}"
         target: /media
         bind:
           create_host_path: false

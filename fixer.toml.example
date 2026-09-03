@@ -1,6 +1,7 @@
 # Shared Fixer configuration for both CLI and Web Server.
-# Copy this file to fixer.toml. Keep real credentials in .env or another
-# secret-injection mechanism; fixer.toml is ignored by Git.
+# Copy this file to fixer.toml. Both binaries also load ./.env; existing process
+# values win over .env, and environment values win over this file. Keep real
+# credentials in environment-backed references; fixer.toml is ignored by Git.
 
 offline = false
 preferred_locales = ["zh-Hans", "zh-Hant", "ja", "en", "und"]
@@ -31,6 +32,8 @@ base_url = "https://openlibrary.org"
 cover_base_url = "https://covers.openlibrary.org/b/"
 
 [server]
+# Production serving requires at least one existing media_roots entry.
+# The container overrides these paths and stores this file under /data.
 bind = "127.0.0.1:3000"
 database = "fixer.sqlite3"
 media_roots = []
@@ -44,5 +47,6 @@ ranges = []
 header = "x-forwarded-for"
 
 [logging]
+# RUST_LOG overrides this filter. Use json for services and containers.
 filter = "fixer_server=info,tower_http=info"
 format = "pretty"

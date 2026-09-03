@@ -218,7 +218,7 @@ Media placement is independent. The CLI applies the output preset first and appe
 ```bash
 fixer providers list
 fixer config validate
-fixer --config ./fixer.json config validate
+fixer --config ./fixer.toml config validate
 ```
 
 `providers list` reports providers compiled into the CLI and their media capabilities. `config validate` loads and validates the effective configuration, then prints a redacted policy summary. The summary reports whether Open Library endpoint overrides are configured; other endpoint overrides are validated but not listed. It never prints API tokens or resolved secret values.

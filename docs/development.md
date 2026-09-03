@@ -8,6 +8,7 @@ Fixer is a Rust 2024 workspace with a Solid/Vite Web application. Default tests 
 - Node.js 24.15 or newer
 - pnpm 11.22.0, pinned by `web/package.json`
 - `curl` for the local production browser harness
+- `ripgrep` for documentation contract checks
 - Chromium installed by Playwright, or a compatible local Chrome channel
 
 Install locked Web dependencies:
@@ -82,6 +83,13 @@ Run `git diff --check` before staging documentation or code.
 
 ## CLI development
 
+Create the ignored shared file once per checkout. Both binaries also load
+`./.env`; exported process values win over that file.
+
+```bash
+cp fixer.toml.example fixer.toml
+```
+
 Use Cargo to run the binary without installing it:
 
 ```bash
@@ -104,8 +112,10 @@ cargo run -p fixer-sdk --example sdk_movie
 Run Axum and Vite in separate terminals:
 
 ```bash
-FIXER_SERVER_MEDIA_ROOTS='/absolute/path/to/media' \
-FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:5173' \
+FIXER_SERVER__DATABASE='/tmp/fixer-development.sqlite3' \
+FIXER_SERVER__MEDIA_ROOTS='/absolute/path/to/media' \
+FIXER_SERVER__ALLOWED_ORIGINS='http://127.0.0.1:5173' \
+FIXER_LOGGING__FORMAT=pretty \
 cargo run -p fixer-server
 ```
 
@@ -113,7 +123,7 @@ cargo run -p fixer-server
 pnpm --dir web dev
 ```
 
-Vite listens on `127.0.0.1:5173` and proxies `/api` to `127.0.0.1:3000`. Keep browser requests on the Vite origin. Use a disposable `FIXER_SERVER_DATABASE` for tests that should not touch the default `./fixer.sqlite3`.
+Vite listens on `127.0.0.1:5173` and proxies `/api` to `127.0.0.1:3000`. Keep browser requests on the Vite origin. Use a disposable `server.database` or `FIXER_SERVER__DATABASE` for tests that should not touch the default database beside `fixer.toml`. Set `FIXER_LOGGING__FORMAT=json` when validating structured traces and request-ID correlation.
 
 The production layout requires `pnpm --dir web build`; Axum then serves `web/dist`. See [server operations](server.md).
 
@@ -130,7 +140,8 @@ The harness:
 
 - copies the committed movie fixture to a canonical temporary media root;
 - builds Web assets and the Cargo-reported `fixer-server` executable;
-- creates isolated SQLite/auth/origin/media settings;
+- generates a mode-`0600` `fixer.toml` with isolated SQLite, origin, media, Web-root, and JSON logging settings;
+- starts the server from that temporary directory with a clean environment containing only `FIXER_CONFIG`, so developer `.env` and overrides cannot redirect it;
 - registers the temporary administrator, creates and reviews a job, approves one bounded write, and verifies output/source bytes;
 - terminates browser/server processes and removes temporary state.
 
@@ -194,6 +205,7 @@ A writer/output change should include no-write plan tests, deterministic snapsho
 Task documentation verification uses:
 
 ```bash
+scripts/check-config-docs.sh
 cargo test --workspace --doc --locked
 cargo run -q -p fixer-cli -- --help
 for command in \
@@ -207,4 +219,4 @@ done
 git diff --check
 ```
 
-Check relative Markdown targets and validate every documented CLI command against current Clap output. Update documentation in the same commit as a public flag, environment variable, JSON schema, provider, writer, or security-boundary change.
+`scripts/check-config-docs.sh` validates the TOML example through the real CLI and rejects stale user-facing JSON discovery, single-underscore server configuration, and in-memory-only settings claims. Also check relative Markdown targets and every documented CLI command against current Clap output. Update documentation in the same commit as a public flag, environment variable, TOML/JSON schema, provider, writer, or security-boundary change.

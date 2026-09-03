@@ -1,177 +1,325 @@
 # Fixer configuration
 
-Fixer reads JSON configuration, environment variables, and global CLI flags. Configuration is validated before command dispatch.
+The CLI and `fixer-server` use the same `fixer_runtime::ConfigLoader` and the same
+`FixerConfig` schema. The canonical configuration file is `fixer.toml`.
+Configuration is validated before command dispatch, listener binding, or worker
+startup.
 
-## File discovery and precedence
-
-The CLI chooses one file in this order:
-
-1. `--config FILE`
-2. `FIXER_CONFIG`
-3. `./fixer.json`, when present
-4. built-in defaults
-
-For settings with a global CLI flag, precedence is flag, environment, file, default. Those settings are `offline`, `proxy`, and `local_root`. Other settings use environment, file, default.
-
-Run:
+Start from the committed template:
 
 ```bash
-fixer --config ./fixer.json config validate
+cp fixer.toml.example fixer.toml
+fixer config validate
 ```
 
-The command prints effective non-secret policy, secret-reference status, and whether Open Library endpoint overrides are configured. Other provider endpoint overrides are validated but not listed in the summary. Secret values are redacted.
+`fixer.toml` and `.env*` are ignored by Git. Keep the template public and keep
+the effective files private.
 
-## Complete example
+## Discovery and precedence
 
-```json
-{
-  "offline": false,
-  "proxy": "http://127.0.0.1:7890",
-  "local_root": "/media/library",
-  "preferred_locales": ["zh-Hans", "zh-Hant", "ja", "en", "und"],
-  "timeout_seconds": 30,
-  "auto_accept_confidence": 0.9,
-  "review_confidence": 0.6,
-  "output_preset": "full",
-  "placement": "in_place",
-  "conflict_policy": "review",
-  "enabled_providers": [
-    "local",
-    "tmdb",
-    "bangumi",
-    "musicbrainz",
-    "openlibrary"
-  ],
-  "tmdb_base_url": "https://api.themoviedb.org/3",
-  "bangumi_base_url": "https://api.bgm.tv",
-  "musicbrainz_base_url": "https://musicbrainz.org/ws/2",
-  "openlibrary_base_url": "https://openlibrary.org",
-  "openlibrary_cover_base_url": "https://covers.openlibrary.org/b/",
-  "anilist_enabled": false,
-  "anilist_endpoint": "https://graphql.anilist.co",
-  "secret_references": {
-    "tmdb_api_token": "FIXER_TMDB_TOKEN",
-    "anilist_access_token": "FIXER_ANILIST_TOKEN"
-  }
-}
+Fixer loads configuration in this order, from highest to lowest precedence:
+
+1. CLI overrides: `--offline`, `--proxy`, and `--local-root`.
+2. Variables already present in the process environment. `RUST_LOG` specifically
+   overrides both `[logging].filter` and `FIXER_LOGGING__FILTER`.
+3. Variables loaded from `./.env`, only when the process environment does not
+   already define the same key.
+4. The selected configuration file.
+5. Built-in defaults.
+
+The selected file is:
+
+1. `--config FILE` for the CLI;
+2. `FIXER_CONFIG` for either binary;
+3. `./fixer.toml` otherwise.
+
+An explicitly selected missing file is an error. A missing default
+`./fixer.toml` is allowed, so commands that need only defaults or environment
+values can still run. Relative `FIXER_CONFIG` and `.env` lookup are based on the
+process current working directory.
+
+Relative `local_root`, `server.database`, `server.media_roots`, and
+`server.web_root` paths are resolved against the selected configuration file's
+directory. Existing local and media roots are canonicalized during load.
+
+```bash
+# Explicit CLI selection
+fixer --config /etc/fixer/fixer.toml config validate
+
+# Shared selection for CLI and server
+FIXER_CONFIG=/etc/fixer/fixer.toml fixer config validate
+FIXER_CONFIG=/etc/fixer/fixer.toml fixer-server
 ```
 
-Unknown fields fail validation.
+## TOML schema
+
+`fixer.toml.example` is the maintained complete example. A compact shared file
+looks like this:
+
+```toml
+offline = false
+local_root = "/srv/media"
+preferred_locales = ["zh-Hans", "zh-Hant", "ja", "en", "und"]
+timeout_seconds = 30
+auto_accept_confidence = 0.9
+review_confidence = 0.6
+output_preset = "full"
+placement = "in_place"
+conflict_policy = "review"
+enabled_providers = ["local", "tmdb", "bangumi", "musicbrainz", "openlibrary"]
+
+[providers.tmdb]
+base_url = "https://api.themoviedb.org/3"
+api_token_env = "TMDB_API_TOKEN"
+
+[providers.bangumi]
+base_url = "https://api.bgm.tv"
+
+[providers.anilist]
+base_url = "https://graphql.anilist.co"
+access_token_env = "ANILIST_ACCESS_TOKEN"
+
+[providers.musicbrainz]
+base_url = "https://musicbrainz.org/ws/2"
+
+[providers.openlibrary]
+base_url = "https://openlibrary.org"
+cover_base_url = "https://covers.openlibrary.org/b/"
+
+[server]
+bind = "127.0.0.1:3000"
+database = "fixer.sqlite3"
+media_roots = ["/srv/media"]
+web_root = "web/dist"
+allowed_origins = ["http://127.0.0.1:3000"]
+https_termination = false
+worker_count = 2
+
+[server.trusted_proxy]
+ranges = []
+header = "x-forwarded-for"
+
+[logging]
+filter = "fixer_server=info,tower_http=info"
+format = "pretty"
+```
+
+Unknown fields, malformed types, invalid endpoints, and invalid enum values fail
+closed. The shared file may contain CLI-only and server-only fields; each binary
+reads the complete schema.
+
+## Environment encoding
+
+Config-rs maps top-level fields to `FIXER_<FIELD>` and nested fields to
+`FIXER_<SECTION>__<FIELD>`. Nested separators are two underscores. Lists use
+comma-separated values.
+
+| TOML field | Canonical environment variable | Default |
+| --- | --- | --- |
+| `offline` | `FIXER_OFFLINE` | `false` |
+| `proxy` | `FIXER_PROXY` | unset |
+| `local_root` | `FIXER_LOCAL_ROOT` | unset |
+| `preferred_locales` | `FIXER_PREFERRED_LOCALES` | `zh-Hans,zh-Hant,ja,en,und` |
+| `timeout_seconds` | `FIXER_TIMEOUT_SECONDS` | `30` |
+| `auto_accept_confidence` | `FIXER_AUTO_ACCEPT_CONFIDENCE` | `0.9` |
+| `review_confidence` | `FIXER_REVIEW_CONFIDENCE` | `0.6` |
+| `output_preset` | `FIXER_OUTPUT_PRESET` | `full` |
+| `placement` | `FIXER_PLACEMENT` | `in_place` |
+| `conflict_policy` | `FIXER_CONFLICT_POLICY` | `review` |
+| `enabled_providers` | `FIXER_ENABLED_PROVIDERS` | default provider set |
+| `providers.tmdb.base_url` | `FIXER_PROVIDERS__TMDB__BASE_URL` | TMDB production API |
+| `providers.bangumi.base_url` | `FIXER_PROVIDERS__BANGUMI__BASE_URL` | Bangumi production API |
+| `providers.anilist.base_url` | `FIXER_PROVIDERS__ANILIST__BASE_URL` | AniList production API |
+| `providers.musicbrainz.base_url` | `FIXER_PROVIDERS__MUSICBRAINZ__BASE_URL` | MusicBrainz production API |
+| `providers.openlibrary.base_url` | `FIXER_PROVIDERS__OPENLIBRARY__BASE_URL` | Open Library production API |
+| `providers.openlibrary.cover_base_url` | `FIXER_PROVIDERS__OPENLIBRARY__COVER_BASE_URL` | Open Library Covers API |
+| `server.bind` | `FIXER_SERVER__BIND` | `127.0.0.1:3000` |
+| `server.database` | `FIXER_SERVER__DATABASE` | `fixer.sqlite3` |
+| `server.media_roots` | `FIXER_SERVER__MEDIA_ROOTS` | empty |
+| `server.web_root` | `FIXER_SERVER__WEB_ROOT` | `web/dist` |
+| `server.allowed_origins` | `FIXER_SERVER__ALLOWED_ORIGINS` | empty |
+| `server.https_termination` | `FIXER_SERVER__HTTPS_TERMINATION` | `false` |
+| `server.worker_count` | `FIXER_SERVER__WORKER_COUNT` | `2` |
+| `server.trusted_proxy.ranges` | `FIXER_SERVER__TRUSTED_PROXY__RANGES` | empty |
+| `server.trusted_proxy.header` | `FIXER_SERVER__TRUSTED_PROXY__HEADER` | `x-forwarded-for` |
+| `logging.filter` | `FIXER_LOGGING__FILTER`, overridden by `RUST_LOG` | `fixer_server=info,tower_http=info` |
+| `logging.format` | `FIXER_LOGGING__FORMAT` | `pretty` |
+
+For example:
+
+```dotenv
+FIXER_OFFLINE=true
+FIXER_ENABLED_PROVIDERS=local,bangumi,openlibrary
+FIXER_SERVER__MEDIA_ROOTS=/srv/movies,/srv/music
+FIXER_SERVER__ALLOWED_ORIGINS=https://fixer.example.com,http://127.0.0.1:5173
+FIXER_LOGGING__FORMAT=json
+RUST_LOG=fixer_server=debug,tower_http=info
+```
+
+Boolean environment values accept `1`, `true`, `yes`, `on`, `0`, `false`,
+`no`, and `off`, without case sensitivity.
 
 ## General settings
 
-| JSON field | Environment | Default | Validation and behavior |
-| --- | --- | --- | --- |
-| `offline` | `FIXER_OFFLINE` | `false` | Boolean. Skips providers that require network access. |
-| `proxy` | `FIXER_PROXY` | unset | Global HTTP proxy used by the default SDK transport. |
-| `local_root` | `FIXER_LOCAL_ROOT` | unset | Required by current `search` and `resolve` commands. |
-| `preferred_locales` | `FIXER_PREFERRED_LOCALES` | `zh-Hans,zh-Hant,ja,en,und` | Ordered BCP 47 tags. Environment value is comma-separated. Empty or malformed lists fail validation. |
-| `timeout_seconds` | `FIXER_TIMEOUT_SECONDS` | `30` | Positive integer passed to the default HTTP transport. Zero fails validation. |
-| `auto_accept_confidence` | `FIXER_AUTO_ACCEPT_CONFIDENCE` | `0.9` | Finite value in `0.0..=1.0`. Must be at least `review_confidence`. |
-| `review_confidence` | `FIXER_REVIEW_CONFIDENCE` | `0.6` | Finite value in `0.0..=1.0`. Must not exceed `auto_accept_confidence`. |
-| `output_preset` | `FIXER_OUTPUT_PRESET` | `full` | `full` or `metadata`; see below. |
-| `placement` | `FIXER_PLACEMENT` | `in_place` | `in_place`, `symlink`, `hardlink`, `copy`, or `reflink`. An explicit CLI flag wins. |
-| `conflict_policy` | `FIXER_CONFLICT_POLICY` | `review` | `prefer_first`, `review`, or `error`. |
-| `enabled_providers` | `FIXER_ENABLED_PROVIDERS` | see provider table | Provider allowlist. Environment value is comma-separated. Unknown or empty lists fail validation. |
+| Field | Validation and behavior |
+| --- | --- |
+| `offline` | Skips providers that require network access. |
+| `proxy` | Validated global HTTP proxy used by the default SDK transport. |
+| `local_root` | Required by the current CLI `search` and `resolve` commands. |
+| `preferred_locales` | Ordered, non-empty BCP 47 tags. |
+| `timeout_seconds` | Positive integer passed to the default HTTP transport. |
+| `auto_accept_confidence` | Finite `0.0..=1.0`, at least `review_confidence`. |
+| `review_confidence` | Finite `0.0..=1.0`. |
+| `output_preset` | `full` or `metadata`. |
+| `placement` | `in_place`, `symlink`, `hardlink`, `copy`, or `reflink`. |
+| `conflict_policy` | `prefer_first`, `review`, or `error`. |
+| `enabled_providers` | Non-empty provider allowlist; duplicates are removed. |
 
-Boolean environment values accept `1`, `true`, `yes`, `on`, `0`, `false`, `no`, and `off`, without case sensitivity.
+The confidence thresholds are validated and reported but are not yet applied to
+candidate selection. `metadata` drops writer-planned local-asset placement while
+retaining metadata writes. Command-level `--placement` still overrides the
+configured placement for one invocation.
 
-### Confidence threshold status
-
-The CLI validates and reports both confidence thresholds so the schema can remain stable across adapters. It does not currently apply them to candidate selection. The matcher exposes integer evidence scores, not a normalized `0.0..=1.0` selection confidence. Merge conflicts use `conflict_policy` today.
-
-### Output presets
-
-`full` keeps every operation produced by the selected writer.
-
-`metadata` keeps writer-planned directory creation and byte writes. It drops writer-planned copy, symlink, hardlink, and reflink operations used for local assets. The CLI applies media placement after this filter, so `placement: copy` still copies the selected media file.
-
-### Conflict policy
+Conflict behavior is:
 
 | Value | Result when merge conflicts exist |
 | --- | --- |
 | `prefer_first` | Continue with deterministic provider precedence. |
-| `review` | Emit the ordinary output plan, return exit code `4`, and stop before execution. `plan --json` provides JSON; `scrape` prints text. This is not an interactive conflict resolver. |
+| `review` | Return exit code `4` after emitting the plan; do not execute. |
 | `error` | Return exit code `1` with a safe conflict count. |
 
-## Providers
+## Providers and secrets
 
-| ID | Media | Network | Enabled by default |
-| --- | --- | ---: | ---: |
-| `local` | movie, television, anime, music, book | no | yes |
-| `tmdb` | movie, television | yes | yes, but inactive without a token |
-| `bangumi` | anime | yes | yes |
-| `anilist` | anime | yes | no |
-| `musicbrainz` | music | yes | yes |
-| `openlibrary` | book | yes | yes |
+The default provider allowlist is `local`, `tmdb`, `bangumi`, `musicbrainz`, and
+`openlibrary`. Add `anilist` explicitly to enable it. Registration and merge
+precedence remain fixed regardless of list order.
 
-Set `enabled_providers` to restrict registration. Duplicates are removed while preserving first occurrence order in the effective configuration summary, but the CLI registers allowed providers in fixed order: local, TMDB, Bangumi, MusicBrainz, Open Library, then AniList. Reordering the allowlist does not change merge precedence. If no explicit allowlist exists, legacy `anilist_enabled: true` adds AniList. With an explicit allowlist, include `anilist` to enable it.
+Prefer runtime-only secrets:
 
-`anilist_enabled` and `FIXER_ANILIST_ENABLED` remain supported for compatibility. Prefer `enabled_providers` for new configuration.
+```toml
+[providers.tmdb]
+api_token_env = "TMDB_API_TOKEN"
 
-## Provider endpoints and credentials
-
-| JSON field | Environment | Purpose |
-| --- | --- | --- |
-| `api_key` or `tmdb_api_token` | `TMDB_API_TOKEN`, then `FIXER_API_KEY` | TMDB bearer token. `tmdb_api_token` is a file alias for compatibility. |
-| `tmdb_base_url` | `TMDB_BASE_URL` | TMDB API endpoint override. |
-| `bangumi_base_url` | `BANGUMI_BASE_URL` | Bangumi API endpoint override. |
-| `musicbrainz_base_url` | `MUSICBRAINZ_BASE_URL` | MusicBrainz API endpoint override. |
-| `openlibrary_base_url` | `OPENLIBRARY_BASE_URL` | Open Library API endpoint override. |
-| `openlibrary_cover_base_url` | `OPENLIBRARY_COVER_BASE_URL` | Open Library Covers endpoint override. |
-| `anilist_endpoint` | `ANILIST_ENDPOINT` | AniList GraphQL endpoint override. |
-| `anilist_access_token` | `ANILIST_ACCESS_TOKEN` | Optional AniList bearer token. |
-
-Endpoint overrides are useful for sanitized fixture servers and controlled mirrors. Fixer validates each endpoint through its provider configuration before use. Open Library cover overrides must include the path prefix onto which `id/...` is joined; the production service uses `https://covers.openlibrary.org/b/`.
-
-## Secret references
-
-Prefer environment-backed references over embedding tokens in JSON:
-
-```json
-{
-  "secret_references": {
-    "tmdb_api_token": "FIXER_TMDB_TOKEN",
-    "anilist_access_token": "FIXER_ANILIST_TOKEN"
-  }
-}
+[providers.anilist]
+access_token_env = "ANILIST_ACCESS_TOKEN"
 ```
 
-A reference must contain only uppercase ASCII letters, digits, and underscores. The named environment variable must exist when Fixer loads the file. `config validate` reports `configured` without printing the variable value.
-
-Direct credential precedence is:
-
-- TMDB: `TMDB_API_TOKEN`, `FIXER_API_KEY`, referenced environment variable, file value.
-- AniList: `ANILIST_ACCESS_TOKEN`, referenced environment variable, file value.
-
-Do not commit direct `api_key`, `tmdb_api_token`, or `anilist_access_token` values.
-
-## CLI overrides
-
-The following global flags override their environment and file counterparts:
-
-```text
---offline
---proxy URL
---local-root PATH
+```dotenv
+TMDB_API_TOKEN=replace-with-a-real-secret
+ANILIST_ACCESS_TOKEN=replace-with-a-real-secret
 ```
 
-`--config FILE` selects the configuration file. Command-level `--placement` overrides configured placement for that invocation.
+Reference names accept only uppercase ASCII letters, digits, and underscores.
+The referenced variable must exist at load time. Direct `TMDB_API_TOKEN`,
+`ANILIST_ACCESS_TOKEN`, `FIXER_API_KEY`, and canonical nested secret environment
+overrides are resolved into redacted runtime-only fields and are not serialized
+when Web settings are saved.
+
+Credential precedence is:
+
+- TMDB: `TMDB_API_TOKEN`, `FIXER_API_KEY`,
+  `FIXER_PROVIDERS__TMDB__API_TOKEN`, referenced environment variable, then
+  `providers.tmdb.api_token`.
+- AniList: `ANILIST_ACCESS_TOKEN`,
+  `FIXER_PROVIDERS__ANILIST__ACCESS_TOKEN`, referenced environment variable,
+  then `providers.anilist.access_token`.
+
+Direct `api_token` and `access_token` TOML values are supported but are plaintext
+at rest. Do not commit them. Config debug output, CLI validation, and settings
+responses redact values, but they cannot protect shell tracing or third-party
+process inspection.
+
+See [providers and connectivity](providers.md) for routing and endpoint details.
+
+## Web settings persistence
+
+The production server gives settings routes and workers the same `ConfigHandle`.
+A successful `PUT /api/v1/settings` validates the complete candidate, writes the
+selected TOML file atomically, and only then swaps the shared in-memory snapshot.
+Each queued job takes a fresh snapshot before building its SDK flow, so the next
+job observes the successful update without a restart.
+
+On Unix, a newly persisted file is mode `0600`. Provider secret values are
+write-only in the API: responses expose only configured booleans and optional
+environment-reference names. A direct token entered in the Web UI is stored as
+plaintext in the private TOML file; an environment reference remains a reference
+and its resolved value is never written.
+
+The Web settings surface edits workspace/provider fields, not `[server]` or
+`[logging]`. Environment values still have higher precedence on the next process
+start. Keep the configuration directory writable by the server account. A write
+or validation failure leaves the previous file and in-memory snapshot active.
+
+Legacy JSON files are read-only for this path. A server started with an explicit
+JSON file can read it, but Web settings persistence returns an error rather than
+writing TOML into a `.json` path.
+
+## Legacy compatibility and migration
+
+For one compatibility window, Fixer still accepts historical flat file fields,
+provider endpoint variables, and single-underscore server variables. New
+deployments should use the nested TOML schema and canonical double-underscore
+environment names.
+
+| Legacy file field | Canonical TOML field |
+| --- | --- |
+| `api_key` or `tmdb_api_token` | `providers.tmdb.api_token` |
+| `tmdb_base_url` | `providers.tmdb.base_url` |
+| `bangumi_base_url` | `providers.bangumi.base_url` |
+| `musicbrainz_base_url` | `providers.musicbrainz.base_url` |
+| `openlibrary_base_url` | `providers.openlibrary.base_url` |
+| `openlibrary_cover_base_url` | `providers.openlibrary.cover_base_url` |
+| `anilist_endpoint` | `providers.anilist.base_url` |
+| `anilist_token` or `anilist_access_token` | `providers.anilist.access_token` |
+| `secret_references.tmdb_api_token` | `providers.tmdb.api_token_env` |
+| `secret_references.anilist_access_token` | `providers.anilist.access_token_env` |
+| `anilist_enabled` | include or omit `anilist` in `enabled_providers` |
+
+Legacy JSON is loaded only when selected explicitly:
+
+```bash
+fixer --config ./legacy.json config validate
+```
+
+To migrate:
+
+1. Copy `fixer.toml.example` to a private `fixer.toml`.
+2. Translate flat provider fields with the table above.
+3. Move server settings under `[server]`, proxy settings under
+   `[server.trusted_proxy]`, and tracing settings under `[logging]`.
+4. Replace embedded tokens with `api_token_env` or `access_token_env` references.
+5. Run `fixer --config ./fixer.toml config validate` in the same environment that
+   will run the CLI or server.
+6. Set `FIXER_CONFIG` for services whose working directory does not contain the
+   migrated file.
+
+Historical single-underscore server variables and endpoint variables such as
+`TMDB_BASE_URL` remain accepted during the compatibility window, but canonical
+nested variables should be used in new service definitions.
 
 ## Validation failures
 
-Configuration load failures return exit code `2`. Common causes include:
+Configuration load failures return CLI exit code `2`. Common causes include:
 
-- unknown JSON fields or provider IDs;
+- malformed `.env` or TOML;
+- an explicitly selected missing file;
+- unknown fields or provider IDs;
+- missing, non-directory, or inaccessible roots;
 - malformed BCP 47 locale tags;
-- zero timeout;
-- thresholds outside `0.0..=1.0`;
-- `review_confidence` above `auto_accept_confidence`;
-- invalid enum values;
-- empty provider lists;
+- zero timeout or worker count;
+- confidence thresholds outside `0.0..=1.0`;
+- invalid placement, conflict, output, or logging values;
 - malformed or unset secret references;
-- malformed provider endpoints or proxy URLs.
+- malformed provider endpoints, origins, CIDRs, or proxy URLs;
+- incomplete trusted-proxy configuration.
 
-## Safety limits
+Run `fixer config validate` with the same current directory, `FIXER_CONFIG`, and
+environment as the failing process. The summary reports effective non-secret
+policy and secret status without printing token values.
 
-Local EPUB scanning loads the EPUB archive file into memory and parses only the selected container and OPF metadata entries. It rejects any selected metadata entry larger than 1 MiB and reports that book as a warning, but the whole archive currently has no separate size cap.
+## Safety limit
+
+Local EPUB scanning loads the EPUB archive into memory and parses only selected
+container and OPF metadata entries. It rejects a selected metadata entry larger
+than 1 MiB and reports a warning, but the whole archive currently has no separate
+size cap.

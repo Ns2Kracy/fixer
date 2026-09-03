@@ -21,6 +21,23 @@ Install Web dependencies with:
 pnpm --dir web install --frozen-lockfile
 ```
 
+## Shared configuration
+
+Both binaries load `./.env` and `./fixer.toml` from the current working
+directory. Process environment values override `.env`, and environment values
+override the file. Start with:
+
+```bash
+cp fixer.toml.example fixer.toml
+cargo run -p fixer-cli -- config validate
+```
+
+Use `FIXER_CONFIG=/absolute/path/fixer.toml` when a service has another working
+directory. Nested environment overrides use two underscores, for example
+`FIXER_SERVER__BIND` and `FIXER_LOGGING__FORMAT=json`. Standard `RUST_LOG` wins over the configured tracing filter. See
+[configuration](docs/configuration.md) for the complete schema, secret handling,
+legacy JSON migration, and Web persistence behavior.
+
 ## CLI quick start
 
 Run the development binary through Cargo:
@@ -61,10 +78,24 @@ cp .env.docker.example .env.docker
 mkdir -p media
 printf 'media path: %s\n' "$PWD/media"
 $EDITOR .env.docker
+(umask 077 && : > .env.secrets)
+# Optional: add TMDB_API_TOKEN or ANILIST_ACCESS_TOKEN.
+$EDITOR .env.secrets
 docker compose --env-file .env.docker up -d --wait
 ```
 
-Set `FIXER_MEDIA_PATH` to the printed absolute path before startup. Keep `FIXER_SERVER_ALLOWED_ORIGINS` equal to the exact URL you will open; the template uses `http://127.0.0.1:3000`. When the service is healthy, open that URL. A database without a registered administrator—including one upgraded from the old startup-password release—redirects unauthenticated visitors to `/login`, where **Sign up** creates the single administrator account; later visits use **Sign in** with that username and password.
+Set `FIXER_MEDIA_PATH` to the printed absolute path before startup. Keep
+`FIXER_SERVER__ALLOWED_ORIGINS` equal to the exact URL you will open; the
+template uses `http://127.0.0.1:3000`. The image creates a private
+`/data/fixer.toml` on first start, and Web settings persist back to that file.
+The quick start creates an ignored mode-`0600` `.env.secrets` next to
+`compose.yaml`; leave it empty or inject provider credentials there.
+
+When the service is healthy, open the configured URL. A database without a
+registered administrator—including one upgraded from the old startup-password
+release—redirects unauthenticated visitors to `/login`, where **Sign up**
+creates the single administrator account; later visits use **Sign in** with that
+username and password.
 
 `latest` is the stable channel and `edge` tracks `main`. Set `FIXER_IMAGE=ghcr.io/ns2kracy/fixer:0.1.0` to pin a release, or use `FIXER_IMAGE=ghcr.io/ns2kracy/fixer@sha256:<manifest-digest>` for an immutable deployment. See [Docker deployment](docs/server.md#docker-deployment) for image channels, permissions, persistence, source builds, upgrades, reverse proxies, and recovery.
 
@@ -73,9 +104,11 @@ Set `FIXER_MEDIA_PATH` to the printed absolute path before startup. Keep `FIXER_
 Run Axum and Vite in separate terminals. The server requires at least one existing absolute media root and the exact Vite browser origin. Use a disposable database when testing first-run registration:
 
 ```bash
-FIXER_SERVER_DATABASE='/tmp/fixer-development.sqlite3' \
-FIXER_SERVER_MEDIA_ROOTS='/absolute/path/to/media' \
-FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:5173' \
+cp fixer.toml.example fixer.toml
+FIXER_SERVER__DATABASE='/tmp/fixer-development.sqlite3' \
+FIXER_SERVER__MEDIA_ROOTS='/absolute/path/to/media' \
+FIXER_SERVER__ALLOWED_ORIGINS='http://127.0.0.1:5173' \
+FIXER_LOGGING__FORMAT=pretty \
 cargo run -p fixer-server
 ```
 
@@ -89,12 +122,18 @@ For the production filesystem layout, build the Web app before starting the serv
 
 ```bash
 pnpm --dir web build
-FIXER_SERVER_MEDIA_ROOTS='/absolute/path/to/media' \
-FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:3000' \
+FIXER_SERVER__MEDIA_ROOTS='/absolute/path/to/media' \
+FIXER_SERVER__ALLOWED_ORIGINS='http://127.0.0.1:3000' \
+FIXER_LOGGING__FORMAT=json \
 cargo run -p fixer-server
 ```
 
-The server reads `web/dist` by default. Set `FIXER_WEB_ROOT` to an absolute build directory when running an installed binary or packaged deployment. Read [server operations](docs/server.md) and the [security model](docs/security.md) before using a non-loopback listener or reverse proxy.
+The server reads `web/dist` by default. Set `server.web_root` in
+`fixer.toml` or `FIXER_SERVER__WEB_ROOT` for an installed binary. Every HTTP
+response carries `x-request-id`; valid inbound IDs are reused and the same ID
+appears in request spans and API error bodies. Read [server
+operations](docs/server.md) and the [security model](docs/security.md) before
+using a non-loopback listener or reverse proxy.
 
 ## Safety model
 
@@ -112,7 +151,7 @@ Placement and platform caveats are documented in [output planning and execution]
 | Guide | Contents |
 | --- | --- |
 | [CLI](docs/cli.md) | search/resolve/scan/plan/scrape workflows, media coverage, exit codes, stable JSON schema |
-| [Configuration](docs/configuration.md) | file/environment/flag precedence, secrets, providers, placement, conflicts |
+| [Configuration](docs/configuration.md) | shared TOML/dotenv precedence, migration, secrets, tracing, Web persistence |
 | [SDK](docs/sdk.md) | typed flows, injection points, errors, Provider contract, runnable example |
 | [Providers](docs/providers.md) | capabilities, credentials, proxies, endpoint overrides, Chinese-region and offline limits |
 | [Output](docs/output.md) | templates, manifests, dry-run, no-overwrite, publication/rollback limits, placement semantics |
@@ -140,6 +179,7 @@ tests/fixtures/library         shared offline acceptance media
 Run the complete local gates before merging cross-cutting work:
 
 ```bash
+scripts/check-config-docs.sh
 cargo fmt --all -- --check
 cargo check --workspace --all-targets --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

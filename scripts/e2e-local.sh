@@ -44,6 +44,7 @@ OUTPUT_PATH="$MOVIE_DIR/movie.json"
 DATABASE_PATH="$TEMP_DIR/fixer.sqlite"
 FIXTURE_DIR="$ROOT_DIR/tests/fixtures/library/movie/In the Mood for Love (2000)"
 CARGO_MESSAGES="$TEMP_DIR/cargo-build.json"
+CONFIG_PATH="$TEMP_DIR/fixer.toml"
 
 mkdir -p "$MEDIA_ROOT/movie"
 cp -R "$FIXTURE_DIR" "$MEDIA_ROOT/movie/"
@@ -93,12 +94,31 @@ while :; do
   BASE_URL="http://$HOST:$PORT"
   : >"$SERVER_LOG"
 
-  FIXER_SERVER_BIND="$HOST:$PORT" \
-    FIXER_SERVER_DATABASE="$DATABASE_PATH" \
-    FIXER_SERVER_MEDIA_ROOTS="$MEDIA_ROOT" \
-    FIXER_SERVER_ALLOWED_ORIGINS="$BASE_URL" \
-    FIXER_WEB_ROOT="$ROOT_DIR/web/dist" \
-    "$SERVER_BINARY" >"$SERVER_LOG" 2>&1 &
+  node - "$CONFIG_PATH" "$HOST:$PORT" "$DATABASE_PATH" "$MEDIA_ROOT" \
+    "$ROOT_DIR/web/dist" "$BASE_URL" <<'NODE'
+const fs = require("node:fs");
+const [path, bind, database, mediaRoot, webRoot, origin] = process.argv.slice(2);
+const quote = JSON.stringify;
+const config = [
+  "[server]",
+  `bind = ${quote(bind)}`,
+  `database = ${quote(database)}`,
+  `media_roots = [${quote(mediaRoot)}]`,
+  `web_root = ${quote(webRoot)}`,
+  `allowed_origins = [${quote(origin)}]`,
+  "",
+  "[logging]",
+  'filter = "fixer_server=info,tower_http=info"',
+  'format = "json"',
+  "",
+].join("\n");
+fs.writeFileSync(path, config, { mode: 0o600 });
+NODE
+
+  (
+    cd "$TEMP_DIR"
+    exec env -i FIXER_CONFIG="$CONFIG_PATH" "$SERVER_BINARY"
+  ) >"$SERVER_LOG" 2>&1 &
   SERVER_PID=$!
 
   ready=false

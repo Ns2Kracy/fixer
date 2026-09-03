@@ -18,7 +18,7 @@ Run:
 ```bash
 fixer --help
 fixer <command> --help
-fixer --config ./fixer.json config validate
+fixer --config ./fixer.toml config validate
 ```
 
 Global flags may appear before or after a subcommand, but Cargo development commands need the separator:
@@ -36,13 +36,27 @@ See [CLI workflows](cli.md) for JSON schema version `1` shapes and all flags.
 Check precedence before editing the file:
 
 1. CLI flag
-2. environment variable
-3. selected JSON file
-4. built-in default
+2. existing process environment
+3. current-directory `.env`, for keys absent from the process
+4. selected `fixer.toml`
+5. built-in default
 
-`--config`, `FIXER_CONFIG`, and a local `./fixer.json` can select different files. The validation summary redacts tokens. It labels the effective source for `offline`, `proxy`, `local_root`, and the direct TMDB API key. The source printed beside AniList tracks the legacy `anilist_enabled` toggle, not `enabled_providers`, so it can say `default` even when an explicit provider allowlist enables AniList. Other effective values are printed without source provenance. See [configuration](configuration.md).
+`--config` wins over `FIXER_CONFIG`; otherwise Fixer selects
+`./fixer.toml`. An explicitly selected missing path is an error. Confirm the
+process current directory and remember that relative data/media/Web paths are
+resolved against the selected file's directory. The validation summary redacts
+tokens and reports source provenance for selected fields. See
+[configuration](configuration.md).
 
-If a secret reference is configured, export the exact uppercase environment name in the same service/shell that starts Fixer. A variable in an interactive shell may not exist in systemd, launchd, a container, or an IDE task.
+If a secret reference is configured, export the exact uppercase environment
+name in the same service or shell that starts Fixer. A variable in an interactive
+shell may not exist in systemd, launchd, a container, or an IDE task.
+
+A Web settings save can additionally fail when the selected file has a non-TOML
+extension, the config directory is not writable, a referenced secret variable is
+missing, or the candidate fails full validation. Legacy JSON remains readable
+only through an explicit path; migrate it before using Web persistence. A failed
+save leaves the prior file and worker snapshot active.
 
 ## No candidates in offline mode
 
@@ -97,7 +111,7 @@ Typical causes:
 
 - `..`, absolute, or reserved path components in a template/plan target;
 - a symlinked ancestor escaping the output root;
-- an input/source/output outside `FIXER_SERVER_MEDIA_ROOTS`;
+- an input/source/output outside `server.media_roots` or `FIXER_SERVER__MEDIA_ROOTS`;
 - a media root that does not exist or canonicalizes to a different path;
 - relative non-symlink operation sources in an embedded server plan.
 
@@ -118,15 +132,19 @@ Hardlinked media shares bytes through every path. Do not run tag/container mutat
 Run with explicit values and inspect stderr:
 
 ```bash
-FIXER_SERVER_BIND='127.0.0.1:3000' \
-FIXER_SERVER_DATABASE='/absolute/state/fixer.sqlite3' \
-FIXER_SERVER_MEDIA_ROOTS='/absolute/media' \
-FIXER_SERVER_ALLOWED_ORIGINS='http://127.0.0.1:3000' \
+FIXER_CONFIG="$PWD/fixer.toml" \
+FIXER_SERVER__BIND='127.0.0.1:3000' \
+FIXER_SERVER__DATABASE='/absolute/state/fixer.sqlite3' \
+FIXER_SERVER__MEDIA_ROOTS='/absolute/media' \
+FIXER_SERVER__ALLOWED_ORIGINS='http://127.0.0.1:3000' \
+FIXER_LOGGING__FORMAT=json \
 cargo run -p fixer-server
 ```
 
 Common failures:
 
+- malformed current-directory `.env`, TOML, or tracing filter;
+- an explicit `FIXER_CONFIG` path that does not exist;
 - missing media roots or a root that is absent/not a directory;
 - malformed exact origin or trusted proxy CIDR/header;
 - only one of the two trusted proxy variables is set;
@@ -149,11 +167,11 @@ docker inspect --format '{{json .State.Health}}' \
 ```
 
 - **Docker daemon unavailable:** `docker info` must succeed. Start Docker Desktop or the host Docker service before pulling, building, or starting Fixer.
-- **Missing required value:** Compose rejects an empty `FIXER_MEDIA_PATH`. Copy `.env.docker.example`, set an absolute existing media directory, and pass `--env-file .env.docker` to every Compose command.
+- **Missing required value:** Compose rejects an empty `FIXER_MEDIA_PATH`. Copy `.env.docker.example`, set an absolute existing media directory, create `.env.secrets` with `(umask 077 && : > .env.secrets)`, and pass `--env-file .env.docker` to every Compose command.
 - **Invalid media path:** `FIXER_MEDIA_PATH` must be absolute, must exist as a directory, and must be shared with Docker Desktop when applicable. Compose resolves an existing relative source against the project directory instead of rejecting it, so verify that the value starts with `/`. Resolve symlinks with `realpath` if the daemon reports a mount-source error.
-- **Permission denied:** the process runs as UID 10001. Grant that UID search/read/write access appropriate to the host media tree, then verify with `docker compose --env-file .env.docker exec -T fixer test -w /media`. Also test `/data`; a failure there points to the named volume rather than the bind mount.
+- **Permission denied:** the process runs as UID 10001. Grant that UID search/read/write access appropriate to the host media tree, then verify with `docker compose --env-file .env.docker exec -T fixer test -w /media`. Also test `/data`; it must hold writable `/data/fixer.toml` and SQLite.
 - **Unhealthy container:** inspect the health output and logs, then run `curl --fail http://127.0.0.1:3000/api/v1/health`. Startup configuration, SQLite, or media-root failures appear in the service log.
-- **Port already allocated:** stop the conflicting listener or choose another `FIXER_PORT`. Update `FIXER_SERVER_ALLOWED_ORIGINS` to the same exact host port before recreating the service.
+- **Port already allocated:** stop the conflicting listener or choose another `FIXER_PORT`. Update `FIXER_SERVER__ALLOWED_ORIGINS` to the same exact host port before recreating the service.
 
 ### Registry image cannot be pulled
 
@@ -175,11 +193,11 @@ docker compose --env-file .env.docker pull
 docker compose --env-file .env.docker up -d --wait
 ```
 
-Do not use `docker compose down --volumes` while troubleshooting. It deletes the SQLite volume and removes the state needed to diagnose or recover jobs.
+Do not use `docker compose down --volumes` while troubleshooting. It deletes the named volume, including `fixer.toml` and SQLite, and removes the state needed to diagnose or recover jobs.
 
 ## Browser receives `cors_origin_denied`
 
-Add the browser's exact scheme, host, and port to `FIXER_SERVER_ALLOWED_ORIGINS`. Do not include a trailing path or wildcard. Restart the server after changing environment configuration.
+Add the browser's exact scheme, host, and port to `server.allowed_origins` or `FIXER_SERVER__ALLOWED_ORIGINS`. Do not include a trailing path or wildcard. Restart after changing process environment; a successful Web settings change is persisted immediately.
 
 Direct cross-origin `PUT /api/v1/settings` is currently blocked because the server preflight method list omits `PUT`. Use the bundled same-origin Web app or the Vite development proxy until that server limitation changes.
 
@@ -191,8 +209,8 @@ Static Web files are outside API CORS middleware; loading HTML successfully does
 - `401 invalid_credentials`: the username or password is wrong. Login requires both fields and intentionally does not reveal which one failed.
 - `401 authentication_required`: the cookie/token is missing, expired, revoked, or scoped to another origin/path.
 - `403 csrf_validation_failed`: a state-changing cookie request omitted/staled `X-CSRF-Token`.
-- Secure cookie is never returned over HTTP: `FIXER_SERVER_HTTPS_TERMINATION=true` was set without HTTPS at the browser.
-- Cookie lacks `Secure` behind HTTPS: set `FIXER_SERVER_HTTPS_TERMINATION=true` and restart.
+- Secure cookie is never returned over HTTP: `FIXER_SERVER__HTTPS_TERMINATION=true` was set without HTTPS at the browser.
+- Cookie lacks `Secure` behind HTTPS: set `FIXER_SERVER__HTTPS_TERMINATION=true` and restart.
 
 Keep `credentials: "include"` for browser API calls. Store the CSRF value only in memory and refresh it by signing in again. Bearer API tokens do not use CSRF, but the current project has no token-management CLI/HTTP route.
 
@@ -239,6 +257,34 @@ FIXER_E2E_BROWSER_CHANNEL=chrome scripts/e2e-local.sh
 ```
 
 The harness prints the last server log lines on failure and cleans temporary state. Override its temporary administrator with `FIXER_E2E_USERNAME` and `FIXER_E2E_PASSWORD`. Set `FIXER_E2E_PORT` only for debugging; a fixed occupied port disables automatic port retry.
+
+## Tracing is missing or request IDs do not match
+
+Validate the configured filter and select a visible formatter:
+
+```bash
+RUST_LOG='fixer_server=info,tower_http=info' \
+FIXER_LOGGING__FORMAT=json \
+cargo run -p fixer-server
+```
+
+Tracing is written to stderr. Service managers and containers must capture that
+stream. `RUST_LOG` overrides `[logging].filter` and `FIXER_LOGGING__FILTER`. An
+invalid effective filter prevents startup; a restrictive valid filter can hide
+HTTP spans.
+
+Probe one authoritative ID:
+
+```bash
+curl -i -H 'x-request-id: diagnose-001' \
+  http://127.0.0.1:3000/api/v1/does-not-exist
+```
+
+The response `x-request-id`, JSON error `request_id`, and `http.request`
+span must all use `diagnose-001`. Empty, non-ASCII, punctuation outside
+`-_.:`, or values longer than 128 bytes are rejected and replaced with a new
+`req-<32 lowercase hex>` ID. Compare IDs, not adjacent timestamps, when
+correlating concurrent requests.
 
 ## Collect safe diagnostics
 

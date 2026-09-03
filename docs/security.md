@@ -12,7 +12,8 @@ Fixer relies on five boundaries:
 2. Administrator sessions or bearer API tokens authenticate protected API calls.
 3. exact-origin CORS and CSRF checks protect browser sessions.
 4. `FsPolicy` confines server reads and writes to canonical media roots.
-5. planning, explicit approval, idempotency, no-overwrite, and stale-state checks constrain filesystem mutation.
+5. A private `fixer.toml` and runtime-only secret injection protect provider credentials.
+6. Planning, explicit approval, idempotency, no-overwrite, and stale-state checks constrain filesystem mutation.
 
 Each boundary covers a different threat. CORS does not replace authentication; the media-root allowlist does not replace OS permissions; a preview does not make an untrusted provider response correct.
 
@@ -36,7 +37,7 @@ A successful `POST /api/v1/auth/register` or `POST /api/v1/auth/login` creates a
 
 Only SHA-256 token and CSRF digests are stored in SQLite. State-changing cookie-authenticated requests (`POST`, `PUT`, `PATCH`, and `DELETE`) must send the matching token as `X-CSRF-Token`. Read methods still require a valid session but not CSRF.
 
-Set `FIXER_SERVER_HTTPS_TERMINATION=true` whenever the browser's external origin uses HTTPS. This adds `Secure` to the cookie. The setting does not start TLS or verify that a reverse proxy is configured. Setting it incorrectly on cleartext HTTP prevents the browser from returning the cookie; leaving it false behind HTTPS weakens transport protection.
+Set `server.https_termination = true` or `FIXER_SERVER__HTTPS_TERMINATION=true` whenever the browser's external origin uses HTTPS. This adds `Secure` to the cookie. The setting does not start TLS or verify that a reverse proxy is configured. Setting it incorrectly on cleartext HTTP prevents the browser from returning the cookie; leaving it false behind HTTPS weakens transport protection.
 
 Logout revokes the persisted session and expires the cookie. Session responses use `Cache-Control: no-store`.
 
@@ -50,12 +51,12 @@ Treat bearer tokens as passwords. Send them only over HTTPS, keep them out of UR
 
 ## Origin policy
 
-When an API request includes `Origin`, Fixer requires an exact match in `FIXER_SERVER_ALLOWED_ORIGINS`. Allowed entries must be HTTP or HTTPS origins with a host and optional port, without a path, wildcard, credentials, query, or fragment. Static Web routes are merged outside API CORS middleware and are not rejected by this origin check.
+When an API request includes `Origin`, Fixer requires an exact match in `server.allowed_origins` or `FIXER_SERVER__ALLOWED_ORIGINS`. Allowed entries must be HTTP or HTTPS origins with a host and optional port, without a path, wildcard, credentials, query, or fragment. Static Web routes are merged outside API CORS middleware and are not rejected by this origin check.
 
 Example:
 
 ```bash
-FIXER_SERVER_ALLOWED_ORIGINS='https://fixer.example.com,http://127.0.0.1:5173'
+FIXER_SERVER__ALLOWED_ORIGINS='https://fixer.example.com,http://127.0.0.1:5173'
 ```
 
 CORS preflight allows credentials and the headers used by authentication, CSRF, idempotency, and event resumption. Its current method list includes `GET`, `HEAD`, and `POST`, but not `PUT`; a browser cannot call `PUT /api/v1/settings` directly across origins even when that origin is allowed. Requests without `Origin` proceed to authentication. This supports non-browser clients, so origin policy must not be treated as network access control.
@@ -67,8 +68,8 @@ CORS preflight allows credentials and the headers used by authentication, CSRF, 
 Forwarded identity is disabled by default. Fixer uses the direct socket peer unless both trusted proxy variables are valid:
 
 ```bash
-FIXER_SERVER_TRUSTED_PROXY_RANGES='10.0.0.0/8,fd00::/8'
-FIXER_SERVER_TRUSTED_PROXY_HEADER='x-fixer-client-ip'
+FIXER_SERVER__TRUSTED_PROXY__RANGES='10.0.0.0/8,fd00::/8'
+FIXER_SERVER__TRUSTED_PROXY__HEADER='x-fixer-client-ip'
 ```
 
 Fixer accepts the header only when the direct peer belongs to a configured CIDR. The value must parse as one IP address. Invalid, absent, or multi-hop values fall back to the socket peer. `Authorization`, `Cookie`, and `Proxy-Authorization` cannot be selected as identity headers.
@@ -77,7 +78,7 @@ Configure the edge proxy to remove the client-supplied header and write one cano
 
 ## Filesystem security
 
-`FIXER_SERVER_MEDIA_ROOTS` is the server's mandatory filesystem allowlist. Roots are existing canonical directories. Reads canonicalize the requested path. Writes check the nearest existing ancestor so a not-yet-created target cannot escape through a symlink. Output targets and absolute sources are revalidated immediately before execution.
+`server.media_roots` or `FIXER_SERVER__MEDIA_ROOTS` is the server's mandatory filesystem allowlist. Roots are existing canonical directories. Reads canonicalize the requested path. Writes check the nearest existing ancestor so a not-yet-created target cannot escape through a symlink. Output targets and absolute sources are revalidated immediately before execution.
 
 A known embedding gap affects relative non-symlink operation sources: `FsPolicy` resolves them against the output root, while the SDK executor resolves them against the process working directory. Built-in server writers currently avoid such operations. Embedders must construct absolute canonical copy/hardlink/reflink sources; do not accept externally supplied relative-source plans.
 
@@ -118,9 +119,9 @@ The default HTTP client buffers response bodies and has no application-specific 
 
 SQLite contains library paths, job inputs, review decisions, plan counts/fingerprints, execution counts, the administrator username and password hash, and token/session digests. It does not persist full output operation bytes or plaintext administrator passwords, issued session tokens, CSRF tokens, or API tokens. A database leak still exposes operational metadata and material for offline password guessing. Restoring the database also restores its administrator account, unexpired sessions, and unrevoked API tokens.
 
-Web workspace provider settings and plaintext provider tokens live in process memory only and reset on restart. CLI secrets can come from environment-backed references. Configuration validation and debug output redact secret values.
+Web workspace settings are atomically persisted to the selected `fixer.toml` and shared with workers. New files are mode `0600` on Unix, but operators must also protect the parent directory and backups. A direct provider token entered through the Web API is write-only in responses yet remains plaintext in TOML. Prefer `api_token_env` and `access_token_env`: only the variable name is serialized, while direct and referenced environment values remain runtime-only. Config validation, debug output, and API responses redact known secret values; shell tracing and process inspection may not.
 
-Protect the database and backups with restrictive ownership, encrypted storage, and retention limits. Stop the server before a file-copy backup. See [backup and restore](server.md#backup-and-restore).
+Stop the server and back up SQLite plus `fixer.toml` together. Back up referenced secret material separately through its secret manager. Use restrictive ownership, encrypted storage, and retention limits. See [backup and restore](server.md#backup-and-restore).
 
 ## Known limits
 
@@ -128,7 +129,7 @@ Protect the database and backups with restrictive ownership, encrypted storage, 
 - There is no built-in password reset, password rotation, or administrator-management command.
 - There is no built-in request, login, or provider rate limiter except MusicBrainz request pacing.
 - API token issuance/revocation has no operator CLI or HTTP route.
-- Workspace settings are not persisted.
+- Direct provider tokens saved through Web settings are plaintext in the private TOML file.
 - Cross-origin preflight omits `PUT`, so direct cross-origin settings updates do not work.
 - Axum's default 2 MiB JSON body limit is framework-defined rather than an explicit Fixer policy.
 - Provider HTTP responses have no separate size cap and are buffered in memory.
@@ -139,17 +140,20 @@ Protect the database and backups with restrictive ownership, encrypted storage, 
 - CORS accepts API requests without `Origin` and therefore cannot serve as an API firewall.
 - The server does not terminate TLS.
 
+Client-supplied valid `x-request-id` values are accepted for correlation and copied to logs, response headers, and error bodies. Treat request IDs as untrusted labels, not authentication or authorization input.
+
 Place compensating controls at the process, filesystem, reverse proxy, firewall, and backup layers.
 
 ## Deployment checklist
 
 - Bind to loopback or a private interface behind authenticated network access.
 - Complete first-run registration from a trusted client, choose a long unique administrator password, and use HTTPS for every non-local browser.
-- Set `FIXER_SERVER_HTTPS_TERMINATION=true` behind HTTPS.
+- Set `server.https_termination = true` or `FIXER_SERVER__HTTPS_TERMINATION=true` behind HTTPS.
 - List exact browser origins and test a rejected origin.
 - Configure trusted proxy CIDRs/header only when client identity is needed.
 - Run as an unprivileged account with narrow canonical media roots.
-- Store SQLite at an explicit protected absolute path and test stopped-server restore.
+- Keep `fixer.toml` writable only by the service account; prefer environment secret references.
+- Store SQLite at an explicit protected absolute path and test a stopped-server restore of both SQLite and TOML.
 - Build `web/dist` from the lockfile and keep HTML revalidating at the proxy.
 - Review provider endpoint overrides and secret sources.
 - Preview a job, reject any path that may exceed the 2,048-character display bound, verify the visible output root and operations, then test one bounded write.
