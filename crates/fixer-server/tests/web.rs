@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use fixer_server::{app, web_app};
+use fixer_server::{app, observed_web_app, web_app};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -42,6 +42,31 @@ async fn response_text(response: axum::response::Response) -> String {
 async fn response_json(response: axum::response::Response) -> Value {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+#[tokio::test]
+async fn observed_web_routes_propagate_request_ids() {
+    let dist = fixture_dist();
+    let application = observed_web_app(axum::Router::new(), dist.path());
+    let inbound = application
+        .clone()
+        .oneshot(
+            Request::get("/")
+                .header("x-request-id", "static-html-001")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(inbound.headers()["x-request-id"], "static-html-001");
+
+    let generated = application
+        .oneshot(Request::get("/settings").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let request_id = generated.headers()["x-request-id"].to_str().unwrap();
+    assert!(request_id.starts_with("req-"));
+    assert_eq!(request_id.len(), 36);
 }
 
 #[tokio::test]

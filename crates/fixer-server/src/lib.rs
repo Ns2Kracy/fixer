@@ -26,7 +26,7 @@ pub use network_policy::{TrustedProxyError, TrustedProxyPolicy};
 pub use observability::{TracingInitError, init_tracing};
 pub use store::SqliteJobStore;
 use thiserror::Error;
-pub use web::web_app;
+pub use web::{observed_web_app, web_app};
 pub use workspace::{WorkspaceState, WorkspaceStateError};
 
 const DEFAULT_BIND_ADDR: SocketAddr =
@@ -356,8 +356,8 @@ async fn serve_inner(
         ),
         None => runtime.start_local_workers(config.worker_count()),
     };
-    let application = web_app(
-        secure_workspace_app(runtime, auth_state, workspace_state),
+    let application = observed_web_app(
+        app::secure_workspace_routes(runtime, auth_state, workspace_state),
         web_root,
     );
     let serve_result = axum::serve(

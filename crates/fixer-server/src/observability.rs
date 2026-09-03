@@ -137,7 +137,7 @@ fn fresh_request_id() -> String {
     let mut random = [0_u8; 16];
     if getrandom::fill(&mut random).is_err() {
         let sequence = FALLBACK_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        return format!("req-{sequence:016x}");
+        return fallback_request_id(sequence);
     }
     let mut request_id = String::with_capacity(36);
     request_id.push_str("req-");
@@ -145,4 +145,21 @@ fn fresh_request_id() -> String {
         write!(request_id, "{byte:02x}").expect("writing to a String cannot fail");
     }
     request_id
+}
+
+fn fallback_request_id(sequence: u64) -> String {
+    format!("req-{sequence:032x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fallback_request_id;
+
+    #[test]
+    fn fallback_request_ids_keep_the_normal_generated_shape() {
+        let request_id = fallback_request_id(1);
+
+        assert_eq!(request_id, "req-00000000000000000000000000000001");
+        assert_eq!(request_id.len(), 36);
+    }
 }

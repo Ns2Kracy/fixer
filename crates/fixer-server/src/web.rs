@@ -27,6 +27,11 @@ pub fn web_app(api: Router, dist_dir: impl AsRef<Path>) -> Router {
     api.merge(web)
 }
 
+/// Adds request tracing and request IDs around a complete API and Web router.
+pub fn observed_web_app(api: Router, dist_dir: impl AsRef<Path>) -> Router {
+    crate::observability::observe(web_app(api, dist_dir))
+}
+
 async fn cache_web_response(request: Request, next: Next) -> Response {
     let path = request.uri().path().to_owned();
     let mut response = next.run(request).await;

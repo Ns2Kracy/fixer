@@ -41,21 +41,31 @@ pub fn secure_workspace_app(
     auth_state: AuthState,
     workspace_state: WorkspaceState,
 ) -> Router {
-    observability::observe(
-        api_app(crate::api::v1::secure_workspace_router(
-            runtime,
-            auth_state.clone(),
-            workspace_state,
-        ))
-        .layer(axum::middleware::from_fn_with_state(
-            auth_state.clone(),
-            crate::auth::resolve_client_ip,
-        ))
-        .layer(axum::middleware::from_fn_with_state(
-            auth_state,
-            crate::auth::enforce_cors,
-        )),
-    )
+    observability::observe(secure_workspace_routes(
+        runtime,
+        auth_state,
+        workspace_state,
+    ))
+}
+
+pub(crate) fn secure_workspace_routes(
+    runtime: JobRuntime,
+    auth_state: AuthState,
+    workspace_state: WorkspaceState,
+) -> Router {
+    api_app(crate::api::v1::secure_workspace_router(
+        runtime,
+        auth_state.clone(),
+        workspace_state,
+    ))
+    .layer(axum::middleware::from_fn_with_state(
+        auth_state.clone(),
+        crate::auth::resolve_client_ip,
+    ))
+    .layer(axum::middleware::from_fn_with_state(
+        auth_state,
+        crate::auth::enforce_cors,
+    ))
 }
 
 fn api_app(v1: Router) -> Router {
