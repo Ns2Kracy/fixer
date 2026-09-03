@@ -114,7 +114,7 @@ Run Axum and Vite in separate terminals:
 ```bash
 FIXER_SERVER__DATABASE='/tmp/fixer-development.sqlite3' \
 FIXER_SERVER__MEDIA_ROOTS='/absolute/path/to/media' \
-FIXER_SERVER__ALLOWED_ORIGINS='http://127.0.0.1:5173' \
+FIXER_SERVER__ALLOWED_ORIGINS='http://127.0.0.1:4173' \
 FIXER_LOGGING__FORMAT=pretty \
 cargo run -p fixer-server
 ```
@@ -123,7 +123,7 @@ cargo run -p fixer-server
 pnpm --dir web dev
 ```
 
-Vite listens on `127.0.0.1:5173` and proxies `/api` to `127.0.0.1:3000`. Keep browser requests on the Vite origin. Use a disposable `server.database` or `FIXER_SERVER__DATABASE` for tests that should not touch the default database beside `fixer.toml`. Set `FIXER_LOGGING__FORMAT=json` when validating structured traces and request-ID correlation.
+Vite listens on `127.0.0.1:4173` and proxies `/api` to `127.0.0.1:3000`. Keep browser requests on the Vite origin. Use a disposable `server.database` or `FIXER_SERVER__DATABASE` for tests that should not touch the default database beside `fixer.toml`. Set `FIXER_LOGGING__FORMAT=json` when validating structured traces and request-ID correlation.
 
 The production layout requires `pnpm --dir web build`; Axum then serves `web/dist`. See [server operations](server.md).
 

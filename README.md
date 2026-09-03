@@ -107,7 +107,7 @@ Run Axum and Vite in separate terminals. The server requires at least one existi
 cp fixer.toml.example fixer.toml
 FIXER_SERVER__DATABASE='/tmp/fixer-development.sqlite3' \
 FIXER_SERVER__MEDIA_ROOTS='/absolute/path/to/media' \
-FIXER_SERVER__ALLOWED_ORIGINS='http://127.0.0.1:5173' \
+FIXER_SERVER__ALLOWED_ORIGINS='http://127.0.0.1:4173' \
 FIXER_LOGGING__FORMAT=pretty \
 cargo run -p fixer-server
 ```
@@ -116,7 +116,7 @@ cargo run -p fixer-server
 pnpm --dir web dev
 ```
 
-Vite listens on `127.0.0.1:5173` and proxies `/api` to Axum at `127.0.0.1:3000`. Keep the browser on the Vite origin during development.
+Vite listens on `127.0.0.1:4173` and proxies `/api` to Axum at `127.0.0.1:3000`. Keep the browser on the Vite origin during development.
 
 For the production filesystem layout, build the Web app before starting the server:
 

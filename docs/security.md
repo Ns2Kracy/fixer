@@ -56,7 +56,7 @@ When an API request includes `Origin`, Fixer requires an exact match in `server.
 Example:
 
 ```bash
-FIXER_SERVER__ALLOWED_ORIGINS='https://fixer.example.com,http://127.0.0.1:5173'
+FIXER_SERVER__ALLOWED_ORIGINS='https://fixer.example.com,http://127.0.0.1:4173'
 ```
 
 CORS preflight allows credentials and the headers used by authentication, CSRF, idempotency, and event resumption. Its current method list includes `GET`, `HEAD`, and `POST`, but not `PUT`; a browser cannot call `PUT /api/v1/settings` directly across origins even when that origin is allowed. Requests without `Origin` proceed to authentication. This supports non-browser clients, so origin policy must not be treated as network access control.

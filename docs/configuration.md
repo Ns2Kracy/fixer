@@ -151,7 +151,7 @@ For example:
 FIXER_OFFLINE=true
 FIXER_ENABLED_PROVIDERS=local,bangumi,openlibrary
 FIXER_SERVER__MEDIA_ROOTS=/srv/movies,/srv/music
-FIXER_SERVER__ALLOWED_ORIGINS=https://fixer.example.com,http://127.0.0.1:5173
+FIXER_SERVER__ALLOWED_ORIGINS=https://fixer.example.com,http://127.0.0.1:4173
 FIXER_LOGGING__FORMAT=json
 RUST_LOG=fixer_server=debug,tower_http=info
 ```
