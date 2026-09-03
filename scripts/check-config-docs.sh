@@ -54,6 +54,7 @@ done
 rg -q 'FIXER_CONFIG: /data/fixer\.toml' "$ROOT_DIR/compose.yaml"
 rg -q -- '- \.env\.secrets' "$ROOT_DIR/compose.yaml"
 rg -q 'scripts/docker-entrypoint\.sh' "$ROOT_DIR/Dockerfile"
+rg -q '^/fixer\.toml$' "$ROOT_DIR/.dockerignore"
 rg -q 'umask 077.*\.env\.secrets' \
   "$ROOT_DIR/README.md" "$ROOT_DIR/docs/server.md"
 
