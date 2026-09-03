@@ -88,6 +88,8 @@ export interface WorkspaceSettingsBase {
 export interface SecretStatus {
   tmdb_api_token_configured: boolean
   anilist_access_token_configured: boolean
+  tmdb_api_token_env?: string
+  anilist_access_token_env?: string
 }
 
 export interface WorkspaceSettings extends WorkspaceSettingsBase {

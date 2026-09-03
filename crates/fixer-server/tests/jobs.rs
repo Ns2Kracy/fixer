@@ -12,8 +12,11 @@ use fixer_core::{
     BoxFuture, Candidate, ExternalId, FetchRequest, HttpClient, LocalizedValue, MetadataDocument,
     Movie, Provider, ProviderDescriptor, ProviderError, ProviderId, SearchRequest, WorkId,
 };
+use fixer_runtime::ConfigLoader;
 use fixer_sdk::{Fixer, FixtureDocument, FixtureProvider};
-use fixer_server::{JobRuntime, SdkJobFlow, SqliteJobStore, job_app};
+use fixer_server::{
+    JobRuntime, SdkJobFlow, SqliteJobStore, WorkspaceState, job_app, workspace_app,
+};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -681,6 +684,73 @@ async fn wait_for_state(router: &Router, id: i64, expected: &str) -> Value {
     })
     .await
     .unwrap_or_else(|_| panic!("job {id} did not reach {expected}"))
+}
+
+#[tokio::test]
+async fn web_settings_update_is_seen_by_the_next_configured_worker_job() {
+    let directory = tempfile::tempdir().unwrap();
+    let media = directory.path().join("Fixture Movie.mkv");
+    std::fs::write(&media, b"fixture").unwrap();
+    std::fs::write(
+        directory.path().join("fixer.toml"),
+        "offline = true\nenabled_providers = [\"local\"]\n",
+    )
+    .unwrap();
+    let handle = ConfigLoader::new(directory.path())
+        .with_environment(std::collections::BTreeMap::new())
+        .load()
+        .unwrap()
+        .into_handle();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(16));
+    let workers = runtime.start_workers(capacity(1), SdkJobFlow::from_handle(handle.clone()));
+    let jobs = job_app(runtime);
+    let settings =
+        workspace_app(WorkspaceState::new_with_config([directory.path()], handle.clone()).unwrap());
+
+    let response = send(
+        &settings,
+        Request::put("/api/v1/settings")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "offline": true,
+                    "proxy": null,
+                    "preferred_locales": ["en", "und"],
+                    "timeout_seconds": 5,
+                    "auto_accept_confidence": 0.9,
+                    "review_confidence": 0.6,
+                    "output_preset": "full",
+                    "placement": "in_place",
+                    "conflict_policy": "review",
+                    "enabled_providers": ["tmdb"],
+                    "provider_endpoints": {
+                        "tmdb": "https://api.themoviedb.org/3",
+                        "bangumi": "https://api.bgm.tv",
+                        "anilist": "https://graphql.anilist.co",
+                        "musicbrainz": "https://musicbrainz.org/ws/2",
+                        "openlibrary": "https://openlibrary.org",
+                        "openlibrary_cover": "https://covers.openlibrary.org/b/"
+                    },
+                    "tmdb_api_token": null,
+                    "anilist_access_token": null,
+                    "clear_tmdb_api_token": false,
+                    "clear_anilist_access_token": false
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(handle.snapshot().enabled_providers, vec!["tmdb"]);
+
+    create_job(&jobs, media.to_string_lossy().as_ref()).await;
+    let failed = wait_for_state(&jobs, 1, "failed").await;
+    assert_eq!(failed["job"]["progress"]["stage"], "failed");
+    workers.shutdown().await;
 }
 
 #[tokio::test]

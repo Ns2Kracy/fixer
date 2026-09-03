@@ -5,7 +5,7 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use config::{Config as ConfigBuilder, Environment, File, Map, Source, Value, ValueKind};
@@ -518,6 +518,7 @@ impl LoadedConfig {
             path: Arc::new(self.path),
             base: Arc::new(self.base),
             environment: Arc::new(self.environment),
+            persistence: Arc::new(Mutex::new(())),
             config: Arc::new(RwLock::new(self.config)),
         }
     }
@@ -528,6 +529,7 @@ pub struct ConfigHandle {
     path: Arc<PathBuf>,
     base: Arc<PathBuf>,
     environment: Arc<BTreeMap<String, String>>,
+    persistence: Arc<Mutex<()>>,
     config: Arc<RwLock<FixerConfig>>,
 }
 impl fmt::Debug for ConfigHandle {
@@ -548,16 +550,41 @@ impl ConfigHandle {
             .expect("configuration lock is not poisoned")
             .clone()
     }
-    pub fn replace_and_persist(&self, mut next: FixerConfig) -> Result<(), ConfigWriteError> {
-        let mut current = self
-            .config
-            .write()
-            .expect("configuration lock is not poisoned");
+    pub fn replace_and_persist(&self, next: FixerConfig) -> Result<(), ConfigWriteError> {
+        if !matches!(
+            self.path.extension().and_then(|extension| extension.to_str()),
+            Some(extension) if extension.eq_ignore_ascii_case("toml")
+        ) {
+            return Err(ConfigWriteError::UnsupportedFormat {
+                path: self.path.as_ref().clone(),
+            });
+        }
+        self.replace_after(next, |next| self.persist_toml(next))
+    }
+
+    fn replace_after(
+        &self,
+        mut next: FixerConfig,
+        persist: impl FnOnce(&FixerConfig) -> Result<(), ConfigWriteError>,
+    ) -> Result<(), ConfigWriteError> {
+        let _writer = self
+            .persistence
+            .lock()
+            .expect("configuration persistence lock is not poisoned");
         next.resolve_secrets(&self.environment)
             .map_err(ConfigWriteError::Validation)?;
         next.normalize(&self.base)
             .map_err(ConfigWriteError::Validation)?;
-        let serialized = toml::to_string_pretty(&next)?;
+        persist(&next)?;
+        *self
+            .config
+            .write()
+            .expect("configuration lock is not poisoned") = next;
+        Ok(())
+    }
+
+    fn persist_toml(&self, next: &FixerConfig) -> Result<(), ConfigWriteError> {
+        let serialized = toml::to_string_pretty(next)?;
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent).map_err(|source| ConfigWriteError::Io {
             path: parent.to_owned(),
@@ -565,10 +592,19 @@ impl ConfigHandle {
         })?;
         let temporary = temporary_path(&self.path);
         let result = (|| {
-            let mut file = fs::File::create(&temporary).map_err(|source| ConfigWriteError::Io {
-                path: temporary.clone(),
-                source,
-            })?;
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options
+                .open(&temporary)
+                .map_err(|source| ConfigWriteError::Io {
+                    path: temporary.clone(),
+                    source,
+                })?;
             file.write_all(serialized.as_bytes())
                 .and_then(|_| file.sync_all())
                 .map_err(|source| ConfigWriteError::Io {
@@ -583,9 +619,7 @@ impl ConfigHandle {
         if result.is_err() {
             let _ = fs::remove_file(&temporary);
         }
-        result?;
-        *current = next;
-        Ok(())
+        result
     }
 }
 
@@ -938,6 +972,8 @@ pub enum ConfigLoadError {
 }
 #[derive(Debug, Error)]
 pub enum ConfigWriteError {
+    #[error("configuration persistence requires a TOML path: {path}")]
+    UnsupportedFormat { path: PathBuf },
     #[error(transparent)]
     Validation(ConfigLoadError),
     #[error("failed to serialize configuration: {0}")]
@@ -1285,9 +1321,53 @@ fn csv(value: &str) -> Vec<String> {
         .collect()
 }
 fn temporary_path(path: &Path) -> PathBuf {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(DEFAULT_CONFIG_FILE);
-    path.with_file_name(format!(".{name}.tmp"))
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    path.with_file_name(format!(".{name}.{}.{}.tmp", std::process::id(), sequence))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{sync::mpsc, thread, time::Duration};
+
+    #[test]
+    fn snapshots_do_not_block_behind_filesystem_persistence() {
+        let root = tempfile::tempdir().unwrap();
+        let handle = ConfigLoader::new(root.path())
+            .with_environment(BTreeMap::new())
+            .load()
+            .unwrap()
+            .into_handle();
+        let before = handle.snapshot();
+        let mut next = before.clone();
+        next.timeout_seconds = 52;
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let writer_handle = handle.clone();
+        let writer = thread::spawn(move || {
+            writer_handle.replace_after(next, |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let (snapshot_tx, snapshot_rx) = mpsc::channel();
+        let reader_handle = handle.clone();
+        let reader = thread::spawn(move || snapshot_tx.send(reader_handle.snapshot()).unwrap());
+        let observed = snapshot_rx.recv_timeout(Duration::from_secs(1));
+
+        release_tx.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        reader.join().unwrap();
+        assert_eq!(observed.unwrap(), before);
+        assert_eq!(handle.snapshot().timeout_seconds, 52);
+    }
 }

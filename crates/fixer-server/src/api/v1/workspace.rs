@@ -341,7 +341,10 @@ fn map_state_error(error: crate::WorkspaceStateError) -> ApiError {
             "Provider connectivity test could not be configured",
             None,
         ),
-        WorkspaceStateError::InvalidRoot | WorkspaceStateError::Inspect => ApiError::new(
+        WorkspaceStateError::InvalidRoot
+        | WorkspaceStateError::Inspect
+        | WorkspaceStateError::SettingsTask
+        | WorkspaceStateError::SettingsPersistence(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "workspace_error",
             "Workspace operation failed",

@@ -31,6 +31,13 @@ pub use worker::{JobFlowError, SdkJobFlow, SearchSummary, WorkerPool};
 
 const EXECUTION_FINGERPRINT: &str = "approved-v1";
 
+const fn is_terminal(state: JobState) -> bool {
+    matches!(
+        state,
+        JobState::Completed | JobState::Failed | JobState::Cancelled | JobState::Interrupted
+    )
+}
+
 #[derive(Default)]
 pub(crate) struct ExecutionTaskRegistry {
     state: StdMutex<ExecutionTaskState>,
@@ -225,6 +232,7 @@ impl JobRuntime {
             )
             .await?;
         self.publish_transition(&job)?;
+        self.release_job_config(id);
         self.wake_workers.notify_waiters();
         Ok(job)
     }
@@ -242,7 +250,12 @@ impl JobRuntime {
             .request_flow
             .get()
             .ok_or(RuntimeError::WorkerFlowUnavailable)?;
-        let search = flow.scan(job.input()).await?.search().await?;
+        let scanned = if is_terminal(job.state()) {
+            flow.scan_current(job.input()).await
+        } else {
+            flow.scan(id, job.input()).await
+        };
+        let search = scanned?.search().await?;
         let (candidates, candidates_truncated) = search.candidate_artifacts()?;
         let selected_index = candidate_index.unwrap_or_else(|| {
             job.review_decision()
@@ -270,7 +283,12 @@ impl JobRuntime {
             .request_flow
             .get()
             .ok_or(RuntimeError::WorkerFlowUnavailable)?;
-        let search = flow.scan(job.input()).await?.search().await?;
+        let scanned = if is_terminal(job.state()) {
+            flow.scan_current(job.input()).await
+        } else {
+            flow.scan(id, job.input()).await
+        };
+        let search = scanned?.search().await?;
         let resolved = search.resolve_selected(decision.candidate_index()).await?;
         let conflict_count = resolved.conflict_count()?;
         let expected = (0..conflict_count).collect::<Vec<_>>();
@@ -310,6 +328,7 @@ impl JobRuntime {
             )
             .await?;
         self.publish_transition(&job)?;
+        self.release_job_config(id);
         Ok(job)
     }
 
@@ -322,7 +341,7 @@ impl JobRuntime {
         if job.state() != JobState::AwaitingConfirmation {
             return Err(RuntimeError::ReviewConflict(job.state()));
         }
-        let (plan, fingerprint) = self.reconstruct_plan(job.input(), &decision).await?;
+        let (plan, fingerprint) = self.reconstruct_plan(id, job.input(), &decision).await?;
         if let Some(policy) = &self.fs_policy {
             policy.validate_plan(&plan)?;
         }
@@ -372,7 +391,7 @@ impl JobRuntime {
         if !job.input().apply() {
             return Err(RuntimeError::ApprovalNotEnabled);
         }
-        let (plan, fingerprint) = self.reconstruct_plan(job.input(), &decision).await?;
+        let (plan, fingerprint) = self.reconstruct_plan(id, job.input(), &decision).await?;
         let reviewed_plan = job
             .plan()
             .ok_or(RuntimeError::ExecutionConflict(job.state()))?;
@@ -507,6 +526,7 @@ impl JobRuntime {
 
     async fn reconstruct_plan(
         &self,
+        id: JobId,
         input: &JobInputDto,
         decision: &ReviewDecisionDto,
     ) -> Result<(fixer_core::OutputPlan, String), RuntimeError> {
@@ -514,7 +534,7 @@ impl JobRuntime {
             .request_flow
             .get()
             .ok_or(RuntimeError::WorkerFlowUnavailable)?;
-        let scanned = flow.scan(input).await?;
+        let scanned = flow.scan(id, input).await?;
         let search = scanned.search().await?;
         let resolved = search.resolve_selected(decision.candidate_index()).await?;
         let conflict_count = resolved.conflict_count()?;
@@ -592,7 +612,7 @@ impl JobRuntime {
         if self.stop_requested(shutdown, id).await {
             return;
         }
-        let scanned = match flow.scan(job.input()).await {
+        let scanned = match flow.scan(id, job.input()).await {
             Ok(scanned) => scanned,
             Err(_) => {
                 self.finish_active(id, JobState::Scanning, JobState::Failed, "failed")
@@ -608,6 +628,7 @@ impl JobRuntime {
             .await
             .is_err()
         {
+            flow.release(id);
             return;
         }
 
@@ -627,6 +648,7 @@ impl JobRuntime {
             .await
             .is_err()
         {
+            flow.release(id);
             return;
         }
 
@@ -660,6 +682,8 @@ impl JobRuntime {
             let _ =
                 self.events
                     .publish_review(id, summary.candidate_count(), summary.conflict_count());
+        } else {
+            flow.release(id);
         }
     }
 
@@ -732,6 +756,9 @@ impl JobRuntime {
             {
                 Ok(job) => {
                     let _ = self.publish_transition(&job);
+                    if is_terminal(next) {
+                        self.release_job_config(id);
+                    }
                     return Ok(job);
                 }
                 Err(error @ (StoreError::StateConflict { .. } | StoreError::NotFound { .. })) => {
@@ -783,6 +810,12 @@ impl JobRuntime {
                 Err(StoreError::StateConflict { .. }) => continue,
                 Err(_) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
             }
+        }
+    }
+
+    fn release_job_config(&self, id: JobId) {
+        if let Some(flow) = self.request_flow.get() {
+            flow.release(id);
         }
     }
 

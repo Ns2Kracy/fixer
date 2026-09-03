@@ -2,20 +2,21 @@ use std::{
     collections::{HashSet, VecDeque},
     fmt, fs,
     path::{Component, Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
     time::Duration,
 };
 
 use fixer_core::{Header, HttpClient, HttpError, HttpMethod, HttpRequest};
 use fixer_http::{HttpConfig, ReqwestHttpClient};
+use fixer_runtime::{
+    ConfigHandle, ConfigWriteError, ConflictPolicy, FixerConfig, OutputPreset, PlacementPolicy,
+    SecretString,
+};
 use language_tags::LanguageTag;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::RwLock;
 use url::Url;
 
-const DEFAULT_LOCALES: &[&str] = &["zh-Hans", "zh-Hant", "ja", "en", "und"];
-const DEFAULT_PROVIDERS: &[&str] = &["local", "tmdb", "bangumi", "musicbrainz", "openlibrary"];
 const KNOWN_PROVIDERS: &[&str] = &[
     "local",
     "tmdb",
@@ -30,31 +31,6 @@ const MAX_SEARCH_VISITS: usize = 10_000;
 const MAX_RELATIVE_PATH_BYTES: usize = 4096;
 const MAX_SECRET_BYTES: usize = 4096;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum OutputPreset {
-    Full,
-    Metadata,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum PlacementPolicy {
-    InPlace,
-    Symlink,
-    Hardlink,
-    Copy,
-    Reflink,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ConflictPolicy {
-    PreferFirst,
-    Review,
-    Error,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProviderEndpoints {
@@ -64,19 +40,6 @@ pub(crate) struct ProviderEndpoints {
     pub(crate) musicbrainz: String,
     pub(crate) openlibrary: String,
     pub(crate) openlibrary_cover: String,
-}
-
-impl Default for ProviderEndpoints {
-    fn default() -> Self {
-        Self {
-            tmdb: "https://api.themoviedb.org/3".to_owned(),
-            bangumi: "https://api.bgm.tv".to_owned(),
-            anilist: "https://graphql.anilist.co".to_owned(),
-            musicbrainz: "https://musicbrainz.org/ws/2".to_owned(),
-            openlibrary: "https://openlibrary.org".to_owned(),
-            openlibrary_cover: "https://covers.openlibrary.org/b/".to_owned(),
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -117,81 +80,46 @@ pub(crate) struct WorkspaceSettingsSnapshot {
     pub(crate) secrets: SecretStatus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SecretStatus {
     pub(crate) tmdb_api_token_configured: bool,
     pub(crate) anilist_access_token_configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tmdb_api_token_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) anilist_access_token_env: Option<String>,
 }
 
-#[derive(Clone)]
-struct SecretValue(String);
-
-impl fmt::Debug for SecretValue {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("[REDACTED]")
-    }
-}
-
-#[derive(Clone)]
-struct WorkspaceSettings {
-    offline: bool,
-    proxy: Option<String>,
-    preferred_locales: Vec<String>,
-    timeout_seconds: u64,
-    auto_accept_confidence: f32,
-    review_confidence: f32,
-    output_preset: OutputPreset,
-    placement: PlacementPolicy,
-    conflict_policy: ConflictPolicy,
-    enabled_providers: Vec<String>,
-    provider_endpoints: ProviderEndpoints,
-    tmdb_api_token: Option<SecretValue>,
-    anilist_access_token: Option<SecretValue>,
-}
-
-impl Default for WorkspaceSettings {
-    fn default() -> Self {
+impl WorkspaceSettingsSnapshot {
+    fn from_config(config: &FixerConfig) -> Self {
         Self {
-            offline: false,
-            proxy: None,
-            preferred_locales: DEFAULT_LOCALES
-                .iter()
-                .map(|value| (*value).to_owned())
-                .collect(),
-            timeout_seconds: 30,
-            auto_accept_confidence: 0.9,
-            review_confidence: 0.6,
-            output_preset: OutputPreset::Full,
-            placement: PlacementPolicy::InPlace,
-            conflict_policy: ConflictPolicy::Review,
-            enabled_providers: DEFAULT_PROVIDERS
-                .iter()
-                .map(|value| (*value).to_owned())
-                .collect(),
-            provider_endpoints: ProviderEndpoints::default(),
-            tmdb_api_token: None,
-            anilist_access_token: None,
-        }
-    }
-}
-
-impl WorkspaceSettings {
-    fn snapshot(&self) -> WorkspaceSettingsSnapshot {
-        WorkspaceSettingsSnapshot {
-            offline: self.offline,
-            proxy: self.proxy.clone(),
-            preferred_locales: self.preferred_locales.clone(),
-            timeout_seconds: self.timeout_seconds,
-            auto_accept_confidence: self.auto_accept_confidence,
-            review_confidence: self.review_confidence,
-            output_preset: self.output_preset,
-            placement: self.placement,
-            conflict_policy: self.conflict_policy,
-            enabled_providers: self.enabled_providers.clone(),
-            provider_endpoints: self.provider_endpoints.clone(),
+            offline: config.offline,
+            proxy: config.proxy.clone(),
+            preferred_locales: config.preferred_locales.clone(),
+            timeout_seconds: config.timeout_seconds,
+            auto_accept_confidence: config.auto_accept_confidence,
+            review_confidence: config.review_confidence,
+            output_preset: config.output_preset,
+            placement: config.placement,
+            conflict_policy: config.conflict_policy,
+            enabled_providers: config.enabled_providers.clone(),
+            provider_endpoints: ProviderEndpoints {
+                tmdb: config.providers.tmdb.base_url.clone(),
+                bangumi: config.providers.bangumi.base_url.clone(),
+                anilist: config.providers.anilist.base_url.clone(),
+                musicbrainz: config.providers.musicbrainz.base_url.clone(),
+                openlibrary: config.providers.openlibrary.base_url.clone(),
+                openlibrary_cover: config.providers.openlibrary.cover_base_url.clone(),
+            },
             secrets: SecretStatus {
-                tmdb_api_token_configured: self.tmdb_api_token.is_some(),
-                anilist_access_token_configured: self.anilist_access_token.is_some(),
+                tmdb_api_token_configured: config.providers.tmdb.resolved_api_token().is_some(),
+                anilist_access_token_configured: config
+                    .providers
+                    .anilist
+                    .resolved_access_token()
+                    .is_some(),
+                tmdb_api_token_env: config.providers.tmdb.api_token_env.clone(),
+                anilist_access_token_env: config.providers.anilist.access_token_env.clone(),
             },
         }
     }
@@ -255,9 +183,48 @@ struct WorkspaceRoot {
     path: PathBuf,
 }
 
+#[derive(Clone)]
+enum WorkspaceConfig {
+    Shared(ConfigHandle),
+    Ephemeral(Arc<RwLock<FixerConfig>>),
+}
+
+impl WorkspaceConfig {
+    fn snapshot(&self) -> FixerConfig {
+        match self {
+            Self::Shared(handle) => handle.snapshot(),
+            Self::Ephemeral(config) => config
+                .read()
+                .expect("workspace configuration lock is not poisoned")
+                .clone(),
+        }
+    }
+
+    async fn replace(&self, next: FixerConfig) -> Result<(), WorkspaceStateError> {
+        match self {
+            Self::Shared(handle) => {
+                let handle = handle.clone();
+                tokio::task::spawn_blocking(move || handle.replace_and_persist(next))
+                    .await
+                    .map_err(|_| WorkspaceStateError::SettingsTask)?
+                    .map_err(WorkspaceStateError::SettingsPersistence)
+            }
+            Self::Ephemeral(config) => {
+                next.validate().map_err(|error| {
+                    WorkspaceStateError::SettingsPersistence(ConfigWriteError::Validation(error))
+                })?;
+                *config
+                    .write()
+                    .expect("workspace configuration lock is not poisoned") = next;
+                Ok(())
+            }
+        }
+    }
+}
+
 struct WorkspaceInner {
     roots: Vec<WorkspaceRoot>,
-    settings: RwLock<WorkspaceSettings>,
+    config: WorkspaceConfig,
 }
 
 #[derive(Clone)]
@@ -279,7 +246,7 @@ impl Default for WorkspaceState {
         Self {
             inner: Arc::new(WorkspaceInner {
                 roots: Vec::new(),
-                settings: RwLock::new(WorkspaceSettings::default()),
+                config: WorkspaceConfig::Ephemeral(Arc::new(RwLock::new(FixerConfig::default()))),
             }),
         }
     }
@@ -287,6 +254,28 @@ impl Default for WorkspaceState {
 
 impl WorkspaceState {
     pub fn new<I, P>(roots: I) -> Result<Self, WorkspaceStateError>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        Self::build(
+            roots,
+            WorkspaceConfig::Ephemeral(Arc::new(RwLock::new(FixerConfig::default()))),
+        )
+    }
+
+    pub fn new_with_config<I, P>(
+        roots: I,
+        config: ConfigHandle,
+    ) -> Result<Self, WorkspaceStateError>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        Self::build(roots, WorkspaceConfig::Shared(config))
+    }
+
+    fn build<I, P>(roots: I, config: WorkspaceConfig) -> Result<Self, WorkspaceStateError>
     where
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
@@ -321,13 +310,13 @@ impl WorkspaceState {
         Ok(Self {
             inner: Arc::new(WorkspaceInner {
                 roots: canonical_roots,
-                settings: RwLock::new(WorkspaceSettings::default()),
+                config,
             }),
         })
     }
 
     pub(crate) async fn settings(&self) -> WorkspaceSettingsSnapshot {
-        self.inner.settings.read().await.snapshot()
+        WorkspaceSettingsSnapshot::from_config(&self.inner.config.snapshot())
     }
 
     pub(crate) async fn update_settings(
@@ -335,29 +324,12 @@ impl WorkspaceState {
         input: WorkspaceSettingsInput,
     ) -> Result<WorkspaceSettingsSnapshot, WorkspaceStateError> {
         validate_settings(&input)?;
-        let mut settings = self.inner.settings.write().await;
-        settings.offline = input.offline;
-        settings.proxy = input.proxy;
-        settings.preferred_locales = input.preferred_locales;
-        settings.timeout_seconds = input.timeout_seconds;
-        settings.auto_accept_confidence = input.auto_accept_confidence;
-        settings.review_confidence = input.review_confidence;
-        settings.output_preset = input.output_preset;
-        settings.placement = input.placement;
-        settings.conflict_policy = input.conflict_policy;
-        settings.enabled_providers = deduplicate(input.enabled_providers);
-        settings.provider_endpoints = input.provider_endpoints;
-        update_secret(
-            &mut settings.tmdb_api_token,
-            input.tmdb_api_token,
-            input.clear_tmdb_api_token,
-        );
-        update_secret(
-            &mut settings.anilist_access_token,
-            input.anilist_access_token,
-            input.clear_anilist_access_token,
-        );
-        Ok(settings.snapshot())
+        let mut next = self.inner.config.snapshot();
+        apply_settings_input(&mut next, input);
+        self.inner.config.replace(next).await?;
+        Ok(WorkspaceSettingsSnapshot::from_config(
+            &self.inner.config.snapshot(),
+        ))
     }
 
     pub(crate) fn roots(&self) -> Vec<RootSummary> {
@@ -482,7 +454,7 @@ impl WorkspaceState {
         if !KNOWN_PROVIDERS.contains(&provider) {
             return Err(WorkspaceStateError::ProviderNotFound);
         }
-        let settings = self.inner.settings.read().await.clone();
+        let settings = self.inner.config.snapshot();
         if !settings
             .enabled_providers
             .iter()
@@ -501,7 +473,7 @@ impl WorkspaceState {
                 "Offline mode skips network providers",
             ));
         }
-        if provider == "tmdb" && settings.tmdb_api_token.is_none() {
+        if provider == "tmdb" && settings.providers.tmdb.resolved_api_token().is_none() {
             return Ok(probe(
                 provider,
                 false,
@@ -509,13 +481,13 @@ impl WorkspaceState {
                 "Provider credentials are not configured",
             ));
         }
-        let endpoint = endpoint(&settings.provider_endpoints, provider)
-            .ok_or(WorkspaceStateError::ProviderNotFound)?;
+        let endpoint =
+            endpoint(&settings, provider).ok_or(WorkspaceStateError::ProviderNotFound)?;
         let mut config =
             HttpConfig::default().with_timeout(Duration::from_secs(settings.timeout_seconds));
-        if let Some(proxy) = settings.proxy {
+        if let Some(proxy) = &settings.proxy {
             config = config
-                .with_proxy(proxy)
+                .with_proxy(proxy.clone())
                 .map_err(|_| WorkspaceStateError::ProbeConfiguration)?;
         }
         let client =
@@ -523,20 +495,21 @@ impl WorkspaceState {
         let mut request = HttpRequest::new(HttpMethod::Head, endpoint);
         if provider == "tmdb" {
             let token = settings
-                .tmdb_api_token
-                .as_ref()
+                .providers
+                .tmdb
+                .resolved_api_token()
                 .expect("TMDB credentials were checked above");
             request = request.with_header(
-                Header::new("authorization", format!("Bearer {}", token.0))
+                Header::new("authorization", format!("Bearer {token}"))
                     .map_err(|_| WorkspaceStateError::ProbeConfiguration)?,
             );
-        } else if provider == "anilist" {
-            if let Some(token) = settings.anilist_access_token {
-                request = request.with_header(
-                    Header::new("authorization", format!("Bearer {}", token.0))
-                        .map_err(|_| WorkspaceStateError::ProbeConfiguration)?,
-                );
-            }
+        } else if provider == "anilist"
+            && let Some(token) = settings.providers.anilist.resolved_access_token()
+        {
+            request = request.with_header(
+                Header::new("authorization", format!("Bearer {token}"))
+                    .map_err(|_| WorkspaceStateError::ProbeConfiguration)?,
+            );
         }
         let result = client.execute(request).await;
         Ok(match result {
@@ -596,6 +569,37 @@ impl WorkspaceState {
             .find(|root| root.id == id)
             .ok_or(WorkspaceStateError::RootNotFound)
     }
+}
+
+fn apply_settings_input(config: &mut FixerConfig, input: WorkspaceSettingsInput) {
+    config.offline = input.offline;
+    config.proxy = input.proxy;
+    config.preferred_locales = input.preferred_locales;
+    config.timeout_seconds = input.timeout_seconds;
+    config.auto_accept_confidence = input.auto_accept_confidence;
+    config.review_confidence = input.review_confidence;
+    config.output_preset = input.output_preset;
+    config.placement = input.placement;
+    config.conflict_policy = input.conflict_policy;
+    config.enabled_providers = deduplicate(input.enabled_providers);
+    config.providers.tmdb.base_url = input.provider_endpoints.tmdb;
+    config.providers.bangumi.base_url = input.provider_endpoints.bangumi;
+    config.providers.anilist.base_url = input.provider_endpoints.anilist;
+    config.providers.musicbrainz.base_url = input.provider_endpoints.musicbrainz;
+    config.providers.openlibrary.base_url = input.provider_endpoints.openlibrary;
+    config.providers.openlibrary.cover_base_url = input.provider_endpoints.openlibrary_cover;
+    update_secret(
+        &mut config.providers.tmdb.api_token,
+        &mut config.providers.tmdb.api_token_env,
+        input.tmdb_api_token,
+        input.clear_tmdb_api_token,
+    );
+    update_secret(
+        &mut config.providers.anilist.access_token,
+        &mut config.providers.anilist.access_token_env,
+        input.anilist_access_token,
+        input.clear_anilist_access_token,
+    );
 }
 
 fn validate_settings(input: &WorkspaceSettingsInput) -> Result<(), WorkspaceStateError> {
@@ -730,11 +734,18 @@ fn validate_secret_update(
     Ok(())
 }
 
-fn update_secret(current: &mut Option<SecretValue>, value: Option<String>, clear: bool) {
+fn update_secret(
+    current: &mut Option<SecretString>,
+    reference: &mut Option<String>,
+    value: Option<String>,
+    clear: bool,
+) {
     if clear {
         *current = None;
+        *reference = None;
     } else if let Some(value) = value {
-        *current = Some(SecretValue(value));
+        *current = Some(SecretString::new(value));
+        *reference = None;
     }
 }
 
@@ -835,13 +846,13 @@ fn normalize_display_path(path: &str) -> String {
     path.trim_matches('/').to_owned()
 }
 
-fn endpoint<'a>(endpoints: &'a ProviderEndpoints, provider: &str) -> Option<&'a str> {
+fn endpoint<'a>(config: &'a FixerConfig, provider: &str) -> Option<&'a str> {
     match provider {
-        "tmdb" => Some(&endpoints.tmdb),
-        "bangumi" => Some(&endpoints.bangumi),
-        "anilist" => Some(&endpoints.anilist),
-        "musicbrainz" => Some(&endpoints.musicbrainz),
-        "openlibrary" => Some(&endpoints.openlibrary),
+        "tmdb" => Some(&config.providers.tmdb.base_url),
+        "bangumi" => Some(&config.providers.bangumi.base_url),
+        "anilist" => Some(&config.providers.anilist.base_url),
+        "musicbrainz" => Some(&config.providers.musicbrainz.base_url),
+        "openlibrary" => Some(&config.providers.openlibrary.base_url),
         _ => None,
     }
 }
@@ -883,4 +894,8 @@ pub enum WorkspaceStateError {
     ProviderNotFound,
     #[error("provider probe could not be configured")]
     ProbeConfiguration,
+    #[error("settings persistence task failed")]
+    SettingsTask,
+    #[error("settings could not be persisted")]
+    SettingsPersistence(#[source] ConfigWriteError),
 }

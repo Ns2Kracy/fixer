@@ -282,19 +282,43 @@ pub async fn serve(config: ServerConfig, web_root: impl AsRef<Path>) -> Result<(
     serve_inner(config, web_root, None).await
 }
 
-/// Opens persistent services using the same provider configuration as the CLI.
+/// Opens persistent services using a fixed provider configuration.
 pub async fn serve_configured(
     config: ServerConfig,
     web_root: impl AsRef<Path>,
     runtime_config: fixer_runtime::FixerConfig,
 ) -> Result<(), ServeError> {
-    serve_inner(config, web_root, Some(runtime_config)).await
+    serve_inner(
+        config,
+        web_root,
+        Some(RuntimeConfiguration::Static(Box::new(runtime_config))),
+    )
+    .await
+}
+
+/// Opens persistent services with one mutable configuration shared by routes and workers.
+pub async fn serve_with_config_handle(
+    config: ServerConfig,
+    web_root: impl AsRef<Path>,
+    runtime_config: fixer_runtime::ConfigHandle,
+) -> Result<(), ServeError> {
+    serve_inner(
+        config,
+        web_root,
+        Some(RuntimeConfiguration::Shared(runtime_config)),
+    )
+    .await
+}
+
+enum RuntimeConfiguration {
+    Static(Box<fixer_runtime::FixerConfig>),
+    Shared(fixer_runtime::ConfigHandle),
 }
 
 async fn serve_inner(
     config: ServerConfig,
     web_root: impl AsRef<Path>,
-    runtime_config: Option<fixer_runtime::FixerConfig>,
+    runtime_config: Option<RuntimeConfiguration>,
 ) -> Result<(), ServeError> {
     config.validate_for_serve()?;
     let store = SqliteJobStore::open(config.database_path()).await?;
@@ -302,7 +326,12 @@ async fn serve_inner(
         .media_policy
         .clone()
         .expect("validated production configuration has media roots");
-    let workspace_state = WorkspaceState::new(fs_policy.roots())?;
+    let workspace_state = match runtime_config.as_ref() {
+        Some(RuntimeConfiguration::Shared(runtime_config)) => {
+            WorkspaceState::new_with_config(fs_policy.roots(), runtime_config.clone())?
+        }
+        Some(RuntimeConfiguration::Static(_)) | None => WorkspaceState::new(fs_policy.roots())?,
+    };
     let runtime = JobRuntime::new(store.clone(), DEFAULT_EVENT_CAPACITY).with_fs_policy(fs_policy);
     let auth_state = AuthState::new(store)
         .with_secure_cookie(config.https_termination)
@@ -317,9 +346,13 @@ async fn serve_inner(
         "server listening"
     );
     let workers = match runtime_config {
-        Some(runtime_config) => runtime.start_workers(
+        Some(RuntimeConfiguration::Static(runtime_config)) => runtime.start_workers(
             config.worker_count(),
-            SdkJobFlow::from_config(runtime_config),
+            SdkJobFlow::from_config(*runtime_config),
+        ),
+        Some(RuntimeConfiguration::Shared(runtime_config)) => runtime.start_workers(
+            config.worker_count(),
+            SdkJobFlow::from_handle(runtime_config),
         ),
         None => runtime.start_local_workers(config.worker_count()),
     };

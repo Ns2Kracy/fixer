@@ -4,6 +4,7 @@ use axum::{
     http::{Request, StatusCode, header},
     routing::head,
 };
+use fixer_runtime::ConfigLoader;
 use fixer_server::{WorkspaceState, workspace_app};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -126,6 +127,240 @@ async fn settings_are_validated_and_secrets_are_write_only() {
         "must not contain credentials"
     );
     assert!(!error.to_string().contains("password"));
+}
+
+#[tokio::test]
+async fn settings_persist_through_config_handle_and_survive_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let media = root.path().join("media");
+    std::fs::create_dir(&media).unwrap();
+    std::fs::write(
+        root.path().join("fixer.toml"),
+        r#"
+enabled_providers = ["local", "tmdb"]
+
+[providers.tmdb]
+api_token_env = "TMDB_SECRET"
+
+[providers.anilist]
+access_token = "direct-anilist-secret"
+
+[server]
+bind = "127.0.0.1:4100"
+media_roots = ["media"]
+worker_count = 3
+"#,
+    )
+    .unwrap();
+    let environment = std::collections::BTreeMap::from([(
+        "TMDB_SECRET".to_owned(),
+        "environment-secret".to_owned(),
+    )]);
+    let handle = ConfigLoader::new(root.path())
+        .with_environment(environment.clone())
+        .load()
+        .unwrap()
+        .into_handle();
+    let app = workspace_app(WorkspaceState::new_with_config([&media], handle.clone()).unwrap());
+
+    let fetched = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/settings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let fetched = response_json(fetched).await;
+    assert_eq!(
+        fetched["settings"]["enabled_providers"],
+        json!(["local", "tmdb"])
+    );
+    assert_eq!(
+        fetched["settings"]["secrets"],
+        json!({
+            "tmdb_api_token_configured": true,
+            "anilist_access_token_configured": true,
+            "tmdb_api_token_env": "TMDB_SECRET"
+        })
+    );
+    assert!(!fetched.to_string().contains("environment-secret"));
+    assert!(!fetched.to_string().contains("direct-anilist-secret"));
+
+    let mut request = settings("http://127.0.0.1:9");
+    request["tmdb_api_token"] = Value::Null;
+    request["anilist_access_token"] = Value::Null;
+    let update = app
+        .clone()
+        .oneshot(put_json("/api/v1/settings", request))
+        .await
+        .unwrap();
+    assert_eq!(update.status(), StatusCode::OK);
+    let updated = response_json(update).await;
+    assert_eq!(
+        updated["settings"]["secrets"]["tmdb_api_token_env"],
+        "TMDB_SECRET"
+    );
+    assert!(!updated.to_string().contains("environment-secret"));
+    assert!(!updated.to_string().contains("write-only-tmdb-secret"));
+
+    let persisted = std::fs::read_to_string(root.path().join("fixer.toml")).unwrap();
+    assert!(persisted.contains("output_preset = \"metadata\""));
+    assert!(persisted.contains("api_token_env = \"TMDB_SECRET\""));
+    let reloaded = ConfigLoader::new(root.path())
+        .with_environment(environment)
+        .load()
+        .unwrap();
+    assert_eq!(reloaded.config().output_preset.to_string(), "metadata");
+    assert_eq!(
+        reloaded.config().providers.tmdb.base_url,
+        "http://127.0.0.1:9"
+    );
+    assert_eq!(reloaded.config().server.bind.to_string(), "127.0.0.1:4100");
+    assert_eq!(reloaded.config().server.worker_count, 3);
+    assert_eq!(
+        reloaded.config().server.media_roots,
+        vec![media.canonicalize().unwrap()]
+    );
+
+    let before_file = std::fs::read(root.path().join("fixer.toml")).unwrap();
+    let before_memory = handle.snapshot();
+    let mut forbidden = settings("http://127.0.0.1:9");
+    forbidden["server"] = json!({"bind": "0.0.0.0:9999", "worker_count": 99});
+    let response = app
+        .clone()
+        .oneshot(put_json("/api/v1/settings", forbidden))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        std::fs::read(root.path().join("fixer.toml")).unwrap(),
+        before_file
+    );
+    assert_eq!(handle.snapshot(), before_memory);
+
+    let mut invalid = settings("http://127.0.0.1:9");
+    invalid["review_confidence"] = json!(0.95);
+    let response = app
+        .oneshot(put_json("/api/v1/settings", invalid))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        std::fs::read(root.path().join("fixer.toml")).unwrap(),
+        before_file
+    );
+    assert_eq!(handle.snapshot(), before_memory);
+}
+
+#[tokio::test]
+async fn direct_secret_replacement_and_clear_update_reference_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("fixer.toml"),
+        "[providers.tmdb]\napi_token_env = \"TMDB_SECRET\"\n",
+    )
+    .unwrap();
+    let handle = ConfigLoader::new(root.path())
+        .with_environment(std::collections::BTreeMap::from([(
+            "TMDB_SECRET".to_owned(),
+            "environment-secret".to_owned(),
+        )]))
+        .load()
+        .unwrap()
+        .into_handle();
+    let app = workspace_app(
+        WorkspaceState::new_with_config(std::iter::empty::<&str>(), handle.clone()).unwrap(),
+    );
+
+    let mut replacement = settings("http://127.0.0.1:9");
+    replacement["tmdb_api_token"] = json!("replacement-secret");
+    replacement["anilist_access_token"] = Value::Null;
+    let response = app
+        .clone()
+        .oneshot(put_json("/api/v1/settings", replacement))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(
+        body["settings"]["secrets"]["tmdb_api_token_configured"],
+        true
+    );
+    assert!(
+        body["settings"]["secrets"]
+            .get("tmdb_api_token_env")
+            .is_none()
+    );
+    assert!(!body.to_string().contains("replacement-secret"));
+    let replaced = handle.snapshot();
+    assert_eq!(
+        replaced
+            .providers
+            .tmdb
+            .api_token
+            .as_ref()
+            .unwrap()
+            .expose_secret(),
+        "replacement-secret"
+    );
+    assert!(replaced.providers.tmdb.api_token_env.is_none());
+
+    let mut clear = settings("http://127.0.0.1:9");
+    clear["tmdb_api_token"] = Value::Null;
+    clear["anilist_access_token"] = Value::Null;
+    clear["clear_tmdb_api_token"] = json!(true);
+    let response = app
+        .oneshot(put_json("/api/v1/settings", clear))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(
+        body["settings"]["secrets"]["tmdb_api_token_configured"],
+        false
+    );
+    let cleared = handle.snapshot();
+    assert!(cleared.providers.tmdb.api_token.is_none());
+    assert!(cleared.providers.tmdb.api_token_env.is_none());
+    assert!(
+        !std::fs::read_to_string(root.path().join("fixer.toml"))
+            .unwrap()
+            .contains("replacement-secret")
+    );
+}
+
+#[tokio::test]
+async fn settings_persistence_failure_keeps_shared_memory_unchanged() {
+    let root = tempfile::tempdir().unwrap();
+    let config_dir = root.path().join("config");
+    let config_path = config_dir.join("fixer.toml");
+    std::fs::create_dir(&config_dir).unwrap();
+    std::fs::write(&config_path, "offline = false\n").unwrap();
+    let handle = ConfigLoader::new(root.path())
+        .with_config_path(&config_path)
+        .load()
+        .unwrap()
+        .into_handle();
+    let before = handle.snapshot();
+    let app = workspace_app(
+        WorkspaceState::new_with_config(std::iter::empty::<&str>(), handle.clone()).unwrap(),
+    );
+
+    std::fs::remove_file(&config_path).unwrap();
+    std::fs::remove_dir(&config_dir).unwrap();
+    std::fs::write(&config_dir, b"blocker").unwrap();
+
+    let response = app
+        .oneshot(put_json("/api/v1/settings", settings("http://127.0.0.1:9")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let error = response_json(response).await;
+    assert_eq!(error["error"]["code"], "workspace_error");
+    assert_eq!(handle.snapshot(), before);
+    assert_eq!(std::fs::read(&config_dir).unwrap(), b"blocker");
 }
 
 #[tokio::test]

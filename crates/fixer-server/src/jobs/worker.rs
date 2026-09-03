@@ -1,6 +1,7 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -18,9 +19,12 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::{sync::watch, task::JoinHandle};
 
-use crate::jobs::{
-    ExecutionTaskRegistry, artifacts,
-    model::{JobInputDto, JobMediaKind, ReviewDecisionDto},
+use crate::{
+    jobs::{
+        ExecutionTaskRegistry, artifacts,
+        model::{JobInputDto, JobMediaKind, ReviewDecisionDto},
+    },
+    store::JobId,
 };
 
 /// Bounded result retained after SDK resolution.
@@ -54,7 +58,11 @@ pub struct SdkJobFlow {
 #[derive(Clone)]
 enum SdkJobSource {
     Fixed(Fixer),
-    Shared(Arc<fixer_runtime::FixerConfig>),
+    Static(Arc<fixer_runtime::FixerConfig>),
+    Shared {
+        config: fixer_runtime::ConfigHandle,
+        snapshots: Arc<Mutex<HashMap<JobId, Arc<fixer_runtime::FixerConfig>>>>,
+    },
 }
 
 impl SdkJobFlow {
@@ -66,7 +74,16 @@ impl SdkJobFlow {
 
     pub fn from_config(config: fixer_runtime::FixerConfig) -> Self {
         Self {
-            source: SdkJobSource::Shared(Arc::new(config)),
+            source: SdkJobSource::Static(Arc::new(config)),
+        }
+    }
+
+    pub fn from_handle(config: fixer_runtime::ConfigHandle) -> Self {
+        Self {
+            source: SdkJobSource::Shared {
+                config,
+                snapshots: Arc::new(Mutex::new(HashMap::new())),
+            },
         }
     }
 }
@@ -144,7 +161,26 @@ pub(crate) enum ResolvedArtifact {
 }
 
 impl WorkerFlow {
-    pub(crate) async fn scan(&self, input: &JobInputDto) -> Result<ScannedJob, JobFlowError> {
+    pub(crate) async fn scan(
+        &self,
+        job_id: JobId,
+        input: &JobInputDto,
+    ) -> Result<ScannedJob, JobFlowError> {
+        self.scan_with_snapshot(Some(job_id), input).await
+    }
+
+    pub(crate) async fn scan_current(
+        &self,
+        input: &JobInputDto,
+    ) -> Result<ScannedJob, JobFlowError> {
+        self.scan_with_snapshot(None, input).await
+    }
+
+    async fn scan_with_snapshot(
+        &self,
+        job_id: Option<JobId>,
+        input: &JobInputDto,
+    ) -> Result<ScannedJob, JobFlowError> {
         match self {
             Self::Configured(flow) => match &flow.source {
                 SdkJobSource::Fixed(fixer) => Ok(ScannedJob {
@@ -154,9 +190,27 @@ impl WorkerFlow {
                     isbn: None,
                     output_root: scan_root(Path::new(input.input_path()))?,
                 }),
-                SdkJobSource::Shared(config) => {
+                SdkJobSource::Static(config) => {
                     let input = input.clone();
                     let config = Arc::clone(config);
+                    tokio::task::spawn_blocking(move || scan_configured(&input, config.as_ref()))
+                        .await
+                        .map_err(|error| JobFlowError::BlockingTask(error.to_string()))?
+                }
+                SdkJobSource::Shared { config, snapshots } => {
+                    let input = input.clone();
+                    let config = if let Some(job_id) = job_id {
+                        let mut snapshots = snapshots
+                            .lock()
+                            .expect("job configuration snapshots lock is not poisoned");
+                        Arc::clone(
+                            snapshots
+                                .entry(job_id)
+                                .or_insert_with(|| Arc::new(config.snapshot())),
+                        )
+                    } else {
+                        Arc::new(config.snapshot())
+                    };
                     tokio::task::spawn_blocking(move || scan_configured(&input, config.as_ref()))
                         .await
                         .map_err(|error| JobFlowError::BlockingTask(error.to_string()))?
@@ -168,6 +222,18 @@ impl WorkerFlow {
                     .await
                     .map_err(|error| JobFlowError::BlockingTask(error.to_string()))?
             }
+        }
+    }
+
+    pub(crate) fn release(&self, job_id: JobId) {
+        if let Self::Configured(SdkJobFlow {
+            source: SdkJobSource::Shared { snapshots, .. },
+        }) = self
+        {
+            snapshots
+                .lock()
+                .expect("job configuration snapshots lock is not poisoned")
+                .remove(&job_id);
         }
     }
 }
@@ -866,6 +932,9 @@ pub(crate) type SharedWorkerFlow = Arc<WorkerFlow>;
 
 #[cfg(test)]
 mod tests {
+    fn job_id(value: i64) -> crate::store::JobId {
+        crate::store::JobId::from_database(value).unwrap()
+    }
 
     #[tokio::test]
     async fn metadata_free_movie_files_use_filename_hints_through_resolve() {
@@ -878,7 +947,10 @@ mod tests {
             false,
         );
 
-        let scanned = super::WorkerFlow::Local.scan(&input).await.unwrap();
+        let scanned = super::WorkerFlow::Local
+            .scan(job_id(1), &input)
+            .await
+            .unwrap();
         let summary = scanned.search().await.unwrap().resolve().await.unwrap();
         assert_eq!(summary.candidate_count(), 1);
         assert_eq!(summary.conflict_count(), 0);
@@ -901,10 +973,74 @@ mod tests {
         };
         let flow = super::WorkerFlow::Configured(super::SdkJobFlow::from_config(config));
 
-        let scanned = flow.scan(&input).await.unwrap();
+        let scanned = flow.scan(job_id(1), &input).await.unwrap();
         let summary = scanned.search().await.unwrap().resolve().await.unwrap();
         assert_eq!(summary.candidate_count(), 1);
         assert_eq!(summary.conflict_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn shared_handle_is_snapshotted_for_each_job() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("fixer.toml"),
+            "offline = true\nenabled_providers = [\"local\"]\n",
+        )
+        .unwrap();
+        let handle = fixer_runtime::ConfigLoader::new(directory.path())
+            .with_environment(std::collections::BTreeMap::new())
+            .load()
+            .unwrap()
+            .into_handle();
+        let flow = super::WorkerFlow::Configured(super::SdkJobFlow::from_handle(handle.clone()));
+        let movie = directory.path().join("In.The.Mood.For.Love.2000.mkv");
+        std::fs::write(&movie, b"fixture").unwrap();
+        let input = crate::jobs::model::JobInputDto::new(
+            crate::jobs::model::JobMediaKind::Movie,
+            movie.to_string_lossy(),
+            false,
+        );
+
+        let active_id = crate::store::JobId::from_database(1).unwrap();
+        let new_id = crate::store::JobId::from_database(2).unwrap();
+        let first = flow
+            .scan(active_id, &input)
+            .await
+            .unwrap()
+            .search()
+            .await
+            .unwrap();
+        assert_eq!(first.candidate_count(), 1);
+
+        let mut next = handle.snapshot();
+        next.enabled_providers = vec!["tmdb".to_owned()];
+        handle.replace_and_persist(next).unwrap();
+
+        let active_again = flow
+            .scan(active_id, &input)
+            .await
+            .unwrap()
+            .search()
+            .await
+            .unwrap();
+        assert_eq!(active_again.candidate_count(), 1);
+
+        let new_job = flow.scan(new_id, &input).await;
+        assert!(matches!(
+            new_job,
+            Err(super::JobFlowError::Runtime(
+                fixer_runtime::RuntimeConfigError::Sdk(fixer_sdk::SdkError::NoProviders)
+            ))
+        ));
+
+        flow.release(active_id);
+        let retried_job = flow.scan(active_id, &input).await;
+        assert!(matches!(
+            retried_job,
+            Err(super::JobFlowError::Runtime(
+                fixer_runtime::RuntimeConfigError::Sdk(fixer_sdk::SdkError::NoProviders)
+            ))
+        ));
     }
 
     #[tokio::test]
@@ -928,7 +1064,10 @@ mod tests {
             false,
         );
 
-        let scanned = super::WorkerFlow::Local.scan(&input).await.unwrap();
+        let scanned = super::WorkerFlow::Local
+            .scan(job_id(1), &input)
+            .await
+            .unwrap();
         let summary = scanned.search().await.unwrap().resolve().await.unwrap();
         assert_eq!(summary.candidate_count(), 1);
     }

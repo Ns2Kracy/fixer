@@ -297,6 +297,49 @@ fn config_handle_persists_atomically_and_updates_its_snapshot() {
     assert_eq!(reloaded.config().timeout_seconds, 52);
 }
 
+#[cfg(unix)]
+#[test]
+fn config_handle_writes_private_file_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let handle = ConfigLoader::new(root.path())
+        .with_environment(env(&[]))
+        .load()
+        .unwrap()
+        .into_handle();
+    let mut next = handle.snapshot();
+    next.providers.tmdb.api_token = Some(fixer_runtime::SecretString::new("private-secret"));
+
+    handle.replace_and_persist(next).unwrap();
+
+    let mode = fs::metadata(handle.path()).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn config_handle_rejects_writing_toml_into_an_explicit_json_path() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("legacy.json");
+    fs::write(&path, "{\"timeout_seconds\":41}\n").unwrap();
+    let handle = ConfigLoader::new(root.path())
+        .with_environment(env(&[]))
+        .with_config_path(&path)
+        .load()
+        .unwrap()
+        .into_handle();
+    let before = handle.snapshot();
+    let original = fs::read(&path).unwrap();
+    let mut next = before.clone();
+    next.timeout_seconds = 52;
+
+    let error = handle.replace_and_persist(next).unwrap_err();
+
+    assert!(error.to_string().contains("TOML"));
+    assert_eq!(handle.snapshot(), before);
+    assert_eq!(fs::read(&path).unwrap(), original);
+}
+
 #[test]
 fn malformed_legacy_boolean_fails_closed() {
     let root = tempfile::tempdir().unwrap();
