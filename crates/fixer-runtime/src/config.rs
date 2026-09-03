@@ -717,6 +717,9 @@ impl ConfigLoader {
                 builder.set_override("local_root", local_root.to_string_lossy().into_owned())?;
         }
         let mut config: FixerConfig = builder.build()?.try_deserialize()?;
+        if let Some(filter) = self.environment.get("RUST_LOG") {
+            config.logging.filter = filter.clone();
+        }
         apply_legacy_overrides(&mut config, &self.environment, providers_explicit)?;
         config.resolve_secrets(&self.environment)?;
         config.normalize(&base)?;

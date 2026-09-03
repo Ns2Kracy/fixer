@@ -112,6 +112,28 @@ fn process_environment_overrides_current_directory_dotenv_and_file() {
 }
 
 #[test]
+fn rust_log_overrides_nested_logging_environment_and_file() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("fixer.toml"),
+        "[logging]\nfilter = 'fixer_server=warn'\n",
+    )
+    .unwrap();
+    let loaded = ConfigLoader::new(root.path())
+        .with_environment(env(&[
+            ("FIXER_LOGGING__FILTER", "fixer_server=debug"),
+            ("RUST_LOG", "fixer_server=trace,tower_http=debug"),
+        ]))
+        .load()
+        .unwrap();
+
+    assert_eq!(
+        loaded.config().logging.filter,
+        "fixer_server=trace,tower_http=debug"
+    );
+}
+
+#[test]
 fn current_directory_dotenv_is_loaded_when_process_environment_is_absent() {
     let root = tempfile::tempdir().unwrap();
     fs::write(
