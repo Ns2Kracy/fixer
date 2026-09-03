@@ -277,8 +277,25 @@ pub enum ServeError {
     Io(#[from] std::io::Error),
 }
 
-/// Opens persistent services, installs every security boundary, binds, and serves.
+/// Opens persistent services with the legacy local-only worker flow.
 pub async fn serve(config: ServerConfig, web_root: impl AsRef<Path>) -> Result<(), ServeError> {
+    serve_inner(config, web_root, None).await
+}
+
+/// Opens persistent services using the same provider configuration as the CLI.
+pub async fn serve_configured(
+    config: ServerConfig,
+    web_root: impl AsRef<Path>,
+    runtime_config: fixer_runtime::FixerConfig,
+) -> Result<(), ServeError> {
+    serve_inner(config, web_root, Some(runtime_config)).await
+}
+
+async fn serve_inner(
+    config: ServerConfig,
+    web_root: impl AsRef<Path>,
+    runtime_config: Option<fixer_runtime::FixerConfig>,
+) -> Result<(), ServeError> {
     config.validate_for_serve()?;
     let store = SqliteJobStore::open(config.database_path()).await?;
     let fs_policy = config
@@ -299,7 +316,13 @@ pub async fn serve(config: ServerConfig, web_root: impl AsRef<Path>) -> Result<(
         worker_count = config.worker_count().get(),
         "server listening"
     );
-    let workers = runtime.start_local_workers(config.worker_count());
+    let workers = match runtime_config {
+        Some(runtime_config) => runtime.start_workers(
+            config.worker_count(),
+            SdkJobFlow::from_config(runtime_config),
+        ),
+        None => runtime.start_local_workers(config.worker_count()),
+    };
     let application = web_app(
         secure_workspace_app(runtime, auth_state, workspace_state),
         web_root,

@@ -45,14 +45,29 @@ impl SearchSummary {
     }
 }
 
-/// Reusable configured SDK flow, including deterministic Fixture providers.
+/// Reusable configured SDK flow, including deterministic fixture or shared providers.
 #[derive(Clone)]
 pub struct SdkJobFlow {
-    fixer: Fixer,
+    source: SdkJobSource,
 }
+
+#[derive(Clone)]
+enum SdkJobSource {
+    Fixed(Fixer),
+    Shared(Arc<fixer_runtime::FixerConfig>),
+}
+
 impl SdkJobFlow {
     pub const fn new(fixer: Fixer) -> Self {
-        Self { fixer }
+        Self {
+            source: SdkJobSource::Fixed(fixer),
+        }
+    }
+
+    pub fn from_config(config: fixer_runtime::FixerConfig) -> Self {
+        Self {
+            source: SdkJobSource::Shared(Arc::new(config)),
+        }
     }
 }
 
@@ -131,13 +146,22 @@ pub(crate) enum ResolvedArtifact {
 impl WorkerFlow {
     pub(crate) async fn scan(&self, input: &JobInputDto) -> Result<ScannedJob, JobFlowError> {
         match self {
-            Self::Configured(flow) => Ok(ScannedJob {
-                fixer: flow.fixer.clone(),
-                media_kind: input.media_kind(),
-                title: path_query_title(Path::new(input.input_path()))?,
-                isbn: None,
-                output_root: scan_root(Path::new(input.input_path()))?,
-            }),
+            Self::Configured(flow) => match &flow.source {
+                SdkJobSource::Fixed(fixer) => Ok(ScannedJob {
+                    fixer: fixer.clone(),
+                    media_kind: input.media_kind(),
+                    title: path_query_title(Path::new(input.input_path()))?,
+                    isbn: None,
+                    output_root: scan_root(Path::new(input.input_path()))?,
+                }),
+                SdkJobSource::Shared(config) => {
+                    let input = input.clone();
+                    let config = Arc::clone(config);
+                    tokio::task::spawn_blocking(move || scan_configured(&input, config.as_ref()))
+                        .await
+                        .map_err(|error| JobFlowError::BlockingTask(error.to_string()))?
+                }
+            },
             Self::Local => {
                 let input = input.clone();
                 tokio::task::spawn_blocking(move || scan_local(&input))
@@ -486,6 +510,20 @@ fn fingerprint_error(error: impl ToString) -> JobFlowError {
 }
 
 fn scan_local(input: &JobInputDto) -> Result<ScannedJob, JobFlowError> {
+    scan_with_config(input, None)
+}
+
+fn scan_configured(
+    input: &JobInputDto,
+    config: &fixer_runtime::FixerConfig,
+) -> Result<ScannedJob, JobFlowError> {
+    scan_with_config(input, Some(config))
+}
+
+fn scan_with_config(
+    input: &JobInputDto,
+    config: Option<&fixer_runtime::FixerConfig>,
+) -> Result<ScannedJob, JobFlowError> {
     let input_path = PathBuf::from(input.input_path());
     let root = scan_root(&input_path)?;
     let (provider, title, isbn, output_root) = match input.media_kind() {
@@ -528,7 +566,10 @@ fn scan_local(input: &JobInputDto) -> Result<ScannedJob, JobFlowError> {
             )
         }
     };
-    let fixer = Fixer::builder().provider(provider).offline().build()?;
+    let fixer = match config {
+        Some(config) => fixer_runtime::build_fixer(config, provider)?,
+        None => Fixer::builder().provider(provider).offline().build()?,
+    };
     Ok(ScannedJob {
         fixer,
         media_kind: input.media_kind(),
@@ -760,6 +801,8 @@ pub enum JobFlowError {
     Local(String),
     #[error(transparent)]
     Sdk(#[from] fixer_sdk::SdkError),
+    #[error(transparent)]
+    Runtime(#[from] fixer_runtime::RuntimeConfigError),
     #[error("blocking scan task failed: {0}")]
     BlockingTask(String),
     #[error("candidate or conflict index exceeds this platform's addressable range")]
@@ -836,6 +879,29 @@ mod tests {
         );
 
         let scanned = super::WorkerFlow::Local.scan(&input).await.unwrap();
+        let summary = scanned.search().await.unwrap().resolve().await.unwrap();
+        assert_eq!(summary.candidate_count(), 1);
+        assert_eq!(summary.conflict_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn shared_runtime_flow_keeps_local_scan_and_provider_configuration_together() {
+        let directory = tempfile::tempdir().unwrap();
+        let movie = directory.path().join("In.The.Mood.For.Love.2000.mkv");
+        std::fs::write(&movie, b"fixture").unwrap();
+        let input = crate::jobs::model::JobInputDto::new(
+            crate::jobs::model::JobMediaKind::Movie,
+            movie.to_string_lossy(),
+            false,
+        );
+        let config = fixer_runtime::FixerConfig {
+            offline: true,
+            enabled_providers: vec!["local".to_owned()],
+            ..Default::default()
+        };
+        let flow = super::WorkerFlow::Configured(super::SdkJobFlow::from_config(config));
+
+        let scanned = flow.scan(&input).await.unwrap();
         let summary = scanned.search().await.unwrap().resolve().await.unwrap();
         assert_eq!(summary.candidate_count(), 1);
         assert_eq!(summary.conflict_count(), 0);
