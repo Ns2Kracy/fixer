@@ -26,13 +26,12 @@ cp "$ROOT_DIR/fixer.toml.example" "$TEMP_DIR/fixer.toml"
     CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT_DIR/target}" \
     TMPDIR="${TMPDIR:-/tmp}" \
     cargo run --quiet --manifest-path "$ROOT_DIR/Cargo.toml" -p fixer-cli -- \
-      --config "$TEMP_DIR/fixer.toml" config validate >/dev/null
+    --config "$TEMP_DIR/fixer.toml" config validate >/dev/null
 )
 
 if rg -n --pcre2 \
   'fixer\.json|FIXER_SERVER_(?!_)|FIXER_WEB_ROOT|live only in process memory|in-memory workspace settings|Workspace settings are not persisted' \
-  "$@"
-then
+  "$@"; then
   printf 'stale public configuration guidance found\n' >&2
   exit 1
 fi
@@ -43,8 +42,7 @@ for contract in \
   'FIXER_SERVER__BIND' \
   'FIXER_LOGGING__FORMAT' \
   'RUST_LOG' \
-  'x-request-id'
-do
+  'x-request-id'; do
   if ! rg -q "$contract" "$@"; then
     printf 'missing public configuration contract: %s\n' "$contract" >&2
     exit 1

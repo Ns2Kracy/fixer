@@ -51,9 +51,10 @@ describe("administrator authentication", () => {
 
     renderApp();
 
-    expect(
-      await screen.findByRole("tab", { name: "Sign up" }),
-    ).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: "Sign up" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(screen.getByRole("tab", { name: "Sign in" })).toHaveAttribute(
       "aria-selected",
       "false",
@@ -221,9 +222,10 @@ describe("administrator authentication", () => {
 
     renderApp();
 
-    expect(
-      await screen.findByRole("tab", { name: "Sign in" }),
-    ).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: "Sign in" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(screen.getByRole("tab", { name: "Sign up" })).toBeDisabled();
   });
 });

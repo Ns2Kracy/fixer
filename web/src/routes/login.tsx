@@ -1,8 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/solid-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import {
   createFileRoute,
   useNavigate,
@@ -129,7 +125,11 @@ function LoginPage() {
               error={status.error}
               fallback="Authentication status is unavailable"
             />
-            <Button type="button" variant="secondary" onClick={() => status.refetch()}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => status.refetch()}
+            >
               Retry
             </Button>
           </Show>
@@ -176,7 +176,9 @@ function LoginPage() {
               id="authentication-panel"
               class="grid content-start gap-5"
               role="tabpanel"
-              aria-labelledby={mode() === "signup" ? "signup-tab" : "signin-tab"}
+              aria-labelledby={
+                mode() === "signup" ? "signup-tab" : "signin-tab"
+              }
               onSubmit={submit}
             >
               <FormField label="Username">
