@@ -49,40 +49,7 @@ pub(crate) fn local_fixer(config: &Config) -> AppResult<(Fixer, Vec<ScanWarning>
     Ok((build_fixer(provider, config)?, warnings))
 }
 pub(crate) fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult<Fixer> {
-    let locales = config
-        .preferred_locales
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    let mut builder = Fixer::builder()
-        .preferred_languages(locales)
-        .map_err(AppError::new)?
-        .timeout(config.timeout);
-    if config.provider_enabled("local") {
-        builder = builder.provider(provider);
-    }
-    if let Some(tmdb) = config.tmdb_provider()? {
-        builder = builder.provider(tmdb);
-    }
-    if let Some(bangumi) = config.bangumi_provider()? {
-        builder = builder.provider(bangumi);
-    }
-    if let Some(musicbrainz) = config.musicbrainz_provider()? {
-        builder = builder.provider(musicbrainz);
-    }
-    if let Some(openlibrary) = config.openlibrary_provider()? {
-        builder = builder.provider(openlibrary);
-    }
-    if let Some(anilist) = config.anilist_provider()? {
-        builder = builder.provider(anilist);
-    }
-    if let Some(proxy) = &config.proxy {
-        builder = builder.proxy(proxy.clone());
-    }
-    if config.offline {
-        builder = builder.offline();
-    }
-    builder.build().map_err(AppError::new)
+    fixer_runtime::build_fixer(config.shared(), provider).map_err(AppError::new)
 }
 pub(crate) fn parse_external_ids(values: &[String]) -> AppResult<Vec<ExternalId>> {
     values

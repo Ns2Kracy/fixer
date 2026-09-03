@@ -713,12 +713,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "fixer-core",
- "fixer-provider-anilist",
- "fixer-provider-bangumi",
  "fixer-provider-local",
- "fixer-provider-musicbrainz",
- "fixer-provider-openlibrary",
- "fixer-provider-tmdb",
+ "fixer-runtime",
  "fixer-sdk",
  "fixer-writer-local",
  "serde",

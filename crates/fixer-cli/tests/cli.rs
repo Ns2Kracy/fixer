@@ -132,6 +132,93 @@ fn config_validate_redacts_secrets_and_reports_flag_precedence() {
 }
 
 #[test]
+fn config_validate_auto_discovers_fixer_toml_instead_of_fixer_json() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("fixer.toml"), "offline = false\n").unwrap();
+    fs::write(root.path().join("fixer.json"), r#"{"offline":true}"#).unwrap();
+
+    let output = run(fixer()
+        .current_dir(root.path())
+        .env_remove("FIXER_CONFIG")
+        .env_remove("FIXER_OFFLINE")
+        .args(["config", "validate"]));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("offline: false (file)")
+    );
+}
+
+#[test]
+fn config_validate_loads_current_directory_dotenv() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join(".env"), "FIXER_OFFLINE=true\n").unwrap();
+
+    let output = run(fixer()
+        .current_dir(root.path())
+        .env_remove("FIXER_CONFIG")
+        .env_remove("FIXER_OFFLINE")
+        .args(["config", "validate"]));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("offline: true (environment)")
+    );
+}
+
+#[test]
+fn canonical_toml_preserves_file_environment_and_flag_precedence() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("fixer.toml"),
+        r#"
+proxy = "http://file-proxy.invalid:8080"
+
+[providers.tmdb]
+api_token = "file-token"
+"#,
+    )
+    .unwrap();
+
+    let output = run(fixer()
+        .current_dir(root.path())
+        .arg("--config")
+        .arg("fixer.toml")
+        .arg("--proxy")
+        .arg("http://flag-proxy.invalid:8082")
+        .args(["config", "validate"])
+        .env("FIXER_PROXY", "not a proxy URL")
+        .env("TMDB_API_TOKEN", "env-token"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("proxy: configured (flag)"));
+    assert!(stdout.contains("api_key: configured (environment)"));
+    for secret in [
+        "file-token",
+        "env-token",
+        "file-proxy",
+        "not a proxy URL",
+        "flag-proxy",
+    ] {
+        assert!(!stdout.contains(secret));
+    }
+}
+
+#[test]
 fn scrape_warnings_return_partial_success_exit_code() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join("source.json"), fixture()).unwrap();

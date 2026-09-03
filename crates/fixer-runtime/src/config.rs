@@ -48,6 +48,7 @@ impl fmt::Display for OutputPreset {
 #[derive(Default)]
 pub enum PlacementPolicy {
     #[default]
+    #[serde(alias = "in-place")]
     InPlace,
     Symlink,
     Hardlink,
@@ -70,6 +71,7 @@ impl fmt::Display for PlacementPolicy {
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum ConflictPolicy {
+    #[serde(alias = "prefer-first")]
     PreferFirst,
     #[default]
     Review,
@@ -415,6 +417,22 @@ impl FixerConfig {
         Ok(())
     }
     fn normalize(&mut self, base: &Path) -> Result<(), ConfigLoadError> {
+        if let Some(root) = &mut self.local_root {
+            let path = if root.is_absolute() {
+                root.clone()
+            } else {
+                base.join(&*root)
+            };
+            *root = path
+                .canonicalize()
+                .map_err(|source| ConfigLoadError::LocalRoot { path, source })?;
+            if !root.is_dir() {
+                return Err(ConfigLoadError::Validation(format!(
+                    "local_root is not a directory: {}",
+                    root.display()
+                )));
+            }
+        }
         let mut seen = HashSet::new();
         self.enabled_providers.retain(|p| seen.insert(p.clone()));
         for root in &mut self.server.media_roots {
@@ -465,6 +483,7 @@ pub struct LoadedConfig {
     path: PathBuf,
     base: PathBuf,
     environment: BTreeMap<String, String>,
+    file_fields: HashSet<String>,
     config: FixerConfig,
 }
 impl fmt::Debug for LoadedConfig {
@@ -481,6 +500,12 @@ impl LoadedConfig {
     }
     pub fn config(&self) -> &FixerConfig {
         &self.config
+    }
+    pub fn has_environment_key(&self, key: &str) -> bool {
+        self.environment.contains_key(key)
+    }
+    pub fn has_file_field(&self, field: &str) -> bool {
+        self.file_fields.contains(field)
     }
     pub fn into_handle(self) -> ConfigHandle {
         ConfigHandle {
@@ -558,11 +583,19 @@ impl ConfigHandle {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ConfigOverrides {
+    pub offline: Option<bool>,
+    pub proxy: Option<String>,
+    pub local_root: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConfigLoader {
     cwd: PathBuf,
     environment: BTreeMap<String, String>,
     config_path: Option<PathBuf>,
+    overrides: ConfigOverrides,
 }
 impl Default for ConfigLoader {
     fn default() -> Self {
@@ -570,6 +603,7 @@ impl Default for ConfigLoader {
             cwd: env::current_dir().unwrap_or_else(|_| ".".into()),
             environment: env::vars().collect(),
             config_path: None,
+            overrides: ConfigOverrides::default(),
         }
     }
 }
@@ -579,6 +613,7 @@ impl ConfigLoader {
             cwd: cwd.as_ref().to_owned(),
             environment: env::vars().collect(),
             config_path: None,
+            overrides: ConfigOverrides::default(),
         }
     }
     pub fn with_environment(mut self, environment: BTreeMap<String, String>) -> Self {
@@ -587,6 +622,10 @@ impl ConfigLoader {
     }
     pub fn with_config_path(mut self, path: impl AsRef<Path>) -> Self {
         self.config_path = Some(path.as_ref().to_owned());
+        self
+    }
+    pub fn with_overrides(mut self, overrides: ConfigOverrides) -> Self {
+        self.overrides = overrides;
         self
     }
     pub fn load(mut self) -> Result<LoadedConfig, ConfigLoadError> {
@@ -599,6 +638,12 @@ impl ConfigLoader {
         let base = selected.parent().unwrap_or(&self.cwd).to_owned();
         let providers_explicit = explicit_provider_list(&selected, &self.environment)?;
         let secret_environment_keys = secret_environment_keys(&selected, &self.environment)?;
+        let file_fields = if selected.is_file() {
+            let values = CompatibleFile::new(selected.clone()).collect()?;
+            field_paths(&values)
+        } else {
+            HashSet::new()
+        };
         let mut builder = ConfigBuilder::builder();
         if selected.is_file() {
             builder = builder.add_source(CompatibleFile::new(selected.clone()));
@@ -619,6 +664,16 @@ impl ConfigLoader {
                     &secret_environment_keys,
                 ))),
         );
+        if let Some(offline) = self.overrides.offline {
+            builder = builder.set_override("offline", offline)?;
+        }
+        if let Some(proxy) = &self.overrides.proxy {
+            builder = builder.set_override("proxy", proxy.clone())?;
+        }
+        if let Some(local_root) = &self.overrides.local_root {
+            builder =
+                builder.set_override("local_root", local_root.to_string_lossy().into_owned())?;
+        }
         let mut config: FixerConfig = builder.build()?.try_deserialize()?;
         apply_legacy_overrides(&mut config, &self.environment, providers_explicit)?;
         config.resolve_secrets(&self.environment)?;
@@ -627,6 +682,7 @@ impl ConfigLoader {
             path: selected,
             base,
             environment: self.environment,
+            file_fields,
             config,
         })
     }
@@ -786,6 +842,28 @@ fn move_legacy_value(values: &mut Map<String, Value>, aliases: &[&str], target: 
     }
 }
 
+fn field_paths(values: &Map<String, Value>) -> HashSet<String> {
+    fn collect(values: &Map<String, Value>, prefix: &str, fields: &mut HashSet<String>) {
+        for (key, value) in values {
+            let field = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            match &value.kind {
+                ValueKind::Table(table) => collect(table, &field, fields),
+                _ => {
+                    fields.insert(field);
+                }
+            }
+        }
+    }
+
+    let mut fields = HashSet::new();
+    collect(values, "", &mut fields);
+    fields
+}
+
 fn contains_nested(values: &Map<String, Value>, path: &[&str]) -> bool {
     let Some((head, tail)) = path.split_first() else {
         return true;
@@ -847,6 +925,8 @@ pub enum ConfigLoadError {
     Config(#[from] config::ConfigError),
     #[error("invalid configuration: {0}")]
     Validation(String),
+    #[error("invalid local root {path}: {source}")]
+    LocalRoot { path: PathBuf, source: io::Error },
     #[error("invalid media root {path}: {source}")]
     MediaRoot { path: PathBuf, source: io::Error },
 }
@@ -895,6 +975,40 @@ fn filtered_environment(
     environment: &BTreeMap<String, String>,
     secret_environment_keys: &HashSet<String>,
 ) -> Map<String, String> {
+    const CANONICAL: &[&str] = &[
+        "FIXER_OFFLINE",
+        "FIXER_PROXY",
+        "FIXER_LOCAL_ROOT",
+        "FIXER_PREFERRED_LOCALES",
+        "FIXER_TIMEOUT_SECONDS",
+        "FIXER_AUTO_ACCEPT_CONFIDENCE",
+        "FIXER_REVIEW_CONFIDENCE",
+        "FIXER_OUTPUT_PRESET",
+        "FIXER_PLACEMENT",
+        "FIXER_CONFLICT_POLICY",
+        "FIXER_ENABLED_PROVIDERS",
+        "FIXER_PROVIDERS__TMDB__BASE_URL",
+        "FIXER_PROVIDERS__TMDB__API_TOKEN",
+        "FIXER_PROVIDERS__TMDB__API_TOKEN_ENV",
+        "FIXER_PROVIDERS__BANGUMI__BASE_URL",
+        "FIXER_PROVIDERS__ANILIST__BASE_URL",
+        "FIXER_PROVIDERS__ANILIST__ACCESS_TOKEN",
+        "FIXER_PROVIDERS__ANILIST__ACCESS_TOKEN_ENV",
+        "FIXER_PROVIDERS__MUSICBRAINZ__BASE_URL",
+        "FIXER_PROVIDERS__OPENLIBRARY__BASE_URL",
+        "FIXER_PROVIDERS__OPENLIBRARY__COVER_BASE_URL",
+        "FIXER_SERVER__BIND",
+        "FIXER_SERVER__DATABASE",
+        "FIXER_SERVER__MEDIA_ROOTS",
+        "FIXER_SERVER__WEB_ROOT",
+        "FIXER_SERVER__ALLOWED_ORIGINS",
+        "FIXER_SERVER__HTTPS_TERMINATION",
+        "FIXER_SERVER__WORKER_COUNT",
+        "FIXER_SERVER__TRUSTED_PROXY__RANGES",
+        "FIXER_SERVER__TRUSTED_PROXY__HEADER",
+        "FIXER_LOGGING__FILTER",
+        "FIXER_LOGGING__FORMAT",
+    ];
     const EXCLUDED: &[&str] = &[
         "FIXER_CONFIG",
         "FIXER_API_KEY",
@@ -913,7 +1027,9 @@ fn filtered_environment(
     environment
         .iter()
         .filter(|(key, _)| {
-            !EXCLUDED.contains(&key.as_str()) && !secret_environment_keys.contains(*key)
+            CANONICAL.contains(&key.as_str())
+                && !EXCLUDED.contains(&key.as_str())
+                && !secret_environment_keys.contains(*key)
         })
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()

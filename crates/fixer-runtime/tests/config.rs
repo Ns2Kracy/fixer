@@ -25,6 +25,7 @@ fn discovers_fixer_toml_and_deserializes_shared_and_server_sections() {
         root.path().join("fixer.toml"),
         r#"
 offline = true
+local_root = "media"
 preferred_locales = ["zh-Hans", "ja"]
 timeout_seconds = 17
 auto_accept_confidence = 0.8
@@ -61,6 +62,10 @@ format = "json"
 
     assert_eq!(loaded.path(), root.path().join("fixer.toml"));
     assert!(config.offline);
+    assert_eq!(
+        config.local_root.as_deref(),
+        Some(root.path().join("media").canonicalize().unwrap().as_path())
+    );
     assert_eq!(config.preferred_locales, ["zh-Hans", "ja"]);
     assert_eq!(config.timeout_seconds, 17);
     assert_eq!(config.output_preset, OutputPreset::Metadata);
