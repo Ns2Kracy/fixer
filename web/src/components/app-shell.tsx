@@ -19,7 +19,7 @@ const navigation = [
 ] as const;
 
 export function AppShell(): JSX.Element {
-  let main!: HTMLElement;
+  let main: HTMLElement | undefined;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [themePreference, setThemePreference] = createSignal<ThemePreference>(
@@ -29,7 +29,9 @@ export function AppShell(): JSX.Element {
   const themeController = createThemeController(({ preference }) =>
     setThemePreference(preference),
   );
-  onCleanup(() => themeController.dispose());
+  onCleanup(() => {
+    themeController.dispose();
+  });
   const logout = useMutation(() => ({
     mutationFn: () => api.logout(),
     onSuccess: async () => {
@@ -47,7 +49,7 @@ export function AppShell(): JSX.Element {
     event,
   ) => {
     event.preventDefault();
-    main.focus();
+    main?.focus();
   };
 
   return (
@@ -91,14 +93,18 @@ export function AppShell(): JSX.Element {
           </div>
           <ThemeSelect
             value={themePreference()}
-            onChange={(preference) => themeController.setPreference(preference)}
+            onChange={(preference) => {
+              themeController.setPreference(preference);
+            }}
           />
           <Button
             class="min-h-9 px-3 py-2 text-sm"
             type="button"
             variant="secondary"
             disabled={logout.isPending}
-            onClick={() => logout.mutate()}
+            onClick={() => {
+              logout.mutate();
+            }}
           >
             {logout.isPending ? "Signing out…" : "Sign out"}
           </Button>
@@ -155,7 +161,9 @@ export function AppShell(): JSX.Element {
         </aside>
         <main
           id="workspace"
-          ref={main}
+          ref={(element) => {
+            main = element;
+          }}
           tabindex="-1"
           class="min-w-0 p-[clamp(2rem,6vw,6rem)] focus:outline-none max-[800px]:px-4 max-[800px]:pt-8 max-[800px]:pb-16"
         >

@@ -37,7 +37,7 @@ export function OutputDiff(props: {
                 {labels[operation.kind]}
               </span>
               <code class="min-w-0 wrap-anywhere text-sm max-[640px]:col-start-2">
-                {operation.source
+                {operation.source !== null && operation.source !== ""
                   ? `${operation.source} → ${operation.target}`
                   : operation.target}
               </code>

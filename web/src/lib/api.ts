@@ -2,19 +2,37 @@ export const API_BASE = "/api/v1";
 export const API_SCHEMA_VERSION = 1 as const;
 
 export type SchemaVersion = typeof API_SCHEMA_VERSION;
-export type MediaKind = "anime" | "book" | "movie" | "music" | "television";
-export type JobState =
-  | "queued"
-  | "scanning"
-  | "searching"
-  | "resolving"
-  | "awaiting_confirmation"
-  | "planning"
-  | "writing"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "interrupted";
+
+function isStringValue<Values extends readonly string[]>(
+  value: string,
+  values: Values,
+): value is Values[number] {
+  return values.some((candidate) => candidate === value);
+}
+
+const MEDIA_KINDS = ["anime", "book", "movie", "music", "television"] as const;
+export type MediaKind = (typeof MEDIA_KINDS)[number];
+export function isMediaKind(value: string): value is MediaKind {
+  return isStringValue(value, MEDIA_KINDS);
+}
+
+const JOB_STATES = [
+  "queued",
+  "scanning",
+  "searching",
+  "resolving",
+  "awaiting_confirmation",
+  "planning",
+  "writing",
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+] as const;
+export type JobState = (typeof JOB_STATES)[number];
+export function isJobState(value: string): value is JobState {
+  return isStringValue(value, JOB_STATES);
+}
 
 export interface ApiErrorDto {
   code: string;
@@ -46,21 +64,42 @@ export interface ProvidersDto {
   providers: ProviderDto[];
 }
 
-export type ProviderId =
-  | "local"
-  | "tmdb"
-  | "bangumi"
-  | "anilist"
-  | "musicbrainz"
-  | "openlibrary";
-export type OutputPreset = "full" | "metadata";
-export type PlacementPolicy =
-  | "in_place"
-  | "symlink"
-  | "hardlink"
-  | "copy"
-  | "reflink";
-export type ConflictPolicy = "prefer_first" | "review" | "error";
+const PROVIDER_IDS = [
+  "local",
+  "tmdb",
+  "bangumi",
+  "anilist",
+  "musicbrainz",
+  "openlibrary",
+] as const;
+export type ProviderId = (typeof PROVIDER_IDS)[number];
+export function isProviderId(value: string): value is ProviderId {
+  return isStringValue(value, PROVIDER_IDS);
+}
+
+const OUTPUT_PRESETS = ["full", "metadata"] as const;
+export type OutputPreset = (typeof OUTPUT_PRESETS)[number];
+export function isOutputPreset(value: string): value is OutputPreset {
+  return isStringValue(value, OUTPUT_PRESETS);
+}
+
+const PLACEMENT_POLICIES = [
+  "in_place",
+  "symlink",
+  "hardlink",
+  "copy",
+  "reflink",
+] as const;
+export type PlacementPolicy = (typeof PLACEMENT_POLICIES)[number];
+export function isPlacementPolicy(value: string): value is PlacementPolicy {
+  return isStringValue(value, PLACEMENT_POLICIES);
+}
+
+const CONFLICT_POLICIES = ["prefer_first", "review", "error"] as const;
+export type ConflictPolicy = (typeof CONFLICT_POLICIES)[number];
+export function isConflictPolicy(value: string): value is ConflictPolicy {
+  return isStringValue(value, CONFLICT_POLICIES);
+}
 
 export interface ProviderEndpoints {
   tmdb: string;
@@ -408,8 +447,8 @@ export class ApiClient {
     this.#baseUrl = options.baseUrl ?? API_BASE;
     this.#fetch =
       options.fetch ?? ((input, init) => globalThis.fetch(input, init));
-    this.#csrfToken = options.csrfToken ?? (() => undefined);
-    this.#csrfTokenChanged = options.csrfTokenChanged ?? (() => undefined);
+    this.#csrfToken = options.csrfToken ?? (() => {});
+    this.#csrfTokenChanged = options.csrfTokenChanged ?? (() => {});
   }
 
   health(): Promise<HealthDto> {
@@ -494,7 +533,7 @@ export class ApiClient {
   async logout(): Promise<void> {
     await this.#request("/auth/logout", { method: "POST" });
     this.#issuedCsrfToken = undefined;
-    this.#csrfTokenChanged(undefined);
+    this.#csrfTokenChanged(this.#issuedCsrfToken);
   }
 
   createJob(request: CreateJobRequest): Promise<JobEnvelope> {
@@ -563,7 +602,8 @@ export class ApiClient {
       headers["content-type"] = "application/json";
     if (method !== "GET") {
       const csrfToken = this.#csrfToken() ?? this.#issuedCsrfToken;
-      if (csrfToken) headers["x-csrf-token"] = csrfToken;
+      if (csrfToken !== undefined && csrfToken !== "")
+        headers["x-csrf-token"] = csrfToken;
     }
 
     const response = await this.#fetch(`${this.#baseUrl}${path}`, {
@@ -609,7 +649,8 @@ function sessionCsrfToken(): string | undefined {
 
 function storeSessionCsrfToken(token: string | undefined): void {
   try {
-    if (token) globalThis.sessionStorage?.setItem(CSRF_STORAGE_KEY, token);
+    if (token !== undefined && token !== "")
+      globalThis.sessionStorage?.setItem(CSRF_STORAGE_KEY, token);
     else globalThis.sessionStorage?.removeItem(CSRF_STORAGE_KEY);
   } catch {
     // Storage can be unavailable in hardened or non-browser runtimes.

@@ -7,10 +7,9 @@ export function RequestError(props: {
   error: Error | null;
   fallback?: string;
 }) {
-  const details = () =>
-    props.error instanceof ApiError
-      ? Object.entries(props.error.details ?? {})
-      : [];
+  const apiError = () =>
+    props.error instanceof ApiError ? props.error : undefined;
+  const details = () => Object.entries(apiError()?.details ?? {});
 
   return (
     <Notice class="my-4" tone="danger" role="alert">
@@ -26,10 +25,8 @@ export function RequestError(props: {
           </p>
         )}
       </For>
-      <Show when={props.error instanceof ApiError && props.error.requestId}>
-        <small class="text-xs">
-          Request {(props.error as ApiError).requestId}
-        </small>
+      <Show when={apiError()?.requestId}>
+        {(requestId) => <small class="text-xs">Request {requestId()}</small>}
       </Show>
     </Notice>
   );

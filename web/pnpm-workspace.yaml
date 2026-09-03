@@ -1,22 +1,22 @@
 minimumReleaseAgeExclude:
   # Task 23 explicitly approved Solid 2 RC because no stable 2.x release exists.
-  - '@solidjs/babel-plugin@2.0.0-rc.3'
-  - '@solidjs/compiler-darwin-arm64@2.0.0-rc.3'
-  - '@solidjs/compiler-darwin-x64@2.0.0-rc.3'
-  - '@solidjs/compiler-linux-arm64-gnu@2.0.0-rc.3'
-  - '@solidjs/compiler-linux-x64-gnu@2.0.0-rc.3'
-  - '@solidjs/compiler-wasm32-wasi@2.0.0-rc.3'
-  - '@solidjs/compiler-win32-x64-msvc@2.0.0-rc.3'
-  - '@solidjs/compiler@2.0.0-rc.3'
-  - '@solidjs/signals@2.0.0-rc.3'
-  - '@solidjs/vite-plugin@3.0.0-next.34'
-  - '@solidjs/web@2.0.0-rc.3'
-  - '@tanstack/solid-router@2.0.0-rc.3'
-  - 'solid-js@2.0.0-rc.3'
+  - "@solidjs/babel-plugin@2.0.0-rc.3"
+  - "@solidjs/compiler-darwin-arm64@2.0.0-rc.3"
+  - "@solidjs/compiler-darwin-x64@2.0.0-rc.3"
+  - "@solidjs/compiler-linux-arm64-gnu@2.0.0-rc.3"
+  - "@solidjs/compiler-linux-x64-gnu@2.0.0-rc.3"
+  - "@solidjs/compiler-wasm32-wasi@2.0.0-rc.3"
+  - "@solidjs/compiler-win32-x64-msvc@2.0.0-rc.3"
+  - "@solidjs/compiler@2.0.0-rc.3"
+  - "@solidjs/signals@2.0.0-rc.3"
+  - "@solidjs/vite-plugin@3.0.0-next.34"
+  - "@solidjs/web@2.0.0-rc.3"
+  - "@tanstack/solid-router@2.0.0-rc.3"
+  - "solid-js@2.0.0-rc.3"
 
 strictPeerDependencies: true
 peerDependencyRules:
   allowedVersions:
     # TanStack Router RC transitive primitives still declare Solid 1 peer ranges.
-    solid-js: '2.0.0-rc.3'
-    '@solidjs/web': '2.0.0-rc.3'
+    solid-js: "2.0.0-rc.3"
+    "@solidjs/web": "2.0.0-rc.3"

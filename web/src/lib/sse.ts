@@ -1,6 +1,7 @@
 import {
   API_BASE,
   API_SCHEMA_VERSION,
+  isJobState,
   type ExecutionSummary,
   type JobState,
   type ProgressSummary,
@@ -64,28 +65,12 @@ export interface JobEventConnection {
 }
 
 const eventTypes = ["state", "progress", "review", "completion"] as const;
-const jobStates = new Set<JobState>([
-  "queued",
-  "scanning",
-  "searching",
-  "resolving",
-  "awaiting_confirmation",
-  "planning",
-  "writing",
-  "completed",
-  "failed",
-  "cancelled",
-  "interrupted",
-]);
-
 export function connectJobEvents(
   jobId: number,
   options: ConnectJobEventsOptions,
 ): JobEventConnection {
-  // SAFETY: native EventSource implements this minimal surface; the cast only narrows
-  // its overloaded listener signatures so the same constructor can be injected in tests.
-  const EventSourceClass =
-    options.eventSource ?? (EventSource as unknown as EventSourceConstructor);
+  // Native EventSource and test doubles share this minimal constructor surface.
+  const EventSourceClass = options.eventSource ?? EventSource;
   const source = new EventSourceClass(
     `${options.baseUrl ?? API_BASE}/jobs/${jobId}/events`,
     {
@@ -172,9 +157,8 @@ function parseJobEvent(
   const base = { cursor: message.lastEventId, job_id: expectedJobId };
   switch (type) {
     case "state":
-      return typeof value.state === "string" &&
-        jobStates.has(value.state as JobState)
-        ? { ...base, type, state: value.state as JobState }
+      return typeof value.state === "string" && isJobState(value.state)
+        ? { ...base, type, state: value.state }
         : undefined;
     case "progress":
       return isProgress(value.progress)

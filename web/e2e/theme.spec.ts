@@ -4,7 +4,8 @@ import { expect, test } from "@playwright/test";
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`${name} must be set by the E2E harness`);
+  if (value === undefined || value === "")
+    throw new Error(`${name} must be set by the E2E harness`);
   return value;
 }
 

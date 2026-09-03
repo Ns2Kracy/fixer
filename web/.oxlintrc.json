@@ -1,0 +1,97 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "promise", "jsx-a11y"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error"
+  },
+  "rules": {
+    // Size limits split cohesive API DTOs, route components, and end-to-end scenarios without improving correctness.
+    "eslint/max-classes-per-file": "off",
+    "eslint/max-lines": "off",
+    "eslint/max-lines-per-function": "off",
+    // Route composition legitimately depends on several small, focused UI and query modules.
+    "import/max-dependencies": "off",
+    // Solid components use explicit ARIA roles where changing the host tag would change the component contract.
+    "jsx-a11y/prefer-tag-over-role": "off",
+    // Readonly parameter propagation would add broad framework-facing API churn without protecting owned state.
+    "typescript/prefer-readonly-parameter-types": "off",
+    // Solid and TanStack callbacks intentionally ignore some returned values and promises.
+    "typescript/strict-void-return": "off",
+    // In-place sorting is limited to owned arrays and avoids requiring ES2023 Array.prototype.toSorted.
+    "unicorn/no-array-sort": "off"
+  },
+  "env": {
+    "builtin": true,
+    "browser": true
+  },
+  "ignorePatterns": ["dist", "node_modules", "src/routeTree.gen.ts"],
+  "options": {
+    "typeAware": true
+  },
+  "overrides": [
+    {
+      // Test doubles intentionally cross untyped mock boundaries, assert method references, and keep local factories near their suites.
+      "files": ["**/*.test.{ts,tsx}"],
+      "plugins": [
+        "typescript",
+        "unicorn",
+        "oxc",
+        "import",
+        "promise",
+        "jsx-a11y",
+        "vitest"
+      ],
+      "env": {
+        "vitest": true
+      },
+      "rules": {
+        "eslint/require-await": "off",
+        "typescript/no-base-to-string": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-type-assertion": "off",
+        "typescript/require-await": "off",
+        "typescript/unbound-method": "off",
+        "unicorn/consistent-function-scoping": "off"
+      }
+    },
+    {
+      // Playwright flows perform serial UI steps, and its fixture boundary requires a narrow type assertion.
+      "files": ["e2e/**/*.spec.ts"],
+      "rules": {
+        "eslint/no-await-in-loop": "off",
+        "typescript/no-unsafe-type-assertion": "off"
+      }
+    },
+    {
+      // These entry points intentionally import CSS and matcher registration for their side effects.
+      "files": ["src/index.tsx", "src/test/setup.ts"],
+      "rules": {
+        "import/no-unassigned-import": "off"
+      }
+    },
+    {
+      // Fetch exposes untyped JSON and the generic client owns the single assertion boundary.
+      "files": ["src/lib/api.ts"],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "off"
+      }
+    },
+    {
+      // EventSource property callbacks model native reconnect lifecycle on the injectable minimal interface.
+      "files": ["src/lib/sse.ts"],
+      "rules": {
+        "unicorn/prefer-add-event-listener": "off"
+      }
+    },
+    {
+      // TanStack Router redirects are intentional non-Error control-flow values.
+      "files": ["src/routes/__root.tsx"],
+      "rules": {
+        "typescript/only-throw-error": "off"
+      }
+    }
+  ]
+}

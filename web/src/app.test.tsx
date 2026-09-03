@@ -173,15 +173,15 @@ describe("Fixer workspace", () => {
     });
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/v1/auth/logout",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({ "x-csrf-token": "csrf-sign-out" }),
         }),
-      ),
-    );
+      );
+    });
     expect(
       await screen.findByRole("heading", { name: "Unlock workspace" }),
     ).toBeVisible();

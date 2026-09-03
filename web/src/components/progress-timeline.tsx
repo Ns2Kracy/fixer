@@ -43,7 +43,7 @@ export function ProgressTimeline(props: {
     const progressIndex = stages.findIndex(
       ([state]) => state === props.progress?.stage,
     );
-    return progressIndex >= 0 ? progressIndex : 0;
+    return Math.max(progressIndex, 0);
   };
 
   return (
@@ -54,8 +54,7 @@ export function ProgressTimeline(props: {
             const stageState = () =>
               index() < currentIndex()
                 ? "complete"
-                : index() === currentIndex() &&
-                    !terminalStates.has(props.state)
+                : index() === currentIndex() && !terminalStates.has(props.state)
                   ? "current"
                   : "upcoming";
 

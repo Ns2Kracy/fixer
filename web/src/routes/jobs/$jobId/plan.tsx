@@ -109,7 +109,7 @@ function PlanPage() {
                   disabled={
                     !data().requires_approval ||
                     data().operations_truncated ||
-                    !job.data?.job.input.apply ||
+                    job.data?.job.input.apply !== true ||
                     job.data?.job.state !== "planning" ||
                     execute.isSuccess
                   }
@@ -124,12 +124,14 @@ function PlanPage() {
                 disabled={
                   !approved() ||
                   data().operations_truncated ||
-                  !job.data?.job.input.apply ||
+                  job.data?.job.input.apply !== true ||
                   job.data?.job.state !== "planning" ||
                   execute.isPending ||
                   execute.isSuccess
                 }
-                onClick={() => execute.mutate()}
+                onClick={() => {
+                  execute.mutate();
+                }}
               >
                 {execute.isPending
                   ? "Executing…"

@@ -10,8 +10,9 @@ import { LoadingState } from "../components/ui/loading-state";
 import { PageHeader } from "../components/ui/page-header";
 import {
   api,
-  type ConflictPolicy,
-  type PlacementPolicy,
+  isConflictPolicy,
+  isOutputPreset,
+  isPlacementPolicy,
   type ProviderEndpoints,
   type ProviderId,
   type UpdateWorkspaceSettingsRequest,
@@ -178,7 +179,9 @@ function SettingsPage() {
                   <LocalePolicyEditor
                     value={form().preferred_locales}
                     disabled={update.isPending}
-                    onChange={(locales) => patch("preferred_locales", locales)}
+                    onChange={(locales) => {
+                      patch("preferred_locales", locales);
+                    }}
                   />
                   <FormField
                     label="Proxy URL"
@@ -188,9 +191,9 @@ function SettingsPage() {
                       type="url"
                       value={form().proxy ?? ""}
                       placeholder="socks5://127.0.0.1:1080"
-                      onInput={(event) =>
-                        patch("proxy", event.currentTarget.value || null)
-                      }
+                      onInput={(event) => {
+                        patch("proxy", event.currentTarget.value || null);
+                      }}
                     />
                   </FormField>
                   <FormField label="Request timeout (seconds)">
@@ -200,12 +203,12 @@ function SettingsPage() {
                       max="300"
                       required
                       value={form().timeout_seconds}
-                      onInput={(event) =>
+                      onInput={(event) => {
                         patch(
                           "timeout_seconds",
                           Number(event.currentTarget.value),
-                        )
-                      }
+                        );
+                      }}
                     />
                   </FormField>
                   <FormField label="Auto-accept confidence">
@@ -216,12 +219,12 @@ function SettingsPage() {
                       step="0.01"
                       required
                       value={form().auto_accept_confidence}
-                      onInput={(event) =>
+                      onInput={(event) => {
                         patch(
                           "auto_accept_confidence",
                           Number(event.currentTarget.value),
-                        )
-                      }
+                        );
+                      }}
                     />
                   </FormField>
                   <FormField label="Review confidence">
@@ -232,22 +235,25 @@ function SettingsPage() {
                       step="0.01"
                       required
                       value={form().review_confidence}
-                      onInput={(event) =>
+                      onInput={(event) => {
                         patch(
                           "review_confidence",
                           Number(event.currentTarget.value),
-                        )
-                      }
+                        );
+                      }}
                     />
                   </FormField>
-                  <label class="flex items-start gap-3 pt-6 text-sm text-muted">
+                  <label
+                    class="flex items-start gap-3 pt-6 text-sm text-muted"
+                    aria-label="Offline mode"
+                  >
                     <input
                       class="mt-[0.15rem] size-[1.05rem] shrink-0 accent-moss"
                       type="checkbox"
                       checked={form().offline}
-                      onChange={(event) =>
-                        patch("offline", event.currentTarget.checked)
-                      }
+                      onChange={(event) => {
+                        patch("offline", event.currentTarget.checked);
+                      }}
                     />
                     <span>
                       <strong class="block text-ink">Offline mode</strong>
@@ -282,12 +288,11 @@ function SettingsPage() {
                   <FormField label="Output preset">
                     <select
                       value={form().output_preset}
-                      onChange={(event) =>
-                        patch(
-                          "output_preset",
-                          event.currentTarget.value as "full" | "metadata",
-                        )
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        if (isOutputPreset(value))
+                          patch("output_preset", value);
+                      }}
                     >
                       <option value="full">Full media package</option>
                       <option value="metadata">Metadata only</option>
@@ -296,12 +301,10 @@ function SettingsPage() {
                   <FormField label="Placement">
                     <select
                       value={form().placement}
-                      onChange={(event) =>
-                        patch(
-                          "placement",
-                          event.currentTarget.value as PlacementPolicy,
-                        )
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        if (isPlacementPolicy(value)) patch("placement", value);
+                      }}
                     >
                       <option value="in_place">In place</option>
                       <option value="symlink">Symlink</option>
@@ -313,12 +316,11 @@ function SettingsPage() {
                   <FormField label="Conflict policy">
                     <select
                       value={form().conflict_policy}
-                      onChange={(event) =>
-                        patch(
-                          "conflict_policy",
-                          event.currentTarget.value as ConflictPolicy,
-                        )
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        if (isConflictPolicy(value))
+                          patch("conflict_policy", value);
+                      }}
                     >
                       <option value="prefer_first">Prefer first source</option>
                       <option value="review">Require review</option>
@@ -361,12 +363,12 @@ function SettingsPage() {
                             checked={form().enabled_providers.includes(
                               provider.id,
                             )}
-                            onChange={(event) =>
+                            onChange={(event) => {
                               toggleProvider(
                                 provider.id,
                                 event.currentTarget.checked,
-                              )
-                            }
+                              );
+                            }}
                           />
                           <span>{provider.label}</span>
                         </label>
@@ -381,12 +383,12 @@ function SettingsPage() {
                             type="url"
                             required
                             value={form().provider_endpoints[endpoint.key]}
-                            onInput={(event) =>
+                            onInput={(event) => {
                               patchEndpoint(
                                 endpoint.key,
                                 event.currentTarget.value,
-                              )
-                            }
+                              );
+                            }}
                           />
                         </FormField>
                       )}
@@ -423,16 +425,20 @@ function SettingsPage() {
                     }
                     value={form().tmdb_api_token ?? ""}
                     clear={form().clear_tmdb_api_token}
-                    onValue={(value) =>
-                      setSecret("tmdb_api_token", "clear_tmdb_api_token", value)
-                    }
-                    onClear={(clear) =>
+                    onValue={(value) => {
+                      setSecret(
+                        "tmdb_api_token",
+                        "clear_tmdb_api_token",
+                        value,
+                      );
+                    }}
+                    onClear={(clear) => {
                       clearSecret(
                         "tmdb_api_token",
                         "clear_tmdb_api_token",
                         clear,
-                      )
-                    }
+                      );
+                    }}
                   />
                   <SecretField
                     label="AniList access token"
@@ -442,20 +448,20 @@ function SettingsPage() {
                     }
                     value={form().anilist_access_token ?? ""}
                     clear={form().clear_anilist_access_token}
-                    onValue={(value) =>
+                    onValue={(value) => {
                       setSecret(
                         "anilist_access_token",
                         "clear_anilist_access_token",
                         value,
-                      )
-                    }
-                    onClear={(clear) =>
+                      );
+                    }}
+                    onClear={(clear) => {
                       clearSecret(
                         "anilist_access_token",
                         "clear_anilist_access_token",
                         clear,
-                      )
-                    }
+                      );
+                    }}
                   />
                 </div>
               </section>
@@ -525,7 +531,9 @@ function SecretField(props: SecretFieldProps) {
             props.configured ? "Leave blank to preserve" : "Enter token"
           }
           disabled={props.clear}
-          onInput={(event) => props.onValue(event.currentTarget.value)}
+          onInput={(event) => {
+            props.onValue(event.currentTarget.value);
+          }}
         />
       </label>
       <label class="flex items-start gap-3 pt-3 text-sm text-muted">
@@ -534,7 +542,9 @@ function SecretField(props: SecretFieldProps) {
           type="checkbox"
           aria-label={`Clear ${props.label}`}
           checked={props.clear}
-          onChange={(event) => props.onClear(event.currentTarget.checked)}
+          onChange={(event) => {
+            props.onClear(event.currentTarget.checked);
+          }}
         />
         <span>Clear configured secret</span>
       </label>

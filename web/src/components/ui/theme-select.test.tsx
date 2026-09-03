@@ -13,11 +13,9 @@ describe("ThemeSelect", () => {
 
     const select = screen.getByRole("combobox", { name: "Theme" });
     expect(select).toHaveValue("system");
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "System",
-      "Light",
-      "Dark",
-    ]);
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(["System", "Light", "Dark"]);
 
     await user.selectOptions(select, "dark");
     expect(onChange).toHaveBeenCalledWith("dark");

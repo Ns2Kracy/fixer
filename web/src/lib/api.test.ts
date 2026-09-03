@@ -10,7 +10,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("ApiClient", () => {
   it("sends JSON, cookies, CSRF, and idempotency headers for an approved execution", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
           schema_version: 1,
@@ -54,7 +54,7 @@ describe("ApiClient", () => {
 
   it("loads auth status and registers the first administrator", async () => {
     const fetchMock = vi
-      .fn()
+      .fn<typeof fetch>()
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -111,7 +111,7 @@ describe("ApiClient", () => {
 
   it("reuses the login CSRF token for authenticated mutations", async () => {
     const fetchMock = vi
-      .fn()
+      .fn<typeof fetch>()
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -145,7 +145,7 @@ describe("ApiClient", () => {
 
   it("preserves structured server errors for the interface", async () => {
     const client = new ApiClient({
-      fetch: vi.fn().mockResolvedValue(
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(
         new Response(
           JSON.stringify({
             error: {
@@ -174,7 +174,7 @@ describe("ApiClient", () => {
 
   it("requests bounded job lists and reconstructed artifacts with stable query parameters", async () => {
     const fetchMock = vi
-      .fn()
+      .fn<typeof fetch>()
       .mockImplementation(
         async () =>
           new Response(
@@ -196,7 +196,7 @@ describe("ApiClient", () => {
   });
 
   it("retries only through the dedicated mutation endpoint", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ schema_version: 1, job: { id: 9 } }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -217,7 +217,7 @@ describe("ApiClient", () => {
   });
 
   it("requests opaque library/search resources with encoded query parameters", async () => {
-    const fetchMock = vi.fn().mockImplementation(
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
       async () =>
         new Response(
           JSON.stringify({ schema_version: 1, roots: [], results: [] }),
@@ -245,7 +245,7 @@ describe("ApiClient", () => {
   });
 
   it("updates settings and previews providers/templates through CSRF-protected mutations", async () => {
-    const fetchMock = vi.fn().mockImplementation(
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
       async () =>
         new Response(JSON.stringify({ schema_version: 1 }), {
           status: 200,

@@ -54,9 +54,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ context, location }) => {
     if (location.pathname === "/login") return;
     try {
-      const status = await context.queryClient.ensureQueryData(
-        authStatusQuery(),
-      );
+      const status =
+        await context.queryClient.ensureQueryData(authStatusQuery());
       if (!status.authenticated) {
         throw redirect({
           to: "/login",

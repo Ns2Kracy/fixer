@@ -78,7 +78,9 @@ function LibraryPage() {
               disabled={
                 roots.isPending || (roots.data?.roots.length ?? 0) === 0
               }
-              onChange={(event) => chooseRoot(event.currentTarget.value)}
+              onChange={(event) => {
+                chooseRoot(event.currentTarget.value);
+              }}
             >
               <For each={roots.data?.roots ?? []}>
                 {(root) => <option value={root.id}>{root.label}</option>}
@@ -109,7 +111,9 @@ function LibraryPage() {
                     aria-current={
                       index() === segments().length - 1 ? "location" : undefined
                     }
-                    onClick={() => segmentPath(index())}
+                    onClick={() => {
+                      segmentPath(index());
+                    }}
                   >
                     {segment}
                   </button>

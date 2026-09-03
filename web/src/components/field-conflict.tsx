@@ -37,7 +37,9 @@ export function FieldConflict(props: {
           <For each={props.conflict.sources}>
             {(source) => (
               <li class="flex gap-2 border border-line px-3 py-1.5 text-xs text-muted">
-                {source.locale ? `${source.locale} · ` : ""}
+                {source.locale !== undefined && source.locale !== ""
+                  ? `${source.locale} · `
+                  : ""}
                 {source.provider}
                 <Show when={source.external_id}>
                   {(id) => (
@@ -67,7 +69,9 @@ export function FieldConflict(props: {
           type="checkbox"
           checked={props.acknowledged}
           aria-label={`Acknowledge conflict ${props.conflict.field_path}`}
-          onChange={(event) => props.onToggle(event.currentTarget.checked)}
+          onChange={(event) => {
+            props.onToggle(event.currentTarget.checked);
+          }}
         />
         I acknowledge this conflict after reviewing the available source and
         locale context.

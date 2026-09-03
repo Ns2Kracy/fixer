@@ -175,12 +175,12 @@ describe("jobs workflow", () => {
       screen.getByLabelText("State filter"),
       "interrupted",
     );
-    await waitFor(() =>
+    await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/v1/jobs?limit=50&state=interrupted",
         expect.any(Object),
-      ),
-    );
+      );
+    });
 
     await user.selectOptions(screen.getByLabelText("Media kind"), "movie");
     await user.type(
@@ -299,7 +299,7 @@ describe("jobs workflow", () => {
       expect.any(Object),
     );
     expect(
-      screen.getByText(/^Additional candidates were omitted by the server./),
+      screen.getByText(/^Additional candidates were omitted by the server./u),
     ).toBeVisible();
     expect(
       screen.getByText("Additional matching evidence was omitted."),
@@ -558,7 +558,7 @@ describe("jobs workflow", () => {
     renderApp("/jobs/7/review");
 
     expect(
-      await screen.findByText(/server omitted additional conflicts/),
+      await screen.findByText(/server omitted additional conflicts/u),
     ).toBeVisible();
     await user.click(
       screen.getByRole("checkbox", { name: "Acknowledge conflict title" }),

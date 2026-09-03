@@ -7,7 +7,8 @@ import { expect, test } from "@playwright/test";
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`${name} must be set by the E2E harness`);
+  if (value === undefined || value === "")
+    throw new Error(`${name} must be set by the E2E harness`);
   return value;
 }
 
@@ -67,7 +68,7 @@ test("user reviews a local candidate and approves its bounded write", async ({
     await page.getByRole("button", { name: "Sign in" }).click();
   }
   expect((await authenticationResponse).ok()).toBe(true);
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/$/u);
 
   await page.getByRole("link", { name: "Jobs" }).click();
   await expect(
@@ -97,13 +98,13 @@ test("user reviews a local candidate and approves its bounded write", async ({
     page.getByRole("heading", { name: "Review metadata" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("radio", { name: /^Select .+ from local$/ }),
+    page.getByRole("radio", { name: /^Select .+ from local$/u }),
   ).toBeChecked();
   await page
     .getByRole("button", { name: "Accept candidate and build plan" })
     .click();
 
-  await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}/plan$`));
+  await expect(page).toHaveURL(new RegExp(`/jobs/${jobId}/plan$`, "u"));
   await expect(
     page.getByRole("heading", { name: "Output plan" }),
   ).toBeVisible();
@@ -115,7 +116,7 @@ test("user reviews a local candidate and approves its bounded write", async ({
   await expect(operations).toHaveCount(1);
   await expect(operations.getByText("Write metadata")).toBeVisible();
   await expect(operations.locator("code")).toHaveText("movie.json");
-  await expect(operations.locator("small")).toHaveText(/\d+ bytes prepared/);
+  await expect(operations.locator("small")).toHaveText(/\d+ bytes prepared/u);
   await page
     .getByRole("checkbox", {
       name: "I approve these filesystem operations",

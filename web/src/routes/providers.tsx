@@ -9,7 +9,12 @@ import { EmptyState } from "../components/ui/empty-state";
 import { LoadingState } from "../components/ui/loading-state";
 import { PageHeader } from "../components/ui/page-header";
 import { SectionHeader } from "../components/ui/section-header";
-import { api, type ProviderId, type ProviderProbeEnvelope } from "../lib/api";
+import {
+  api,
+  isProviderId,
+  type ProviderId,
+  type ProviderProbeEnvelope,
+} from "../lib/api";
 
 export const Route = createFileRoute("/providers")({
   component: ProvidersPage,
@@ -34,14 +39,14 @@ function ProvidersPage() {
     onSuccess: (result) => {
       setResults((current) => ({ ...current, [result.provider]: result }));
     },
-    onSettled: () => setTestingId(undefined),
+    onSettled: () => {
+      setTestingId(undefined);
+    },
   }));
 
-  function isEnabled(provider: string) {
+  function isEnabled(provider: ProviderId) {
     return (
-      settings.data?.settings.enabled_providers.includes(
-        provider as ProviderId,
-      ) ?? false
+      settings.data?.settings.enabled_providers.includes(provider) ?? false
     );
   }
 
@@ -86,16 +91,27 @@ function ProvidersPage() {
         <Show when={catalog.isSuccess && settings.isSuccess}>
           <div class="border-t-2 border-ink">
             <For each={catalog.data?.providers ?? []}>
-              {(provider) => (
-                <ProviderStatus
-                  provider={provider}
-                  enabled={isEnabled(provider.id)}
-                  testing={probe.isPending && testingId() === provider.id}
-                  disabled={probe.isPending}
-                  result={results()[provider.id as ProviderId]}
-                  onTest={() => probe.mutate(provider.id as ProviderId)}
-                />
-              )}
+              {(provider) => {
+                const providerId = isProviderId(provider.id)
+                  ? provider.id
+                  : undefined;
+                return (
+                  <ProviderStatus
+                    provider={provider}
+                    enabled={providerId !== undefined && isEnabled(providerId)}
+                    testing={probe.isPending && testingId() === providerId}
+                    disabled={probe.isPending}
+                    result={
+                      providerId === undefined
+                        ? undefined
+                        : results()[providerId]
+                    }
+                    onTest={() => {
+                      if (providerId !== undefined) probe.mutate(providerId);
+                    }}
+                  />
+                );
+              }}
             </For>
           </div>
         </Show>

@@ -10,7 +10,12 @@ import { FormField } from "../components/ui/form-field";
 import { Notice } from "../components/ui/notice";
 import { PageHeader } from "../components/ui/page-header";
 import { SectionHeader } from "../components/ui/section-header";
-import { api, type MediaKind, type SearchRequest } from "../lib/api";
+import {
+  api,
+  isMediaKind,
+  type MediaKind,
+  type SearchRequest,
+} from "../lib/api";
 
 export const Route = createFileRoute("/search")({
   component: SearchPage,
@@ -59,9 +64,10 @@ function SearchPage() {
         <FormField label="Media kind">
           <select
             value={mediaKind()}
-            onChange={(event) =>
-              setMediaKind(event.currentTarget.value as MediaKind)
-            }
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              if (isMediaKind(value)) setMediaKind(value);
+            }}
           >
             <For each={mediaKinds}>
               {(kind) => <option value={kind.value}>{kind.label}</option>}

@@ -21,7 +21,7 @@ function createEnvironment(options?: {
   const environment: ThemeEnvironment = {
     storage: {
       getItem: vi.fn(() => stored),
-      setItem: vi.fn((_key, value) => {
+      setItem: vi.fn<(key: string, value: string) => void>((_key, value) => {
         stored = value;
       }),
     },
@@ -79,9 +79,14 @@ describe("theme preferences", () => {
   });
 
   it("persists explicit choices and follows system changes only in system mode", () => {
-    const { environment, setSystemDark } = createEnvironment({ systemDark: false });
+    const { environment, setSystemDark } = createEnvironment({
+      systemDark: false,
+    });
     const states: ThemeState[] = [];
-    const controller = createThemeController((state) => states.push(state), environment);
+    const controller = createThemeController(
+      (state) => states.push(state),
+      environment,
+    );
 
     expect(states.at(-1)).toEqual({ preference: "system", resolved: "light" });
 
@@ -89,7 +94,10 @@ describe("theme preferences", () => {
     expect(states.at(-1)).toEqual({ preference: "system", resolved: "dark" });
 
     controller.setPreference("light");
-    expect(environment.storage.setItem).toHaveBeenCalledWith("fixer-theme", "light");
+    expect(environment.storage.setItem).toHaveBeenCalledWith(
+      "fixer-theme",
+      "light",
+    );
     expect(states.at(-1)).toEqual({ preference: "light", resolved: "light" });
 
     setSystemDark(false);

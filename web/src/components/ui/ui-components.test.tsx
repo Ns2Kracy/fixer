@@ -50,7 +50,9 @@ describe("shared UI components", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
     ).toBeVisible();
-    expect(screen.getByText("Control provider and output policy.")).toBeVisible();
+    expect(
+      screen.getByText("Control provider and output policy."),
+    ).toBeVisible();
     expect(screen.getByText("Saved")).toBeVisible();
     expect(
       screen.getByRole("heading", { level: 2, name: "Readiness ledger" }),

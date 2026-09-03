@@ -32,7 +32,9 @@ export function CandidatePicker(props: {
                 value={candidate.index}
                 checked={selected()}
                 aria-label={`Select ${candidate.title} from ${candidate.provider}`}
-                onChange={() => props.onSelect(candidate.index)}
+                onChange={() => {
+                  props.onSelect(candidate.index);
+                }}
               />
               <span class="min-w-0">
                 <span class="flex items-baseline gap-3">
@@ -40,9 +42,7 @@ export function CandidatePicker(props: {
                     {candidate.title}
                   </strong>
                   <Show when={candidate.year}>
-                    {(year) => (
-                      <span class="text-xs text-muted">{year()}</span>
-                    )}
+                    {(year) => <span class="text-xs text-muted">{year()}</span>}
                   </Show>
                 </span>
                 <span class="mt-1 block text-[0.7rem] text-muted">

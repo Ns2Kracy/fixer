@@ -45,9 +45,9 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
               value={props.pathTemplate}
               required
               disabled={props.pending}
-              onInput={(event) =>
-                props.onPathTemplate(event.currentTarget.value)
-              }
+              onInput={(event) => {
+                props.onPathTemplate(event.currentTarget.value);
+              }}
             />
           </FormField>
         </div>
@@ -63,9 +63,9 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
               value={props.contentTemplate}
               required
               disabled={props.pending}
-              onInput={(event) =>
-                props.onContentTemplate(event.currentTarget.value)
-              }
+              onInput={(event) => {
+                props.onContentTemplate(event.currentTarget.value);
+              }}
             />
           </FormField>
         </div>
@@ -82,7 +82,9 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
               type="text"
               value={props.title}
               required
-              onInput={(event) => props.onTitle(event.currentTarget.value)}
+              onInput={(event) => {
+                props.onTitle(event.currentTarget.value);
+              }}
             />
           </FormField>
           <FormField label="Sample ID">
@@ -90,7 +92,9 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
               type="text"
               value={props.id}
               required
-              onInput={(event) => props.onId(event.currentTarget.value)}
+              onInput={(event) => {
+                props.onId(event.currentTarget.value);
+              }}
             />
           </FormField>
           <FormField label="Sample year">
@@ -99,7 +103,9 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
               min="0"
               max="65535"
               value={props.year}
-              onInput={(event) => props.onYear(event.currentTarget.value)}
+              onInput={(event) => {
+                props.onYear(event.currentTarget.value);
+              }}
             />
           </FormField>
           <FormField label="Sample edition">
@@ -107,12 +113,18 @@ export function TemplatePreview(props: TemplatePreviewProps): JSX.Element {
               type="text"
               value={props.edition}
               placeholder="Director's cut"
-              onInput={(event) => props.onEdition(event.currentTarget.value)}
+              onInput={(event) => {
+                props.onEdition(event.currentTarget.value);
+              }}
             />
           </FormField>
         </fieldset>
 
-        <Button class="justify-self-start" type="submit" disabled={props.pending}>
+        <Button
+          class="justify-self-start"
+          type="submit"
+          disabled={props.pending}
+        >
           {props.pending ? "Rendering…" : "Preview template"}
         </Button>
         <Show when={props.error}>

@@ -2,15 +2,13 @@
   "name": "fixer-web",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Fixer task workspace. Solid 2 is pinned to 2.0.0-rc.3 because no stable 2.x release was published when Task 23 was implemented.",
-  "engines": {
-    "node": ">=24.15.0",
-    "pnpm": "11.22.0"
-  },
-  "packageManager": "pnpm@11.22.0",
+  "type": "module",
   "scripts": {
     "dev": "vite",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint .",
     "routes:generate": "vite build --mode route-generation",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -34,9 +32,17 @@
     "@testing-library/user-event": "14.6.1",
     "@types/node": "24.10.1",
     "jsdom": "30.0.1",
+    "oxfmt": "0.66.0",
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.2.2",
     "vitest": "4.1.11"
-  }
+  },
+  "engines": {
+    "node": ">=24.15.0",
+    "pnpm": "11.22.0"
+  },
+  "packageManager": "pnpm@11.22.0"
 }

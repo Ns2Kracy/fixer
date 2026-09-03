@@ -148,9 +148,9 @@ function ReviewPage() {
                   <FieldConflict
                     conflict={conflict}
                     acknowledged={acknowledged().has(conflict.index)}
-                    onToggle={(checked) =>
-                      toggleConflict(conflict.index, checked)
-                    }
+                    onToggle={(checked) => {
+                      toggleConflict(conflict.index, checked);
+                    }}
                   />
                 )}
               </For>
@@ -176,14 +176,14 @@ function ReviewPage() {
                   !allConflictsAcknowledged() ||
                   data().conflicts_truncated
                 }
-                onClick={() =>
+                onClick={() => {
                   accept.mutate({
                     candidate_index: selectedIndex(),
                     accepted_conflict_indexes: [...acknowledged()].sort(
                       (a, b) => a - b,
                     ),
-                  })
-                }
+                  });
+                }}
               >
                 {accept.isPending
                   ? "Building plan…"

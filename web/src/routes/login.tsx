@@ -41,7 +41,7 @@ function LoginPage() {
   const [confirmationError, setConfirmationError] = createSignal<string>();
   const mode = (): AuthMode =>
     selectedMode() ??
-    (status.data?.registration_required ? "signup" : "signin");
+    (status.data?.registration_required === true ? "signup" : "signin");
   const registrationClosed = () =>
     status.data !== undefined && !status.data.registration_required;
 
@@ -63,7 +63,7 @@ function LoginPage() {
         username: session.username,
       });
       const redirect = safeInternalRedirect(search().redirect);
-      if (redirect) {
+      if (redirect !== undefined) {
         router.history.push(redirect);
         return;
       }
@@ -128,7 +128,9 @@ function LoginPage() {
             <Button
               type="button"
               variant="secondary"
-              onClick={() => status.refetch()}
+              onClick={() => {
+                void status.refetch();
+              }}
             >
               Retry
             </Button>
@@ -150,7 +152,9 @@ function LoginPage() {
                 role="tab"
                 aria-controls="authentication-panel"
                 aria-selected={mode() === "signin" ? "true" : "false"}
-                onClick={() => selectMode("signin")}
+                onClick={() => {
+                  selectMode("signin");
+                }}
               >
                 Sign in
               </button>
@@ -166,7 +170,9 @@ function LoginPage() {
                 aria-controls="authentication-panel"
                 aria-selected={mode() === "signup" ? "true" : "false"}
                 disabled={registrationClosed()}
-                onClick={() => selectMode("signup")}
+                onClick={() => {
+                  selectMode("signup");
+                }}
               >
                 Sign up
               </button>
@@ -241,7 +247,7 @@ function LoginPage() {
                     ? "Create administrator"
                     : "Sign in"}
               </Button>
-              <Show when={confirmationError()}>
+              <Show when={confirmationError() !== undefined}>
                 <p class="m-0 text-sm font-semibold text-coral" role="alert">
                   {confirmationError()}
                 </p>
@@ -265,5 +271,7 @@ function LoginPage() {
 }
 
 function safeInternalRedirect(value: string | undefined): string | undefined {
-  return value?.startsWith("/") && !value.startsWith("//") ? value : undefined;
+  return value !== undefined && value.startsWith("/") && !value.startsWith("//")
+    ? value
+    : undefined;
 }

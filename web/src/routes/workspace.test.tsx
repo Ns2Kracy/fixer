@@ -95,12 +95,12 @@ describe("scraper workspace routes", () => {
     await user.type(screen.getByLabelText("Search terms"), "fixture title");
     await user.click(screen.getByRole("button", { name: "Search library" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/v1/search?media_kind=book&query=fixture+title&limit=50",
         expect.any(Object),
-      ),
-    );
+      );
+    });
     expect(await screen.findByText("Books/Fixture.epub")).toBeVisible();
     expect(screen.getByText("root-0")).toBeVisible();
   });
@@ -315,10 +315,12 @@ describe("scraper workspace routes", () => {
         ([, init]) => init?.method === "PUT",
       );
       expect(update).toBeDefined();
-      const body = JSON.parse(String(update?.[1]?.body));
-      expect(body.timeout_seconds).toBe(45);
-      expect(body.tmdb_api_token).toBeNull();
-      expect(body.anilist_access_token).toBeNull();
+      const body: unknown = JSON.parse(String(update?.[1]?.body));
+      expect(body).toMatchObject({
+        timeout_seconds: 45,
+        tmdb_api_token: null,
+        anilist_access_token: null,
+      });
       expect(body).not.toHaveProperty("secrets");
     });
     expect(await screen.findByText("Settings saved")).toBeVisible();

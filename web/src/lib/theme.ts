@@ -80,11 +80,15 @@ export function browserThemeEnvironment(): ThemeEnvironment {
   return {
     storage: {
       getItem: (key) => window.localStorage.getItem(key),
-      setItem: (key, value) => window.localStorage.setItem(key, value),
+      setItem: (key, value) => {
+        window.localStorage.setItem(key, value);
+      },
     },
     mediaQuery: window.matchMedia("(prefers-color-scheme: dark)"),
     root: document.documentElement,
-    themeColor: document.querySelector<HTMLMetaElement>('meta[name="theme-color"]'),
+    themeColor: document.querySelector<HTMLMetaElement>(
+      'meta[name="theme-color"]',
+    ),
   };
 }
 

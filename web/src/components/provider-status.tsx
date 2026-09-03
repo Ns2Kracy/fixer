@@ -26,7 +26,10 @@ const resultClasses = {
 export function ProviderStatus(props: ProviderStatusProps): JSX.Element {
   return (
     <article class="grid min-h-[116px] grid-cols-[52px_minmax(220px,1fr)_110px_auto] items-center gap-5 border-b border-line max-[1000px]:grid-cols-[44px_minmax(0,1fr)_auto] max-[700px]:grid-cols-[38px_minmax(0,1fr)] max-[700px]:py-4">
-      <div class="font-serif text-base font-medium text-muted" aria-hidden="true">
+      <div
+        class="font-serif text-base font-medium text-muted"
+        aria-hidden="true"
+      >
         {props.provider.id.slice(0, 2).toUpperCase()}
       </div>
       <div class="min-w-0">

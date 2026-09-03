@@ -15,10 +15,11 @@ export function LocalePolicyEditor(
       value
         .split(",")
         .map((locale) => locale.trim())
-        .filter(
-          (locale) =>
-            locale.length > 0 && !seen.has(locale) && seen.add(locale),
-        ),
+        .filter((locale) => {
+          if (locale.length === 0 || seen.has(locale)) return false;
+          seen.add(locale);
+          return true;
+        }),
     );
   }
 
@@ -32,7 +33,9 @@ export function LocalePolicyEditor(
         disabled={props.disabled}
         placeholder="zh-Hans, ja, en, und"
         aria-describedby="locale-policy-help"
-        onInput={(event) => update(event.currentTarget.value)}
+        onInput={(event) => {
+          update(event.currentTarget.value);
+        }}
       />
       <small
         class="font-normal leading-relaxed text-muted"

@@ -13,6 +13,8 @@ import { PageHeader } from "../../components/ui/page-header";
 import { SectionHeader } from "../../components/ui/section-header";
 import {
   api,
+  isJobState,
+  isMediaKind,
   type CreateJobRequest,
   type JobState,
   type MediaKind,
@@ -54,11 +56,13 @@ function JobsPage() {
 
   const jobs = useQuery(() => ({
     queryKey: ["jobs", stateFilter()],
-    queryFn: () =>
-      api.listJobs({
+    queryFn: () => {
+      const state = stateFilter();
+      return api.listJobs({
         limit: 50,
-        ...(stateFilter() ? { state: stateFilter() as JobState } : {}),
-      }),
+        ...(state === "" ? {} : { state }),
+      });
+    },
   }));
 
   const createJob = useMutation(() => ({
@@ -92,9 +96,10 @@ function JobsPage() {
           <FormField label="State filter">
             <select
               value={stateFilter()}
-              onChange={(event) =>
-                setStateFilter(event.currentTarget.value as JobState | "")
-              }
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                if (value === "" || isJobState(value)) setStateFilter(value);
+              }}
             >
               <For each={states}>
                 {(state) => <option value={state.value}>{state.label}</option>}
@@ -123,9 +128,10 @@ function JobsPage() {
           <FormField label="Media kind">
             <select
               value={mediaKind()}
-              onChange={(event) =>
-                setMediaKind(event.currentTarget.value as MediaKind)
-              }
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                if (isMediaKind(value)) setMediaKind(value);
+              }}
             >
               <For each={mediaKinds}>
                 {(kind) => <option value={kind.value}>{kind.label}</option>}

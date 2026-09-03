@@ -44,7 +44,7 @@ describe("connectJobEvents", () => {
   it("uses native reconnect semantics and reconciles typed events with fetched state", async () => {
     MockEventSource.instances = [];
     const onEvent = vi.fn();
-    const reconcile = vi.fn().mockResolvedValue(undefined);
+    const reconcile = vi.fn(() => Promise.resolve());
     const onConnectionChange = vi.fn();
 
     const connection = connectJobEvents(7, {
@@ -58,9 +58,13 @@ describe("connectJobEvents", () => {
     expect(source.url).toBe("/api/v1/jobs/7/events");
     expect(source.withCredentials).toBe(true);
     source.onopen?.(new Event("open"));
-    await vi.waitFor(() => expect(reconcile).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => {
+      expect(reconcile).toHaveBeenCalledTimes(1);
+    });
     source.emit("state", { schema_version: 1, job_id: 7, state: "searching" });
-    await vi.waitFor(() => expect(reconcile).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(reconcile).toHaveBeenCalledTimes(2);
+    });
 
     expect(onConnectionChange).toHaveBeenCalledWith("connected");
     expect(onEvent).toHaveBeenCalledWith(
@@ -73,7 +77,9 @@ describe("connectJobEvents", () => {
 
     source.onerror?.(new Event("error"));
     expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting");
-    await vi.waitFor(() => expect(reconcile).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => {
+      expect(reconcile).toHaveBeenCalledTimes(3);
+    });
     connection.close();
     expect(source.closed).toBe(true);
   });

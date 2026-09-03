@@ -101,7 +101,7 @@ describe("administrator authentication", () => {
     );
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/v1/auth/login",
         expect.objectContaining({
@@ -112,8 +112,8 @@ describe("administrator authentication", () => {
             password: "local-development-password",
           }),
         }),
-      ),
-    );
+      );
+    });
     expect(sessionStorage.getItem("fixer.csrf-token")).toBe(
       "csrf-browser-session",
     );
@@ -188,7 +188,7 @@ describe("administrator authentication", () => {
       screen.getByRole("button", { name: "Create administrator" }),
     );
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/v1/auth/register",
         expect.objectContaining({
@@ -199,8 +199,8 @@ describe("administrator authentication", () => {
             password: "local-development-password",
           }),
         }),
-      ),
-    );
+      );
+    });
     expect(sessionStorage.getItem("fixer.csrf-token")).toBe(
       "csrf-registration",
     );

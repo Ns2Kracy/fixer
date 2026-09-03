@@ -26,7 +26,9 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        ...(browserChannel ? { channel: browserChannel } : {}),
+        ...(browserChannel !== undefined && browserChannel !== ""
+          ? { channel: browserChannel }
+          : {}),
       },
     },
   ],

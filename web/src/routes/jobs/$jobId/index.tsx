@@ -50,11 +50,15 @@ function JobDetailPage() {
 
   onSettled(() => {
     const connection = connectJobEvents(jobId(), {
-      onEvent: () => undefined,
-      reconcile: () => job.refetch().then(() => undefined),
+      onEvent: () => {},
+      reconcile: async () => {
+        await job.refetch();
+      },
       onConnectionChange: setConnectionState,
     });
-    return () => connection.close();
+    return () => {
+      connection.close();
+    };
   });
 
   return (
@@ -142,7 +146,9 @@ function JobDetailPage() {
                     class="justify-self-start"
                     type="button"
                     disabled={retry.isPending}
-                    onClick={() => retry.mutate()}
+                    onClick={() => {
+                      retry.mutate();
+                    }}
                   >
                     {retry.isPending ? "Retrying…" : "Retry job"}
                   </Button>
@@ -159,7 +165,9 @@ function JobDetailPage() {
                     variant="secondary"
                     type="button"
                     disabled={cancel.isPending}
-                    onClick={() => cancel.mutate()}
+                    onClick={() => {
+                      cancel.mutate();
+                    }}
                   >
                     {cancel.isPending ? "Cancelling…" : "Cancel before writing"}
                   </Button>

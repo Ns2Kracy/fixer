@@ -1,14 +1,14 @@
-import { render } from '@solidjs/web'
+import { render } from "@solidjs/web";
 
-import { App } from './app'
-import { createQueryClient } from './lib/query-client'
-import { createAppRouter } from './router'
-import './styles.css'
+import { App } from "./app";
+import { createQueryClient } from "./lib/query-client";
+import { createAppRouter } from "./router";
+import "./styles.css";
 
-const root = document.getElementById('root')
-if (!root) throw new Error('Fixer Web requires a #root element')
+const root = document.querySelector("#root");
+if (!root) throw new Error("Fixer Web requires a #root element");
 
-const queryClient = createQueryClient()
-const router = createAppRouter({ queryClient })
+const queryClient = createQueryClient();
+const router = createAppRouter({ queryClient });
 
-render(() => <App queryClient={queryClient} router={router} />, root)
+render(() => <App queryClient={queryClient} router={router} />, root);
