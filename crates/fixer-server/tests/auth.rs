@@ -243,6 +243,24 @@ async fn login(router: &axum::Router) -> (String, String) {
 }
 
 #[tokio::test]
+async fn authentication_errors_share_the_authoritative_request_id() {
+    let (_root, _store, router) = unregistered_secure_app(false).await;
+    let response = router
+        .oneshot(
+            Request::get("/api/v1/jobs")
+                .header("x-request-id", "upstream-auth-42")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.headers()["x-request-id"], "upstream-auth-42");
+    let body = json_body(response).await;
+    assert_eq!(body["error"]["request_id"], "upstream-auth-42");
+}
+
+#[tokio::test]
 async fn registration_initializes_the_only_administrator_and_reports_session_status() {
     let (_root, _store, router) = unregistered_secure_app(false).await;
 

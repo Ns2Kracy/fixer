@@ -26,7 +26,9 @@ sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "sync"] }
-tower-http = { version = "0.6.11", features = ["fs"] }
+tower.workspace = true
+tower-http = { version = "0.6.11", features = ["fs", "request-id", "trace"] }
+tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]

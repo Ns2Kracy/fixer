@@ -1,7 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::collections::BTreeMap;
 
 use axum::{
     Json,
@@ -9,8 +6,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
-
-static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Serialize)]
 struct ErrorEnvelope {
@@ -39,7 +34,7 @@ impl ApiError {
         message: &'static str,
         details: Option<BTreeMap<String, String>>,
     ) -> Self {
-        let sequence = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        let request_id = crate::observability::current_request_id();
         Self {
             status,
             body: ErrorEnvelope {
@@ -47,7 +42,7 @@ impl ApiError {
                     code,
                     message,
                     details,
-                    request_id: format!("req-{sequence:016x}"),
+                    request_id,
                 },
             },
         }

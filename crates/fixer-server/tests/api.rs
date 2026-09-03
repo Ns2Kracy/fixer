@@ -20,6 +20,13 @@ async fn health_returns_a_stable_versioned_dto() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| !value.is_empty())
+    );
     assert_eq!(
         response_json(response).await,
         json!({
@@ -88,6 +95,24 @@ async fn unsupported_api_versions_use_the_safe_error_envelope() {
     let body = response_json(response).await;
     assert_eq!(body["error"]["code"], "not_found");
     assert_eq!(body["error"]["message"], "API endpoint not found");
+}
+
+#[tokio::test]
+async fn upstream_request_id_is_authoritative_for_error_header_and_body() {
+    let response = app()
+        .oneshot(
+            Request::get("/api/v1/missing")
+                .header("x-request-id", "upstream-req-42")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.headers()["x-request-id"], "upstream-req-42");
+    let body = response_json(response).await;
+    assert_eq!(body["error"]["request_id"], "upstream-req-42");
 }
 
 #[tokio::test]

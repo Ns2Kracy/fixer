@@ -6,6 +6,7 @@ pub mod auth;
 mod fs_policy;
 pub mod jobs;
 mod network_policy;
+mod observability;
 pub mod store;
 mod web;
 mod workspace;
