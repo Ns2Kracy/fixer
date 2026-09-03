@@ -10,7 +10,7 @@ use fixer_core::{
 use futures_util::future::join_all;
 use std::time::SystemTime;
 
-pub(crate) struct SearchOutcome {
+pub struct SearchOutcome {
     pub candidates: Vec<Candidate>,
     pub warnings: Vec<ResolutionWarning>,
 }
@@ -20,7 +20,7 @@ struct SourcedMetadata {
     source: SourceRef,
 }
 
-pub(crate) async fn search_movie(
+pub async fn search_movie(
     fixer: &Fixer,
     title: &str,
     year: Option<u16>,
@@ -34,7 +34,7 @@ pub(crate) async fn search_movie(
     search_candidates(fixer, MediaKind::Movie, request, query).await
 }
 
-pub(crate) async fn search_anime(
+pub async fn search_anime(
     fixer: &Fixer,
     title: &str,
     year: Option<u16>,
@@ -52,7 +52,7 @@ pub(crate) async fn search_anime(
     search_candidates(fixer, MediaKind::Anime, request, query).await
 }
 
-pub(crate) async fn search_book(
+pub async fn search_book(
     fixer: &Fixer,
     title: &str,
     year: Option<u16>,
@@ -70,7 +70,7 @@ pub(crate) async fn search_book(
     search_candidates(fixer, MediaKind::Book, request, query).await
 }
 
-pub(crate) async fn search_music(
+pub async fn search_music(
     fixer: &Fixer,
     title: &str,
     year: Option<u16>,
@@ -84,7 +84,7 @@ pub(crate) async fn search_music(
     search_candidates(fixer, MediaKind::Music, request, query).await
 }
 
-pub(crate) async fn search_television(
+pub async fn search_television(
     fixer: &Fixer,
     title: &str,
     year: Option<u16>,
@@ -172,7 +172,7 @@ async fn search_candidates(
     })
 }
 
-pub(crate) async fn fetch_movies(
+pub async fn fetch_movies(
     fixer: &Fixer,
     candidates: &[Candidate],
     warnings: Vec<ResolutionWarning>,
@@ -194,7 +194,7 @@ pub(crate) async fn fetch_movies(
     Ok(resolved)
 }
 
-pub(crate) async fn fetch_anime(
+pub async fn fetch_anime(
     fixer: &Fixer,
     candidates: &[Candidate],
     warnings: Vec<ResolutionWarning>,
@@ -217,7 +217,7 @@ pub(crate) async fn fetch_anime(
     Ok(resolved)
 }
 
-pub(crate) async fn fetch_book(
+pub async fn fetch_book(
     fixer: &Fixer,
     candidates: &[Candidate],
     warnings: Vec<ResolutionWarning>,
@@ -255,7 +255,7 @@ pub(crate) async fn fetch_book(
     })
 }
 
-pub(crate) async fn fetch_music(
+pub async fn fetch_music(
     fixer: &Fixer,
     candidates: &[Candidate],
     warnings: Vec<ResolutionWarning>,
@@ -293,7 +293,7 @@ pub(crate) async fn fetch_music(
     })
 }
 
-pub(crate) async fn fetch_series(
+pub async fn fetch_series(
     fixer: &Fixer,
     candidates: &[Candidate],
     warnings: Vec<ResolutionWarning>,

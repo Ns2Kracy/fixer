@@ -54,7 +54,7 @@ impl EpisodeSequence {
 }
 
 /// One television episode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Episode {
     pub id: WorkId,
     pub titles: Titles,
@@ -67,7 +67,7 @@ pub struct Episode {
 
 impl Episode {
     /// Constructs an episode.
-    pub fn new(id: WorkId, titles: Titles, sequence: EpisodeSequence) -> Self {
+    pub const fn new(id: WorkId, titles: Titles, sequence: EpisodeSequence) -> Self {
         Self {
             id,
             titles,
@@ -81,7 +81,7 @@ impl Episode {
 }
 
 /// A numbered television season.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Season {
     pub id: WorkId,
     pub number: u32,
@@ -91,7 +91,7 @@ pub struct Season {
 
 impl Season {
     /// Constructs a season. Zero represents specials.
-    pub fn new(id: WorkId, number: u32, episodes: Vec<Episode>) -> Result<Self, CoreError> {
+    pub const fn new(id: WorkId, number: u32, episodes: Vec<Episode>) -> Result<Self, CoreError> {
         Ok(Self {
             id,
             number,
@@ -102,7 +102,7 @@ impl Season {
 }
 
 /// A television series hierarchy.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Series {
     pub id: WorkId,
     pub titles: Titles,
@@ -114,7 +114,12 @@ pub struct Series {
 
 impl Series {
     /// Constructs a series.
-    pub fn new(id: WorkId, titles: Titles, ordering: OrderingScheme, seasons: Vec<Season>) -> Self {
+    pub const fn new(
+        id: WorkId,
+        titles: Titles,
+        ordering: OrderingScheme,
+        seasons: Vec<Season>,
+    ) -> Self {
         Self {
             id,
             titles,

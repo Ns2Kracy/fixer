@@ -15,7 +15,7 @@ use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 struct NoHttp;
 
 impl HttpClient for NoHttp {
-    fn execute<'a>(&'a self, _: HttpRequest) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+    fn execute(&self, _: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, HttpError>> {
         Box::pin(async { panic!("local book provider must not use HTTP") })
     }
 }

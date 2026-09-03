@@ -23,7 +23,7 @@ use crate::{
 
 const SCHEMA_VERSION: u32 = 1;
 
-pub(crate) fn router(state: WorkspaceState) -> Router {
+pub fn router(state: WorkspaceState) -> Router {
     Router::new()
         .route(
             "/settings",
@@ -153,7 +153,7 @@ const fn default_search_limit() -> usize {
 }
 
 async fn get_settings(State(state): State<WorkspaceState>) -> Json<SettingsEnvelope> {
-    Json(settings_envelope(state.settings().await))
+    Json(settings_envelope(state.settings()))
 }
 
 async fn update_settings(
@@ -164,7 +164,7 @@ async fn update_settings(
     let settings = state
         .update_settings(request)
         .await
-        .map_err(map_state_error)?;
+        .map_err(|error| map_state_error(&error))?;
     Ok(Json(settings_envelope(settings)))
 }
 
@@ -188,7 +188,7 @@ async fn list_library(
     let listing = tokio::task::spawn_blocking(move || state.list(&query.root_id, &query.path))
         .await
         .map_err(map_blocking_task_error)?
-        .map_err(map_state_error)?;
+        .map_err(|error| map_state_error(&error))?;
     Ok(Json(LibraryEnvelope {
         schema_version: SCHEMA_VERSION,
         root_id: listing.root_id,
@@ -211,7 +211,7 @@ async fn search(
     let matches = tokio::task::spawn_blocking(move || state.search(&query.query, query.limit))
         .await
         .map_err(map_blocking_task_error)?
-        .map_err(map_state_error)?;
+        .map_err(|error| map_state_error(&error))?;
     Ok(Json(SearchEnvelope {
         schema_version: SCHEMA_VERSION,
         media_kind: query.media_kind,
@@ -231,7 +231,7 @@ async fn test_provider(
     let result = state
         .probe_provider(&provider)
         .await
-        .map_err(map_state_error)?;
+        .map_err(|error| map_state_error(&error))?;
     Ok(Json(provider_probe_envelope(result)))
 }
 
@@ -250,27 +250,27 @@ async fn preview_template(
         request.sample.year,
         request.sample.edition,
     )
-    .map_err(map_template_error)?;
+    .map_err(|error| map_template_error(&error))?;
     let path = PathTemplate::new(request.path_template)
         .and_then(|template| template.render(&context))
-        .map_err(map_template_error)?;
-    let content = ContentTemplate::new(request.content_template)
+        .map_err(|error| map_template_error(&error))?;
+    let rendered_content = ContentTemplate::new(request.content_template)
         .and_then(|template| template.render(&context))
-        .map_err(map_template_error)?;
+        .map_err(|error| map_template_error(&error))?;
     let path = path
         .to_str()
         .ok_or_else(|| invalid_template("rendered path is not valid UTF-8"))?
         .replace('\\', "/");
-    let content_bytes = content.len();
+    let content_bytes = rendered_content.len();
     Ok(Json(TemplatePreviewEnvelope {
         schema_version: SCHEMA_VERSION,
         path,
-        content,
+        content: rendered_content,
         content_bytes,
     }))
 }
 
-fn settings_envelope(settings: WorkspaceSettingsSnapshot) -> SettingsEnvelope {
+const fn settings_envelope(settings: WorkspaceSettingsSnapshot) -> SettingsEnvelope {
     SettingsEnvelope {
         schema_version: SCHEMA_VERSION,
         settings,
@@ -300,7 +300,7 @@ fn map_settings_json_rejection(_error: JsonRejection) -> ApiError {
     invalid_input("body", "must be valid JSON matching the settings schema")
 }
 
-fn map_state_error(error: crate::WorkspaceStateError) -> ApiError {
+fn map_state_error(error: &crate::WorkspaceStateError) -> ApiError {
     use crate::WorkspaceStateError;
 
     match error {
@@ -353,7 +353,7 @@ fn map_state_error(error: crate::WorkspaceStateError) -> ApiError {
     }
 }
 
-fn map_template_error(error: TemplateError) -> ApiError {
+fn map_template_error(error: &TemplateError) -> ApiError {
     invalid_template(match error {
         TemplateError::InvalidSyntax(_) => "template syntax is invalid",
         TemplateError::UnsupportedVariable(_) => "template contains an unsupported variable",

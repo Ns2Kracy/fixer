@@ -55,10 +55,10 @@ pub enum SdkError {
 
 struct DisabledHttpClient;
 impl HttpClient for DisabledHttpClient {
-    fn execute<'a>(
-        &'a self,
+    fn execute(
+        &self,
         _request: HttpRequest,
-    ) -> fixer_core::BoxFuture<'a, Result<HttpResponse, HttpError>> {
+    ) -> fixer_core::BoxFuture<'_, Result<HttpResponse, HttpError>> {
         Box::pin(async { Err(HttpError::Offline) })
     }
 }

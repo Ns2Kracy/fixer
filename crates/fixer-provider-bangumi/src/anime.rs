@@ -239,8 +239,8 @@ async fn request_json<T: DeserializeOwned>(
 
 fn map_subject(subject: Subject, episodes: Vec<Episode>) -> Result<AnimeSeries, BangumiError> {
     let mut titles = LocalizedValue::new();
-    insert_title(&mut titles, infer_name_locale(&subject.name), subject.name)?;
-    insert_title(&mut titles, "zh-Hans", subject.name_cn)?;
+    insert_title(&mut titles, infer_name_locale(&subject.name), &subject.name)?;
+    insert_title(&mut titles, "zh-Hans", &subject.name_cn)?;
     for item in subject.infobox {
         add_infobox_titles(&mut titles, item)?;
     }
@@ -248,7 +248,7 @@ fn map_subject(subject: Subject, episodes: Vec<Episode>) -> Result<AnimeSeries, 
     let platform_class = platform_episode_class(&subject.platform);
     let episodes = episodes
         .into_iter()
-        .filter_map(|episode| match map_episode(episode, platform_class) {
+        .filter_map(|episode| match map_episode(&episode, platform_class) {
             Ok(Some(episode)) => Some(Ok(episode)),
             Ok(None) => None,
             Err(error) => Some(Err(error)),
@@ -270,7 +270,7 @@ fn map_subject(subject: Subject, episodes: Vec<Episode>) -> Result<AnimeSeries, 
 }
 
 fn map_episode(
-    episode: Episode,
+    episode: &Episode,
     platform_class: AnimeEpisodeClass,
 ) -> Result<Option<AnimeEpisode>, BangumiError> {
     let class = match episode.episode_type {
@@ -290,8 +290,8 @@ fn map_episode(
         ))
     })?;
     let mut titles = LocalizedValue::new();
-    insert_title(&mut titles, infer_name_locale(&episode.name), episode.name)?;
-    insert_title(&mut titles, "zh-Hans", episode.name_cn)?;
+    insert_title(&mut titles, infer_name_locale(&episode.name), &episode.name)?;
+    insert_title(&mut titles, "zh-Hans", &episode.name_cn)?;
     AnimeEpisode::new(
         WorkId::new(format!("bangumi-episode-{}", episode.id)).map_err(data_error)?,
         titles,
@@ -309,13 +309,13 @@ fn add_infobox_titles(
 ) -> Result<(), BangumiError> {
     if let Some(locale) = locale_for_label(&item.key) {
         match item.value {
-            InfoboxValue::Text(value) => insert_title(titles, locale, value)?,
+            InfoboxValue::Text(value) => insert_title(titles, locale, &value)?,
             InfoboxValue::Values(values) => {
                 for value in values {
                     insert_title(
                         titles,
                         locale_for_label(&value.k).unwrap_or(locale),
-                        value.v,
+                        &value.v,
                     )?;
                 }
             }
@@ -328,13 +328,13 @@ fn add_infobox_titles(
     match item.value {
         InfoboxValue::Text(value) => {
             let locale = infer_name_locale(&value);
-            insert_title(titles, locale, value)?;
+            insert_title(titles, locale, &value)?;
         }
         InfoboxValue::Values(values) => {
             for value in values {
                 let locale =
                     locale_for_label(&value.k).unwrap_or_else(|| infer_name_locale(&value.v));
-                insert_title(titles, locale, value.v)?;
+                insert_title(titles, locale, &value.v)?;
             }
         }
     }
@@ -344,7 +344,7 @@ fn add_infobox_titles(
 fn insert_title(
     titles: &mut LocalizedValue<String>,
     locale: &str,
-    value: String,
+    value: &str,
 ) -> Result<(), BangumiError> {
     let value = value.trim().to_owned();
     if value.is_empty()
@@ -376,6 +376,11 @@ fn parse_year(date: &str) -> Option<u16> {
     date.get(..4)?.parse().ok()
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is checked as finite, positive, integral, and within u32 range before casting"
+)]
 fn positive_integer(value: Option<f64>) -> Option<u32> {
     let value = value?;
     (value.is_finite()

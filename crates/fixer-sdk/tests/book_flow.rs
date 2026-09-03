@@ -67,9 +67,10 @@ impl Provider for FailingBookProvider {
         _: SearchRequest,
         _: &'a dyn HttpClient,
     ) -> BoxFuture<'a, Result<Vec<Candidate>, ProviderError>> {
-        if self.descriptor.requires_network() {
-            panic!("offline book flow invoked a network provider");
-        }
+        assert!(
+            !self.descriptor.requires_network(),
+            "offline book flow invoked a network provider"
+        );
         Box::pin(async {
             Err(ProviderError::InvalidResponse(
                 "fixture search failure".to_owned(),

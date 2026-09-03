@@ -89,12 +89,12 @@ impl SdkJobFlow {
 }
 
 #[derive(Clone)]
-pub(crate) enum WorkerFlow {
+pub enum WorkerFlow {
     Configured(SdkJobFlow),
     Local,
 }
 
-pub(crate) struct ScannedJob {
+pub struct ScannedJob {
     fixer: Fixer,
     media_kind: JobMediaKind,
     title: String,
@@ -102,7 +102,7 @@ pub(crate) struct ScannedJob {
     output_root: PathBuf,
 }
 
-pub(crate) enum SearchArtifact {
+pub enum SearchArtifact {
     Anime {
         search: AnimeSearch,
         title: String,
@@ -136,7 +136,7 @@ pub(crate) enum SearchArtifact {
     },
 }
 
-pub(crate) enum ResolvedArtifact {
+pub enum ResolvedArtifact {
     Anime {
         resolved: Resolved<AnimeSeries>,
         output_root: PathBuf,
@@ -161,7 +161,7 @@ pub(crate) enum ResolvedArtifact {
 }
 
 impl WorkerFlow {
-    pub(crate) async fn scan(
+    pub async fn scan(
         &self,
         job_id: JobId,
         input: &JobInputDto,
@@ -169,10 +169,7 @@ impl WorkerFlow {
         self.scan_with_snapshot(Some(job_id), input).await
     }
 
-    pub(crate) async fn scan_current(
-        &self,
-        input: &JobInputDto,
-    ) -> Result<ScannedJob, JobFlowError> {
+    pub async fn scan_current(&self, input: &JobInputDto) -> Result<ScannedJob, JobFlowError> {
         self.scan_with_snapshot(None, input).await
     }
 
@@ -199,18 +196,19 @@ impl WorkerFlow {
                 }
                 SdkJobSource::Shared { config, snapshots } => {
                     let input = input.clone();
-                    let config = if let Some(job_id) = job_id {
-                        let mut snapshots = snapshots
-                            .lock()
-                            .expect("job configuration snapshots lock is not poisoned");
-                        Arc::clone(
-                            snapshots
-                                .entry(job_id)
-                                .or_insert_with(|| Arc::new(config.snapshot())),
-                        )
-                    } else {
-                        Arc::new(config.snapshot())
-                    };
+                    let config = job_id.map_or_else(
+                        || Arc::new(config.snapshot()),
+                        |job_id| {
+                            let mut snapshots = snapshots
+                                .lock()
+                                .expect("job configuration snapshots lock is not poisoned");
+                            Arc::clone(
+                                snapshots
+                                    .entry(job_id)
+                                    .or_insert_with(|| Arc::new(config.snapshot())),
+                            )
+                        },
+                    );
                     tokio::task::spawn_blocking(move || scan_configured(&input, config.as_ref()))
                         .await
                         .map_err(|error| JobFlowError::BlockingTask(error.to_string()))?
@@ -225,7 +223,7 @@ impl WorkerFlow {
         }
     }
 
-    pub(crate) fn release(&self, job_id: JobId) {
+    pub fn release(&self, job_id: JobId) {
         if let Self::Configured(SdkJobFlow {
             source: SdkJobSource::Shared { snapshots, .. },
         }) = self
@@ -239,7 +237,7 @@ impl WorkerFlow {
 }
 
 impl ScannedJob {
-    pub(crate) async fn search(self) -> Result<SearchArtifact, JobFlowError> {
+    pub async fn search(self) -> Result<SearchArtifact, JobFlowError> {
         let Self {
             fixer,
             media_kind,
@@ -304,7 +302,7 @@ impl ScannedJob {
 }
 
 impl SearchArtifact {
-    pub(crate) async fn resolve(self) -> Result<SearchSummary, JobFlowError> {
+    pub async fn resolve(self) -> Result<SearchSummary, JobFlowError> {
         let candidate_count = self.candidate_count();
         let resolved = self.resolve_selected(0).await?;
         Ok(SearchSummary::new(
@@ -313,7 +311,7 @@ impl SearchArtifact {
         ))
     }
 
-    pub(crate) const fn candidate_count(&self) -> u64 {
+    pub const fn candidate_count(&self) -> u64 {
         match self {
             Self::Anime { count, .. }
             | Self::Book { count, .. }
@@ -323,7 +321,7 @@ impl SearchArtifact {
         }
     }
 
-    pub(crate) fn candidate_artifacts(
+    pub fn candidate_artifacts(
         &self,
     ) -> Result<(Vec<artifacts::CandidateArtifact>, bool), JobFlowError> {
         let (query, candidates) = match self {
@@ -355,7 +353,7 @@ impl SearchArtifact {
         )
     }
 
-    pub(crate) async fn resolve_selected(
+    pub async fn resolve_selected(
         self,
         candidate_index: u64,
     ) -> Result<ResolvedArtifact, JobFlowError> {
@@ -408,7 +406,7 @@ impl SearchArtifact {
 }
 
 impl ResolvedArtifact {
-    pub(crate) fn review_diagnostics(&self) -> artifacts::ReviewArtifacts {
+    pub fn review_diagnostics(&self) -> artifacts::ReviewArtifacts {
         match self {
             Self::Anime { resolved, .. } => artifacts::diagnostics(resolved),
             Self::Book { resolved, .. } => artifacts::diagnostics(resolved),
@@ -418,7 +416,7 @@ impl ResolvedArtifact {
         }
     }
 
-    pub(crate) fn conflict_count(&self) -> Result<u64, JobFlowError> {
+    pub fn conflict_count(&self) -> Result<u64, JobFlowError> {
         count(match self {
             Self::Anime { resolved, .. } => resolved.conflicts.len(),
             Self::Book { resolved, .. } => resolved.conflicts.len(),
@@ -428,7 +426,7 @@ impl ResolvedArtifact {
         })
     }
 
-    pub(crate) fn plan(&self) -> Result<OutputPlan, JobFlowError> {
+    pub fn plan(&self) -> Result<OutputPlan, JobFlowError> {
         let plan = match self {
             Self::Anime {
                 resolved,
@@ -473,11 +471,13 @@ impl ResolvedArtifact {
         Ok(plan)
     }
 
-    pub(crate) fn plan_fingerprint(
+    pub fn plan_fingerprint(
         &self,
         decision: &ReviewDecisionDto,
         plan: &OutputPlan,
     ) -> Result<String, JobFlowError> {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+
         let (media_kind, resolved) = match self {
             Self::Anime { resolved, .. } => ("anime", serde_json::to_value(resolved)),
             Self::Book { resolved, .. } => ("book", serde_json::to_value(resolved)),
@@ -541,7 +541,12 @@ impl ResolvedArtifact {
             }
         }
         let digest = hasher.finalize();
-        Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+        let mut fingerprint = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            fingerprint.push(char::from(HEX[usize::from(byte >> 4)]));
+            fingerprint.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+        Ok(fingerprint)
     }
 }
 
@@ -571,6 +576,10 @@ fn hash_path(hasher: &mut Sha256, path: &Path) {
     hash_frame(hasher, path.to_string_lossy().as_bytes());
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Result::map_err adapters receive their error by value"
+)]
 fn fingerprint_error(error: impl ToString) -> JobFlowError {
     JobFlowError::Fingerprint(error.to_string())
 }
@@ -786,7 +795,7 @@ fn select_rooted<T>(
             .next()
             .ok_or_else(|| ambiguous("media documents", 0));
     }
-    let mut matches = pairs
+    let matches = pairs
         .into_iter()
         .filter(|(_, root)| input_path.starts_with(root))
         .collect::<Vec<_>>();
@@ -800,7 +809,7 @@ fn select_rooted<T>(
             )
         })?;
     let mut deepest_matches = matches
-        .drain(..)
+        .into_iter()
         .filter(|(_, root)| root.components().count() == deepest);
     let (document, root) = deepest_matches.next().expect("deepest match exists");
     if deepest_matches.next().is_some() {
@@ -852,9 +861,17 @@ fn path_query_title(path: &Path) -> Result<String, JobFlowError> {
 fn count(value: usize) -> Result<u64, JobFlowError> {
     u64::try_from(value).map_err(|_| JobFlowError::CountOverflow)
 }
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Result::map_err adapters receive their error by value"
+)]
 fn local_error(error: impl ToString) -> JobFlowError {
     JobFlowError::Local(error.to_string())
 }
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Result::map_err adapters receive their error by value"
+)]
 fn planning_error(error: impl ToString) -> JobFlowError {
     JobFlowError::Planning(error.to_string())
 }
@@ -894,7 +911,7 @@ pub struct WorkerPool {
 }
 
 impl WorkerPool {
-    pub(crate) fn new(
+    pub(super) const fn new(
         shutdown: watch::Sender<bool>,
         handles: Vec<JoinHandle<()>>,
         execution_tasks: Arc<ExecutionTaskRegistry>,
@@ -923,12 +940,12 @@ impl Drop for WorkerPool {
     }
 }
 
-pub(crate) const RETRY_DELAYS: [Duration; 3] = [
+pub const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(10),
     Duration::from_millis(25),
     Duration::from_millis(50),
 ];
-pub(crate) type SharedWorkerFlow = Arc<WorkerFlow>;
+pub type SharedWorkerFlow = Arc<WorkerFlow>;
 
 #[cfg(test)]
 mod tests {

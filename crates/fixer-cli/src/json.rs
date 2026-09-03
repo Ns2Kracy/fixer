@@ -3,10 +3,10 @@ use fixer_provider_local::ScanWarning;
 use serde::Serialize;
 use std::path::Path;
 
-pub(crate) const SCHEMA_VERSION: u8 = 1;
+pub const SCHEMA_VERSION: u8 = 1;
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ScanDto {
+pub struct ScanDto {
     schema_version: u8,
     kind: &'static str,
     root: String,
@@ -15,7 +15,7 @@ pub(crate) struct ScanDto {
 }
 
 impl ScanDto {
-    pub(crate) fn new(
+    pub fn new(
         kind: &'static str,
         root: &Path,
         documents: usize,
@@ -47,7 +47,7 @@ impl From<&ScanWarning> for ScanWarningDto {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct PlanDto {
+pub struct PlanDto {
     schema_version: u8,
     kind: &'static str,
     output_root: String,
@@ -55,7 +55,7 @@ pub(crate) struct PlanDto {
 }
 
 impl PlanDto {
-    pub(crate) fn new(kind: &'static str, output_root: &Path, plan: &OutputPlan) -> Self {
+    pub fn new(kind: &'static str, output_root: &Path, plan: &OutputPlan) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             kind,

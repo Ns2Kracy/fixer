@@ -7,7 +7,7 @@ use crate::{
 use fixer_provider_local::{scan, scan_anime, scan_books, scan_music, scan_television};
 use std::path::{Path, PathBuf};
 
-pub(crate) fn run(args: ScanArgs) -> AppResult<RunStatus> {
+pub fn run(args: &ScanArgs) -> AppResult<RunStatus> {
     if !args.path.exists() {
         return Err(AppError::invalid_input(format!(
             "input path does not exist: {}",

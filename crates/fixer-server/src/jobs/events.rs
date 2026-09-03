@@ -30,7 +30,7 @@ struct JobEvent {
 }
 
 impl JobEvent {
-    fn new(job_id: JobId, kind: &'static str, data: Value) -> Self {
+    const fn new(job_id: JobId, kind: &'static str, data: Value) -> Self {
         Self {
             sequence: 0,
             job_id,
@@ -67,25 +67,24 @@ struct EventState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SubscribeError {
+pub enum SubscribeError {
     Expired,
     Invalid,
     SequenceExhausted,
 }
 
-pub(crate) type JobEventStream =
-    Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send + 'static>>;
+pub type JobEventStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send + 'static>>;
 
 /// Globally bounded event history with atomic replay/live subscription.
 #[derive(Debug, Clone)]
-pub(crate) struct JobEventHub {
+pub struct JobEventHub {
     capacity: usize,
     state: Arc<Mutex<EventState>>,
     sender: broadcast::Sender<JobEvent>,
 }
 
 impl JobEventHub {
-    pub(crate) fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize) -> Self {
         debug_assert!(capacity > 0);
         let (sender, _) = broadcast::channel(capacity);
         Self {
@@ -99,11 +98,7 @@ impl JobEventHub {
         }
     }
 
-    pub(crate) fn publish_state(
-        &self,
-        job_id: JobId,
-        state: JobState,
-    ) -> Result<(), SubscribeError> {
+    pub fn publish_state(&self, job_id: JobId, state: JobState) -> Result<(), SubscribeError> {
         let mut guard = self
             .state
             .lock()
@@ -111,7 +106,7 @@ impl JobEventHub {
         self.publish_locked(&mut guard, JobEvent::state(job_id, state))
     }
 
-    pub(crate) fn publish_progress(
+    pub fn publish_progress(
         &self,
         job_id: JobId,
         progress: &ProgressSummary,
@@ -127,7 +122,7 @@ impl JobEventHub {
         ))
     }
 
-    pub(crate) fn publish_completion(
+    pub fn publish_completion(
         &self,
         job_id: JobId,
         execution: &ExecutionSummary,
@@ -143,7 +138,7 @@ impl JobEventHub {
         ))
     }
 
-    pub(crate) fn publish_review(
+    pub fn publish_review(
         &self,
         job_id: JobId,
         candidate_count: u64,
@@ -169,11 +164,7 @@ impl JobEventHub {
         self.publish_locked(&mut guard, event)
     }
 
-    pub(crate) fn ensure_state(
-        &self,
-        job_id: JobId,
-        state: JobState,
-    ) -> Result<(), SubscribeError> {
+    pub fn ensure_state(&self, job_id: JobId, state: JobState) -> Result<(), SubscribeError> {
         let mut guard = self
             .state
             .lock()
@@ -181,10 +172,12 @@ impl JobEventHub {
         if guard.retained.iter().any(|event| event.job_id == job_id) {
             return Ok(());
         }
-        self.publish_locked(&mut guard, JobEvent::state(job_id, state))
+        let result = self.publish_locked(&mut guard, JobEvent::state(job_id, state));
+        drop(guard);
+        result
     }
 
-    pub(crate) fn subscribe(
+    pub fn subscribe(
         &self,
         job_id: JobId,
         raw_cursor: Option<&str>,
@@ -272,8 +265,10 @@ impl Subscription {
                         return Some((Ok(event.into_sse(&epoch)), subscription));
                     }
                     Ok(_) => {}
-                    Err(broadcast::error::RecvError::Lagged(_))
-                    | Err(broadcast::error::RecvError::Closed) => return None,
+                    Err(
+                        broadcast::error::RecvError::Lagged(_)
+                        | broadcast::error::RecvError::Closed,
+                    ) => return None,
                 }
             }
         }))
@@ -319,6 +314,7 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert_eq!(state.retained.len(), 3);
+        drop(state);
     }
 
     #[tokio::test]

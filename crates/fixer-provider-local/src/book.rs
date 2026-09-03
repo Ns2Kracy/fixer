@@ -123,7 +123,7 @@ fn parse_rootfile(input: &str) -> Result<String, LocalError> {
     reader.config_mut().trim_text(true);
     loop {
         match reader.read_event() {
-            Ok(Event::Empty(element)) | Ok(Event::Start(element))
+            Ok(Event::Empty(element) | Event::Start(element))
                 if element.local_name().as_ref() == b"rootfile" =>
             {
                 for attribute in element.attributes() {
@@ -197,7 +197,7 @@ fn canonical_isbns(values: &[String]) -> Result<(Isbn10, Isbn13), LocalError> {
             .trim()
             .strip_prefix("urn:isbn:")
             .or_else(|| value.trim().strip_prefix("URN:ISBN:"))
-            .unwrap_or(value.trim());
+            .unwrap_or_else(|| value.trim());
         if isbn_13.is_none() {
             isbn_13 = Isbn13::new(candidate.to_owned()).ok();
         }

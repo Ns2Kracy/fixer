@@ -140,14 +140,14 @@ pub enum LocalizedEntry<T> {
 
 impl<T> LocalizedEntry<T> {
     /// Returns the stored value.
-    pub fn value(&self) -> &T {
+    pub const fn value(&self) -> &T {
         match self {
             Self::Tagged { value, .. } | Self::Untagged { value } => value,
         }
     }
 
     /// Returns the language tag when one was declared.
-    pub fn language(&self) -> Option<&LanguageTag> {
+    pub const fn language(&self) -> Option<&LanguageTag> {
         match self {
             Self::Tagged { language, .. } => Some(language),
             Self::Untagged { .. } => None,

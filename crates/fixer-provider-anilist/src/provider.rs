@@ -4,7 +4,7 @@ use fixer_core::{
     Provider, ProviderDescriptor, ProviderError, ProviderId, SearchRequest,
 };
 
-/// Optional AniList anime metadata provider.
+/// Optional `AniList` anime metadata provider.
 #[derive(Debug, Clone)]
 pub struct AniListProvider {
     descriptor: ProviderDescriptor,
@@ -12,7 +12,7 @@ pub struct AniListProvider {
 }
 
 impl AniListProvider {
-    /// Constructs an anime-only AniList provider.
+    /// Constructs an anime-only `AniList` provider.
     pub fn new(config: AniListConfig) -> Result<Self, AniListError> {
         Ok(Self {
             descriptor: ProviderDescriptor::new(
@@ -26,7 +26,7 @@ impl AniListProvider {
         })
     }
 
-    /// Searches AniList anime media.
+    /// Searches `AniList` anime media.
     pub async fn search_anime(
         &self,
         request: SearchRequest,
@@ -35,7 +35,7 @@ impl AniListProvider {
         graphql::search(&self.config, request, http).await
     }
 
-    /// Fetches one AniList anime media document.
+    /// Fetches one `AniList` anime media document.
     pub async fn fetch_anime(
         &self,
         request: FetchRequest,

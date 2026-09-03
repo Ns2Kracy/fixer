@@ -78,7 +78,7 @@ fn every_output_plan_source_and_target_must_stay_in_an_allowed_root() {
 
     let mut escaped_target = OutputPlan::new(&library);
     escaped_target.push(OutputOperation::Copy {
-        source: source.clone(),
+        source,
         target: outside.join("copy.mkv"),
     });
     assert!(policy.validate_plan(&escaped_target).is_err());

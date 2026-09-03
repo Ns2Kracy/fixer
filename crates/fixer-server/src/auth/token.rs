@@ -14,7 +14,7 @@ pub struct IssuedApiToken {
 }
 
 impl IssuedApiToken {
-    pub(crate) fn new(id: i64, token: String) -> Self {
+    pub(crate) const fn new(id: i64, token: String) -> Self {
         Self { id, token }
     }
 

@@ -121,16 +121,14 @@ fn movie_merge_preserves_locales_and_exposes_conflicts() {
     );
     assert_eq!(resolved.value.credits.len(), 1);
     assert_eq!(resolved.value.ratings.len(), 3);
-    assert_eq!(
-        resolved
-            .value
-            .ratings
-            .iter()
-            .find(|rating| rating.system == "imdb")
-            .unwrap()
-            .value,
-        8.0
-    );
+    let imdb_rating = resolved
+        .value
+        .ratings
+        .iter()
+        .find(|rating| rating.system == "imdb")
+        .unwrap()
+        .value;
+    assert!((imdb_rating - 8.0).abs() < f32::EPSILON);
     assert_eq!(resolved.value.artwork.len(), 2);
     assert!(!resolved.conflicts.is_empty());
     assert!(!resolved.provenance.sources_for("movie.titles").is_empty());

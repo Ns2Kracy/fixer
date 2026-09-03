@@ -190,10 +190,10 @@ fn merge_localized(
     let mut identities = std::collections::BTreeMap::<String, (String, ProviderId)>::new();
     for document in ordered {
         for entry in select(&document.value).entries() {
-            let language = entry
-                .language()
-                .map(|tag| tag.normalized().to_owned())
-                .unwrap_or_else(|| "<untagged>".to_owned());
+            let language = entry.language().map_or_else(
+                || "<untagged>".to_owned(),
+                |tag| tag.normalized().to_owned(),
+            );
             let value = entry.value();
             if let Some((existing, provider)) = identities.get(&language) {
                 if normalize(existing) != normalize(value) {
@@ -208,7 +208,7 @@ fn merge_localized(
             identities.insert(language, (value.clone(), document.source.provider.clone()));
             match entry {
                 LocalizedEntry::Tagged { language, value } => {
-                    result.insert(language.as_str(), value.clone())?
+                    result.insert(language.as_str(), value.clone())?;
                 }
                 LocalizedEntry::Untagged { value } => result.insert_untagged(value.clone()),
             }
@@ -293,6 +293,10 @@ fn normalize(value: &str) -> String {
         .join(" ")
         .to_lowercase()
 }
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "the count is bounded by this fixed six-element completeness checklist"
+)]
 fn completeness(movie: &Movie) -> f32 {
     let present = [
         !movie.titles.entries().is_empty(),

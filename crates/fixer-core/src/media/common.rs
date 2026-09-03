@@ -81,7 +81,7 @@ impl ReleaseDate {
     }
 }
 
-fn days_in_month(year: u16, month: u8) -> u8 {
+const fn days_in_month(year: u16, month: u8) -> u8 {
     match month {
         4 | 6 | 9 | 11 => 30,
         2 if year % 400 == 0 || (year % 4 == 0 && year % 100 != 0) => 29,
@@ -382,7 +382,7 @@ impl Asset {
     }
 }
 
-pub(crate) fn validate_text(
+pub(super) fn validate_text(
     field: &'static str,
     value: &str,
     maximum: usize,

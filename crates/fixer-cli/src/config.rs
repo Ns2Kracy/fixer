@@ -58,27 +58,27 @@ impl Config {
         if let Some(path) = &cli.config {
             loader = loader.with_config_path(path);
         }
-        let loaded = loader.load().map_err(AppError::new)?;
+        let loaded_config = loader.load().map_err(AppError::new)?;
         let sources = ConfigSources {
             offline: source(
                 cli.offline,
-                loaded.has_environment_key("FIXER_OFFLINE"),
-                loaded.has_file_field("offline"),
+                loaded_config.has_environment_key("FIXER_OFFLINE"),
+                loaded_config.has_file_field("offline"),
             ),
             proxy: source(
                 cli.proxy.is_some(),
-                loaded.has_environment_key("FIXER_PROXY"),
-                loaded.has_file_field("proxy"),
+                loaded_config.has_environment_key("FIXER_PROXY"),
+                loaded_config.has_file_field("proxy"),
             ),
             local_root: source(
                 cli.local_root.is_some(),
-                loaded.has_environment_key("FIXER_LOCAL_ROOT"),
-                loaded.has_file_field("local_root"),
+                loaded_config.has_environment_key("FIXER_LOCAL_ROOT"),
+                loaded_config.has_file_field("local_root"),
             ),
             api_key: source(
                 false,
                 has_environment_key(
-                    &loaded,
+                    &loaded_config,
                     &[
                         "TMDB_API_TOKEN",
                         "FIXER_API_KEY",
@@ -87,21 +87,21 @@ impl Config {
                     ],
                 ),
                 has_file_field(
-                    &loaded,
+                    &loaded_config,
                     &["providers.tmdb.api_token", "providers.tmdb.api_token_env"],
                 ),
             ),
             anilist: source(
                 false,
                 has_environment_key(
-                    &loaded,
+                    &loaded_config,
                     &["FIXER_ANILIST_ENABLED", "FIXER_ENABLED_PROVIDERS"],
                 ),
-                loaded.has_file_field("enabled_providers"),
+                loaded_config.has_file_field("enabled_providers"),
             ),
         };
 
-        let shared = loaded.config().clone();
+        let shared = loaded_config.config().clone();
         Ok(Self { shared, sources })
     }
 
@@ -109,7 +109,7 @@ impl Config {
         self.shared.validate().map_err(AppError::new)
     }
 
-    pub fn shared(&self) -> &FixerConfig {
+    pub const fn shared(&self) -> &FixerConfig {
         &self.shared
     }
 
@@ -181,7 +181,7 @@ fn has_file_field(loaded: &LoadedConfig, fields: &[&str]) -> bool {
     fields.iter().any(|field| loaded.has_file_field(field))
 }
 
-fn source(flag: bool, environment: bool, file: bool) -> ConfigSource {
+const fn source(flag: bool, environment: bool, file: bool) -> ConfigSource {
     if flag {
         ConfigSource::Flag
     } else if environment {
@@ -193,7 +193,7 @@ fn source(flag: bool, environment: bool, file: bool) -> ConfigSource {
     }
 }
 
-fn configured<T>(value: Option<T>) -> &'static str {
+const fn configured<T: ?Sized>(value: Option<&T>) -> &'static str {
     if value.is_some() {
         "configured"
     } else {
@@ -201,7 +201,7 @@ fn configured<T>(value: Option<T>) -> &'static str {
     }
 }
 
-fn configured_bool(value: bool) -> &'static str {
+const fn configured_bool(value: bool) -> &'static str {
     if value {
         "configured"
     } else {

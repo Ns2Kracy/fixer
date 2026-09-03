@@ -9,7 +9,7 @@ pub struct IssuedSession {
 }
 
 impl IssuedSession {
-    pub(crate) fn new(token: String, csrf_token: String, expires_at_ms: i64) -> Self {
+    pub(crate) const fn new(token: String, csrf_token: String, expires_at_ms: i64) -> Self {
         Self {
             token,
             csrf_token,

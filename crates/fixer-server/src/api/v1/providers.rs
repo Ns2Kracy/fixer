@@ -4,13 +4,13 @@ use serde::Serialize;
 const SCHEMA_VERSION: u8 = 1;
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ProvidersDto {
+pub struct ProvidersDto {
     schema_version: u8,
     providers: Vec<ProviderDto>,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ProviderDto {
+pub struct ProviderDto {
     id: &'static str,
     name: &'static str,
     media_kinds: &'static [&'static str],
@@ -18,7 +18,7 @@ pub(crate) struct ProviderDto {
     optional: bool,
 }
 
-pub(crate) async fn get() -> Json<ProvidersDto> {
+pub async fn get() -> Json<ProvidersDto> {
     Json(ProvidersDto {
         schema_version: SCHEMA_VERSION,
         providers: vec![

@@ -14,7 +14,7 @@ use std::{
 const ID3V1_SIZE: usize = 128;
 const CUE_FRAMES_PER_SECOND: u32 = 75;
 
-/// Baseline ID3v1 or ID3v1.1 fields read from an MP3 tail.
+/// Baseline `ID3v1` or `ID3v1.1` fields read from an MP3 tail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Id3v1Tags {
     pub title: Option<String>,
@@ -255,7 +255,7 @@ struct TrackInput {
     duration: Duration,
 }
 
-/// Recursively reads baseline ID3v1 and CUE metadata without following symlinks.
+/// Recursively reads baseline `ID3v1` and CUE metadata without following symlinks.
 pub fn scan_music(root: &Path) -> Result<MusicScanResult, LocalError> {
     if !root.is_dir() {
         return Err(LocalError::InvalidPath(root.to_path_buf()));

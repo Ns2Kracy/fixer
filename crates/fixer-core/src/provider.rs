@@ -63,7 +63,7 @@ impl ProviderDescriptor {
     }
 
     /// Returns the stable provider ID.
-    pub fn id(&self) -> &ProviderId {
+    pub const fn id(&self) -> &ProviderId {
         &self.id
     }
     /// Returns the human-readable provider name.
@@ -310,7 +310,7 @@ impl Candidate {
         }
     }
     /// Returns the provider ID.
-    pub fn provider(&self) -> &ProviderId {
+    pub const fn provider(&self) -> &ProviderId {
         match self {
             Self::Movie(v) => &v.provider,
             Self::Television(v) => &v.provider,
@@ -320,7 +320,7 @@ impl Candidate {
         }
     }
     /// Returns the external ID selected for fetching.
-    pub fn external_id(&self) -> &ExternalId {
+    pub const fn external_id(&self) -> &ExternalId {
         match self {
             Self::Movie(v) => &v.external_id,
             Self::Television(v) => &v.external_id,

@@ -57,12 +57,12 @@ impl OpenLibraryError {
 impl From<OpenLibraryError> for ProviderError {
     fn from(error: OpenLibraryError) -> Self {
         match error {
-            OpenLibraryError::NotFound => ProviderError::NotFound,
-            OpenLibraryError::MalformedResponse(message) => ProviderError::InvalidResponse(message),
+            OpenLibraryError::NotFound => Self::NotFound,
+            OpenLibraryError::MalformedResponse(message) => Self::InvalidResponse(message),
             OpenLibraryError::InvalidConfig(message) | OpenLibraryError::InvalidData(message) => {
-                ProviderError::InvalidInput(message)
+                Self::InvalidInput(message)
             }
-            other => ProviderError::Transport(other.to_string()),
+            other => Self::Transport(other.to_string()),
         }
     }
 }

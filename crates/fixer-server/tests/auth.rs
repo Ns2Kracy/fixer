@@ -261,6 +261,10 @@ async fn authentication_errors_share_the_authoritative_request_id() {
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the registration test keeps one complete administrator bootstrap scenario together"
+)]
 async fn registration_initializes_the_only_administrator_and_reports_session_status() {
     let (_root, _store, router) = unregistered_secure_app(false).await;
 

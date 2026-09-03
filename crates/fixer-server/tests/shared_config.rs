@@ -35,7 +35,7 @@ header = "x-fixer-client-ip"
     .unwrap();
 
     let loaded = ConfigLoader::new(root.path())
-        .with_environment(Default::default())
+        .with_environment(std::collections::BTreeMap::default())
         .load()
         .unwrap();
     let server = ServerConfig::from_shared(&loaded.config().server).unwrap();

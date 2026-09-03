@@ -16,7 +16,7 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
     match command {
         Command::Search { command } => search::run(command, &config).await,
         Command::Resolve { command } => resolve::run(command, &config).await,
-        Command::Scan(args) => scan::run(args),
+        Command::Scan(args) => scan::run(&args),
         Command::Plan(args) => scrape::plan(args, &config).await,
         Command::Scrape(args) => scrape::run(args, &config).await,
         Command::Config {
@@ -39,7 +39,7 @@ pub async fn run(command: Command, config: Config) -> AppResult<RunStatus> {
     }
 }
 
-pub(crate) fn local_fixer(config: &Config) -> AppResult<(Fixer, Vec<ScanWarning>)> {
+pub fn local_fixer(config: &Config) -> AppResult<(Fixer, Vec<ScanWarning>)> {
     let root = config.local_root.as_ref().ok_or_else(|| {
         AppError::invalid_input(
             "local metadata root is required; pass --local-root or set FIXER_LOCAL_ROOT",
@@ -48,10 +48,10 @@ pub(crate) fn local_fixer(config: &Config) -> AppResult<(Fixer, Vec<ScanWarning>
     let (provider, warnings) = LocalProvider::from_scan(root).map_err(AppError::new)?;
     Ok((build_fixer(provider, config)?, warnings))
 }
-pub(crate) fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult<Fixer> {
+pub fn build_fixer(provider: LocalProvider, config: &Config) -> AppResult<Fixer> {
     fixer_runtime::build_fixer(config.shared(), provider).map_err(AppError::new)
 }
-pub(crate) fn parse_external_ids(values: &[String]) -> AppResult<Vec<ExternalId>> {
+pub fn parse_external_ids(values: &[String]) -> AppResult<Vec<ExternalId>> {
     values
         .iter()
         .map(|value| {
@@ -65,11 +65,11 @@ pub(crate) fn parse_external_ids(values: &[String]) -> AppResult<Vec<ExternalId>
         .collect()
 }
 
-pub(crate) fn finish_with_warnings(warnings: &[ScanWarning]) -> RunStatus {
+pub fn finish_with_warnings(warnings: &[ScanWarning]) -> RunStatus {
     finish_with_resolution_warnings(warnings, &[])
 }
 
-pub(crate) fn finish_with_resolution_warnings(
+pub fn finish_with_resolution_warnings(
     scan_warnings: &[ScanWarning],
     resolution_warnings: &[fixer_core::ResolutionWarning],
 ) -> RunStatus {

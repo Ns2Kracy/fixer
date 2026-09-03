@@ -41,7 +41,7 @@ pub struct TelevisionScanResult {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct TelevisionRecord {
+pub struct TelevisionRecord {
     pub external_id: ExternalId,
     pub value: Series,
     pub root: PathBuf,
@@ -151,13 +151,13 @@ pub fn parse_matroska_tags(input: &str) -> Result<MatroskaEpisodeTags, LocalErro
                 }
             }
             "TMDB" | "TMDBID" | "TMDB_ID" => {
-                result.external_ids.push(ExternalId::new("tmdb", value)?)
+                result.external_ids.push(ExternalId::new("tmdb", value)?);
             }
             "TVDB" | "TVDBID" | "TVDB_ID" => {
-                result.external_ids.push(ExternalId::new("tvdb", value)?)
+                result.external_ids.push(ExternalId::new("tvdb", value)?);
             }
             "IMDB" | "IMDBID" | "IMDB_ID" => {
-                result.external_ids.push(ExternalId::new("imdb", value)?)
+                result.external_ids.push(ExternalId::new("imdb", value)?);
             }
             _ => {}
         }
@@ -181,7 +181,7 @@ pub fn scan_television(root: &Path) -> Result<TelevisionScanResult, LocalError> 
     })
 }
 
-pub(crate) fn scan_television_records(
+pub fn scan_television_records(
     root: &Path,
 ) -> Result<(Vec<TelevisionRecord>, Vec<ScanWarning>), LocalError> {
     if !root.is_dir() {
@@ -415,7 +415,7 @@ fn parse_season_folder(value: &str) -> Option<u32> {
 
 fn parse_episode_prefix(value: &str) -> Option<(u32, String)> {
     let trimmed = value.trim_start();
-    let digits = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
     if digits == 0 {
         return None;
     }

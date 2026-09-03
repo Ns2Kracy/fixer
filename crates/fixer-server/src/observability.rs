@@ -63,7 +63,7 @@ impl MakeRequestId for MakeFixerRequestId {
     }
 }
 
-pub(crate) fn observe(router: Router) -> Router {
+pub fn observe(router: Router) -> Router {
     router.layer(
         ServiceBuilder::new()
             .layer(middleware::from_fn(normalize_request_id))
@@ -94,7 +94,7 @@ pub(crate) fn observe(router: Router) -> Router {
     )
 }
 
-pub(crate) fn current_request_id() -> String {
+pub fn current_request_id() -> String {
     CURRENT_REQUEST_ID
         .try_with(Clone::clone)
         .unwrap_or_else(|_| fresh_request_id())
@@ -116,8 +116,7 @@ async fn bind_request_id(request: Request, next: Next) -> Response {
         .extensions()
         .get::<RequestId>()
         .and_then(|value| value.header_value().to_str().ok())
-        .map(str::to_owned)
-        .unwrap_or_else(fresh_request_id);
+        .map_or_else(fresh_request_id, str::to_owned);
     CURRENT_REQUEST_ID
         .scope(request_id, next.run(request))
         .await

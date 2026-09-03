@@ -72,8 +72,7 @@ impl MergePolicy {
         self.field_order
             .get(field_path)
             .or_else(|| self.media_order.get(&media_kind))
-            .map(Vec::as_slice)
-            .unwrap_or(&self.global_order)
+            .map_or(&self.global_order, Vec::as_slice)
     }
     pub(crate) fn rank(
         &self,

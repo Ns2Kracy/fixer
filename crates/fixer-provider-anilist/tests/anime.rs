@@ -63,7 +63,7 @@ async fn fetch_maps_alternate_titles_summary_cover_and_banner_without_fake_episo
     Mock::given(method("POST"))
         .and(path("/graphql"))
         .and(body_partial_json(serde_json::json!({
-            "variables": { "id": 154587 }
+            "variables": { "id": 154_587 }
         })))
         .respond_with(
             ResponseTemplate::new(200)

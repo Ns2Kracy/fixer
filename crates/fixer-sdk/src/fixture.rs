@@ -46,7 +46,7 @@ impl FixtureProvider {
             .map(|document| document.document.media_kind())
             .collect::<std::collections::BTreeSet<_>>();
         let media_kinds = if media_kinds.is_empty() {
-            [MediaKind::Movie].into_iter().collect()
+            std::iter::once(MediaKind::Movie).collect()
         } else {
             media_kinds
         };
@@ -94,8 +94,7 @@ impl Provider for FixtureProvider {
                             .titles
                             .entries()
                             .first()
-                            .map(|entry| entry.value().clone())
-                            .unwrap_or_else(|| title.clone());
+                            .map_or_else(|| title.clone(), |entry| entry.value().clone());
                         let candidate_year = movie.release_year().or(year);
                         MovieCandidate::new(
                             self.descriptor.id().clone(),
@@ -118,8 +117,7 @@ impl Provider for FixtureProvider {
                             .titles
                             .entries()
                             .first()
-                            .map(|entry| entry.value().clone())
-                            .unwrap_or_else(|| title.clone());
+                            .map_or_else(|| title.clone(), |entry| entry.value().clone());
                         BookCandidate::new(
                             self.descriptor.id().clone(),
                             fixture.external_id.clone(),
@@ -141,8 +139,7 @@ impl Provider for FixtureProvider {
                             .titles
                             .entries()
                             .first()
-                            .map(|entry| entry.value().clone())
-                            .unwrap_or_else(|| title.clone());
+                            .map_or_else(|| title.clone(), |entry| entry.value().clone());
                         TelevisionCandidate::new(
                             self.descriptor.id().clone(),
                             fixture.external_id.clone(),

@@ -361,7 +361,7 @@ async fn scrape_television(
         }
     }
     let resolved = query.resolve().await.map_err(AppError::new)?;
-    let output_root = television_output_root(series_root, args.placement(), &resolved)?;
+    let output_root = television_output_root(series_root, args.placement(), &resolved);
     let conflicts = resolved.conflicts.len();
     let plan = TelevisionWriter
         .plan_resolved(&resolved, &output_root)
@@ -393,9 +393,10 @@ fn finish_plan(
                 "non-in-place placement requires a media file path",
             ));
         }
-        let target = placement_target.map(PathBuf::from).unwrap_or_else(|| {
-            PathBuf::from(args.path.file_name().expect("file path was checked above"))
-        });
+        let target = placement_target.map_or_else(
+            || PathBuf::from(args.path.file_name().expect("file path was checked above")),
+            PathBuf::from,
+        );
         if output_root.join(&target) != args.path {
             let placement = plan_media_placement(
                 &args.path,
@@ -608,9 +609,9 @@ fn television_output_root(
     series_root: &Path,
     placement: PlacementArg,
     resolved: &fixer_core::Resolved<fixer_core::Series>,
-) -> AppResult<PathBuf> {
+) -> PathBuf {
     if placement == PlacementArg::InPlace {
-        return Ok(series_root.to_path_buf());
+        return series_root.to_path_buf();
     }
     let base = series_root.parent().unwrap_or(series_root);
     let title = resolved
@@ -618,9 +619,8 @@ fn television_output_root(
         .titles
         .entries()
         .first()
-        .map(|entry| entry.value().as_str())
-        .unwrap_or("television");
-    Ok(base.join(safe_folder_name(title)))
+        .map_or("television", |entry| entry.value().as_str());
+    base.join(safe_folder_name(title))
 }
 
 fn safe_folder_name(value: &str) -> String {

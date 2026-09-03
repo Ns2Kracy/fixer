@@ -63,7 +63,7 @@ impl fmt::Debug for ServerConfig {
 }
 
 impl ServerConfig {
-    /// Creates a configuration whose administrator credentials are stored in SQLite.
+    /// Creates a configuration whose administrator credentials are stored in `SQLite`.
     pub fn new(bind_addr: SocketAddr) -> Result<Self, ServerConfigError> {
         Ok(Self::base(bind_addr))
     }
@@ -187,7 +187,7 @@ impl ServerConfig {
         Ok(config)
     }
 
-    pub fn validate_for_serve(&self) -> Result<(), ServerConfigError> {
+    pub const fn validate_for_serve(&self) -> Result<(), ServerConfigError> {
         if self.media_policy.is_none() {
             return Err(ServerConfigError::MissingMediaRoots);
         }

@@ -9,7 +9,7 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A television series document paired with provider source metadata.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeriesDocument {
     pub value: Series,
     pub source: SourceRef,
@@ -188,8 +188,7 @@ fn merge_localized<'a>(
         for entry in values.entries() {
             let language = entry
                 .language()
-                .map(|tag| tag.normalized().to_owned())
-                .unwrap_or_else(|| "untagged".to_owned());
+                .map_or_else(|| "untagged".to_owned(), |tag| tag.normalized().to_owned());
             if let Some((existing, provider)) = identities.get(&language) {
                 if normalize(existing) != normalize(entry.value()) {
                     conflicts.push(MergeConflict {
@@ -203,7 +202,7 @@ fn merge_localized<'a>(
             identities.insert(language, (entry.value().clone(), source.provider.clone()));
             match entry {
                 LocalizedEntry::Tagged { language, value } => {
-                    result.insert(language.as_str(), value.clone())?
+                    result.insert(language.as_str(), value.clone())?;
                 }
                 LocalizedEntry::Untagged { value } => result.insert_untagged(value.clone()),
             }
@@ -478,6 +477,10 @@ fn normalize(value: &str) -> String {
         .to_lowercase()
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "the count is bounded by this fixed five-element completeness checklist"
+)]
 fn series_completeness(series: &Series) -> f32 {
     let present = [
         !series.titles.entries().is_empty(),

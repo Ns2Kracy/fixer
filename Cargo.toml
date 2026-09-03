@@ -7,6 +7,11 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.85"
+description = "A local-first metadata orchestration toolkit for movies, television, anime, music, and books"
+repository = "https://github.com/Ns2Kracy/fixer"
+readme = "README.md"
+keywords = ["metadata", "media", "movies", "television", "anime"]
+categories = ["multimedia", "command-line-utilities"]
 
 [workspace.dependencies]
 language-tags = { version = "0.3.2", features = ["serde"] }
@@ -43,3 +48,19 @@ sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio
 fs2 = "0.4.3"
 same-file = "1.0.6"
 sha2 = "0.10.9"
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+
+# Documenting every existing Result API is valuable but outside this lint-rollout change.
+missing_errors_doc = "allow"
+# Annotating the full existing getter and constructor surface would create broad API churn.
+must_use_candidate = "allow"
+# Builder return values follow the same established API style and annotation tradeoff.
+return_self_not_must_use = "allow"
+# Domain-specific field names are clearer than renaming public fields only to vary suffixes.
+struct_field_names = "allow"
+# Duplicate versions come from compatible transitive dependency trees outside workspace control.
+multiple_crate_versions = "allow"

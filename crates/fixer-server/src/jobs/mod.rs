@@ -69,6 +69,7 @@ impl ExecutionTaskRegistry {
             .pending_registrations
             .checked_add(1)
             .ok_or(RuntimeError::CountOverflow)?;
+        drop(state);
         Ok(ExecutionRegistrationPermit {
             registry: Arc::clone(self),
             active: true,
@@ -89,6 +90,7 @@ impl ExecutionTaskRegistry {
                 state.tasks.retain(|task| !task.is_finished());
                 let tasks = std::mem::take(&mut state.tasks);
                 let complete = state.pending_registrations == 0 && tasks.is_empty();
+                drop(state);
                 (tasks, complete)
             };
             if complete {
@@ -584,7 +586,7 @@ impl JobRuntime {
                 }
                 Ok(None) => {
                     tokio::select! {
-                        _ = &mut notified => {},
+                        () = &mut notified => {},
                         changed = shutdown.changed() => {
                             if changed.is_err() || *shutdown.borrow() { return; }
                         }
@@ -592,7 +594,7 @@ impl JobRuntime {
                 }
                 Err(_) => {
                     tokio::select! {
-                        _ = tokio::time::sleep(RETRY_DELAYS[RETRY_DELAYS.len() - 1]) => {},
+                        () = tokio::time::sleep(RETRY_DELAYS[RETRY_DELAYS.len() - 1]) => {},
                         changed = shutdown.changed() => {
                             if changed.is_err() || *shutdown.borrow() { return; }
                         }
@@ -612,13 +614,10 @@ impl JobRuntime {
         if self.stop_requested(shutdown, id).await {
             return;
         }
-        let scanned = match flow.scan(id, job.input()).await {
-            Ok(scanned) => scanned,
-            Err(_) => {
-                self.finish_active(id, JobState::Scanning, JobState::Failed, "failed")
-                    .await;
-                return;
-            }
+        let Ok(scanned) = flow.scan(id, job.input()).await else {
+            self.finish_active(id, JobState::Scanning, JobState::Failed, "failed")
+                .await;
+            return;
         };
         if self.stop_requested(shutdown, id).await {
             return;
@@ -632,13 +631,10 @@ impl JobRuntime {
             return;
         }
 
-        let search = match scanned.search().await {
-            Ok(search) => search,
-            Err(_) => {
-                self.finish_active(id, JobState::Searching, JobState::Failed, "failed")
-                    .await;
-                return;
-            }
+        let Ok(search) = scanned.search().await else {
+            self.finish_active(id, JobState::Searching, JobState::Failed, "failed")
+                .await;
+            return;
         };
         if self.stop_requested(shutdown, id).await {
             return;
@@ -652,13 +648,10 @@ impl JobRuntime {
             return;
         }
 
-        let summary = match search.resolve().await {
-            Ok(summary) => summary,
-            Err(_) => {
-                self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
-                    .await;
-                return;
-            }
+        let Ok(summary) = search.resolve().await else {
+            self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
+                .await;
+            return;
         };
         if self.stop_requested(shutdown, id).await {
             return;
@@ -807,7 +800,7 @@ impl JobRuntime {
                 .await
             {
                 Ok(_) | Err(StoreError::NotFound { .. }) => return,
-                Err(StoreError::StateConflict { .. }) => continue,
+                Err(StoreError::StateConflict { .. }) => {}
                 Err(_) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
             }
         }

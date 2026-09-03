@@ -17,9 +17,9 @@ impl NfoWriter {
         resolved: &Resolved<Movie>,
         output_root: impl AsRef<Path>,
     ) -> Result<OutputPlan, PlanningError> {
-        self.plan_movie(&resolved.value, output_root.as_ref())
+        Self::plan_movie(&resolved.value, output_root.as_ref())
     }
-    fn plan_movie(&self, movie: &Movie, output_root: &Path) -> Result<OutputPlan, PlanningError> {
+    fn plan_movie(movie: &Movie, output_root: &Path) -> Result<OutputPlan, PlanningError> {
         let title = movie
             .titles
             .entries()
@@ -64,7 +64,7 @@ impl NfoWriter {
 impl Writer for NfoWriter {
     fn plan(&self, request: WriteRequest) -> Result<OutputPlan, PlanningError> {
         match request.document {
-            MetadataDocument::Movie(movie) => self.plan_movie(&movie, &request.output_root),
+            MetadataDocument::Movie(movie) => Self::plan_movie(&movie, &request.output_root),
             MetadataDocument::Television(series) => {
                 television::plan_series(&series, &request.output_root)
             }
@@ -72,7 +72,7 @@ impl Writer for NfoWriter {
         }
     }
 }
-pub(crate) fn element(output: &mut String, name: &str, value: &str) {
+pub fn element(output: &mut String, name: &str, value: &str) {
     output.push_str("  <");
     output.push_str(name);
     output.push('>');
@@ -81,7 +81,7 @@ pub(crate) fn element(output: &mut String, name: &str, value: &str) {
     output.push_str(name);
     output.push_str(">\n");
 }
-pub(crate) fn escape_xml(value: &str) -> String {
+pub fn escape_xml(value: &str) -> String {
     value
         .chars()
         .flat_map(|character| match character {

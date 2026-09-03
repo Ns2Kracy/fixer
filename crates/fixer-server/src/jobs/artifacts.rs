@@ -15,7 +15,7 @@ const MAX_OPERATIONS: usize = 1_000;
 const MAX_TEXT_CHARS: usize = 2_048;
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ReviewArtifacts {
+pub struct ReviewArtifacts {
     pub candidates: Vec<CandidateArtifact>,
     pub candidates_truncated: bool,
     pub warnings: Vec<WarningArtifact>,
@@ -25,7 +25,7 @@ pub(crate) struct ReviewArtifacts {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct CandidateArtifact {
+pub struct CandidateArtifact {
     pub index: u64,
     pub media_kind: fixer_core::MediaKind,
     pub provider: String,
@@ -39,26 +39,26 @@ pub(crate) struct CandidateArtifact {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ExternalIdArtifact {
+pub struct ExternalIdArtifact {
     pub namespace: String,
     pub value: String,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct EvidenceArtifact {
+pub struct EvidenceArtifact {
     pub kind: fixer_core::MatchEvidenceKind,
     pub points: i32,
     pub detail: String,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct WarningArtifact {
+pub struct WarningArtifact {
     pub code: String,
     pub message: String,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ConflictArtifact {
+pub struct ConflictArtifact {
     pub index: u64,
     pub field_path: String,
     pub message: String,
@@ -69,21 +69,21 @@ pub(crate) struct ConflictArtifact {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct SourceArtifact {
+pub struct SourceArtifact {
     pub provider: String,
     pub external_id: Option<ExternalIdArtifact>,
     pub locale: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct PlanArtifacts {
+pub struct PlanArtifacts {
     pub output_root: String,
     pub operations: Vec<OperationArtifact>,
     pub operations_truncated: bool,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct OperationArtifact {
+pub struct OperationArtifact {
     pub index: u64,
     pub kind: &'static str,
     pub source: Option<String>,
@@ -92,7 +92,7 @@ pub(crate) struct OperationArtifact {
     pub content_bytes: Option<u64>,
 }
 
-pub(crate) fn candidates(
+pub fn candidates(
     query: &fixer_core::MatchQuery,
     values: &[Candidate],
 ) -> Result<(Vec<CandidateArtifact>, bool), JobFlowError> {
@@ -130,7 +130,7 @@ pub(crate) fn candidates(
     Ok((values, truncated))
 }
 
-pub(crate) fn diagnostics<T>(resolved: &Resolved<T>) -> ReviewArtifacts {
+pub fn diagnostics<T>(resolved: &Resolved<T>) -> ReviewArtifacts {
     let warnings_truncated = resolved.warnings.len() > MAX_WARNINGS;
     let conflicts_truncated = resolved.conflicts.len() > MAX_CONFLICTS;
     ReviewArtifacts {
@@ -154,7 +154,7 @@ pub(crate) fn diagnostics<T>(resolved: &Resolved<T>) -> ReviewArtifacts {
     }
 }
 
-pub(crate) fn plan(plan: &OutputPlan) -> Result<PlanArtifacts, JobFlowError> {
+pub fn plan(plan: &OutputPlan) -> Result<PlanArtifacts, JobFlowError> {
     let operations_truncated = plan.operations().len() > MAX_OPERATIONS;
     let operations = plan
         .operations()

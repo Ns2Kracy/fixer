@@ -5,6 +5,7 @@ use fixer_core::{
     MusicReleaseGroup, ProviderId, ReleaseId, SearchRequest, Track, TrackSequence, WorkId,
 };
 use serde::{Deserialize, de::DeserializeOwned};
+use std::fmt::Write as _;
 
 #[derive(Debug, Deserialize)]
 struct SearchResponse {
@@ -90,7 +91,7 @@ pub async fn search(
     };
     let mut query = format!("releasegroup:\"{}\"", escape_lucene(&title));
     if let Some(year) = year {
-        query.push_str(&format!(" AND firstreleasedate:{year}"));
+        let _ = write!(query, " AND firstreleasedate:{year}");
     }
     let mut url = config
         .base_url()

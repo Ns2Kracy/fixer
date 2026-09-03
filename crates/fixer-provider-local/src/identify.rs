@@ -43,9 +43,9 @@ pub fn identify_path(path: &Path) -> Result<MediaHint, LocalError> {
         "movie" | "video" | "film"
     );
     let (raw, kind) = if generic {
-        parent
-            .map(|value| (value, EvidenceKind::Directory))
-            .unwrap_or((stem, EvidenceKind::Filename))
+        parent.map_or((stem, EvidenceKind::Filename), |value| {
+            (value, EvidenceKind::Directory)
+        })
     } else {
         (stem, EvidenceKind::Filename)
     };

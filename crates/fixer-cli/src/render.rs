@@ -286,8 +286,7 @@ pub fn resolved_book_text(resolved: &Resolved<BookWork>) {
         .value
         .editions
         .first()
-        .map(|edition| edition.isbn_13.as_str())
-        .unwrap_or("no-isbn");
+        .map_or("no-isbn", |edition| edition.isbn_13.as_str());
     println!("{title}\\t{editions} edition(s)\\t{isbn}");
 }
 
@@ -400,8 +399,7 @@ fn preferred_title(titles: &LocalizedValue<String>) -> &str {
     titles
         .entries()
         .first()
-        .map(|entry| entry.value().as_str())
-        .unwrap_or("<untitled>")
+        .map_or("<untitled>", |entry| entry.value().as_str())
 }
 
 pub fn search_text(candidates: &[Candidate]) {

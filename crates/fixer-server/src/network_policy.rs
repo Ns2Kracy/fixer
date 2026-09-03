@@ -54,7 +54,7 @@ impl TrustedProxyPolicy {
         })
     }
 
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.client_ip_header.is_some()
     }
 

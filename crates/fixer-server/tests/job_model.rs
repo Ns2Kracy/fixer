@@ -7,12 +7,13 @@ use fixer_server::jobs::model::{
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
-fn assert_round_trip<T>(value: T)
+fn assert_round_trip<T>(value: &T)
 where
     T: Debug + PartialEq + Serialize + DeserializeOwned,
 {
-    let json = serde_json::to_string(&value).unwrap();
-    assert_eq!(serde_json::from_str::<T>(&json).unwrap(), value);
+    let json = serde_json::to_string(value).unwrap();
+    let decoded = serde_json::from_str::<T>(&json).unwrap();
+    assert_eq!(&decoded, value);
 }
 
 fn assert_unsupported_version<T>(record: Value)
@@ -34,42 +35,42 @@ fn job_input_and_summaries_are_stable_server_owned_dtos() {
             "apply": false
         })
     );
-    assert_round_trip(input);
+    assert_round_trip(&input);
 
     let progress = ProgressSummary::new("searching", 2, Some(6));
     assert_eq!(
         serde_json::to_value(&progress).unwrap(),
         json!({"schema_version": 1, "stage": "searching", "completed_items": 2, "total_items": 6})
     );
-    assert_round_trip(progress);
+    assert_round_trip(&progress);
 
     let review = ReviewSummary::new(3, 2);
     assert_eq!(
         serde_json::to_value(review).unwrap(),
         json!({"schema_version": 1, "candidate_count": 3, "conflict_count": 2})
     );
-    assert_round_trip(review);
+    assert_round_trip(&review);
 
     let decision = ReviewDecisionDto::new(2, vec![0, 1]);
     assert_eq!(
         serde_json::to_value(&decision).unwrap(),
         json!({"schema_version": 1, "candidate_index": 2, "accepted_conflict_indexes": [0, 1]})
     );
-    assert_round_trip(decision);
+    assert_round_trip(&decision);
 
     let plan = PlanSummary::new(5, true);
     assert_eq!(
         serde_json::to_value(&plan).unwrap(),
         json!({"schema_version": 1, "operation_count": 5, "requires_confirmation": true})
     );
-    assert_round_trip(plan);
+    assert_round_trip(&plan);
 
     let execution = ExecutionSummary::new(4, 1);
     assert_eq!(
         serde_json::to_value(execution).unwrap(),
         json!({"schema_version": 1, "completed_operations": 4, "failed_operations": 1})
     );
-    assert_round_trip(execution);
+    assert_round_trip(&execution);
 }
 
 #[test]

@@ -499,14 +499,14 @@ impl fmt::Debug for LoadedConfig {
         f.debug_struct("LoadedConfig")
             .field("path", &self.path)
             .field("config", &self.config)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 impl LoadedConfig {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    pub fn config(&self) -> &FixerConfig {
+    pub const fn config(&self) -> &FixerConfig {
         &self.config
     }
     pub fn has_environment_key(&self, key: &str) -> bool {
@@ -539,13 +539,18 @@ impl fmt::Debug for ConfigHandle {
         f.debug_struct("ConfigHandle")
             .field("path", &self.path)
             .field("config", &self.snapshot())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 impl ConfigHandle {
     pub fn path(&self) -> &Path {
         self.path.as_ref()
     }
+    /// Returns a consistent copy of the current configuration.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configuration lock has been poisoned.
     pub fn snapshot(&self) -> FixerConfig {
         self.config
             .read()
@@ -608,7 +613,7 @@ impl ConfigHandle {
                     source,
                 })?;
             file.write_all(serialized.as_bytes())
-                .and_then(|_| file.sync_all())
+                .and_then(|()| file.sync_all())
                 .map_err(|source| ConfigWriteError::Io {
                     path: temporary.clone(),
                     source,
@@ -718,7 +723,7 @@ impl ConfigLoader {
         }
         let mut config: FixerConfig = builder.build()?.try_deserialize()?;
         if let Some(filter) = self.environment.get("RUST_LOG") {
-            config.logging.filter = filter.clone();
+            config.logging.filter.clone_from(filter);
         }
         apply_legacy_overrides(&mut config, &self.environment, providers_explicit)?;
         config.resolve_secrets(&self.environment)?;
@@ -769,7 +774,7 @@ struct CompatibleFile {
 }
 
 impl CompatibleFile {
-    fn new(path: PathBuf) -> Self {
+    const fn new(path: PathBuf) -> Self {
         Self { path }
     }
 }
@@ -1112,25 +1117,25 @@ fn apply_legacy_overrides(
         config.server.trusted_proxy.ranges = csv(v);
     }
     if let Some(v) = environment.get("FIXER_SERVER_TRUSTED_PROXY_HEADER") {
-        config.server.trusted_proxy.header = v.clone();
+        config.server.trusted_proxy.header.clone_from(v);
     }
     if let Some(v) = environment.get("TMDB_BASE_URL") {
-        config.providers.tmdb.base_url = v.clone();
+        config.providers.tmdb.base_url.clone_from(v);
     }
     if let Some(v) = environment.get("BANGUMI_BASE_URL") {
-        config.providers.bangumi.base_url = v.clone();
+        config.providers.bangumi.base_url.clone_from(v);
     }
     if let Some(v) = environment.get("MUSICBRAINZ_BASE_URL") {
-        config.providers.musicbrainz.base_url = v.clone();
+        config.providers.musicbrainz.base_url.clone_from(v);
     }
     if let Some(v) = environment.get("OPENLIBRARY_BASE_URL") {
-        config.providers.openlibrary.base_url = v.clone();
+        config.providers.openlibrary.base_url.clone_from(v);
     }
     if let Some(v) = environment.get("OPENLIBRARY_COVER_BASE_URL") {
-        config.providers.openlibrary.cover_base_url = v.clone();
+        config.providers.openlibrary.cover_base_url.clone_from(v);
     }
     if let Some(v) = environment.get("ANILIST_ENDPOINT") {
-        config.providers.anilist.base_url = v.clone();
+        config.providers.anilist.base_url.clone_from(v);
     }
     if let Some(value) = environment.get("FIXER_ANILIST_ENABLED") {
         let enabled = parse_bool("FIXER_ANILIST_ENABLED", value)?;

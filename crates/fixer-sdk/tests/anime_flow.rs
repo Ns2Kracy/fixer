@@ -38,7 +38,7 @@ fn local_anime() -> AnimeSeries {
     )
 }
 
-async fn anilist(server: &MockServer) -> AniListProvider {
+fn anilist(server: &MockServer) -> AniListProvider {
     AniListProvider::new(
         AniListConfig::default()
             .with_endpoint(server.uri())
@@ -62,7 +62,7 @@ async fn anilist_titles_and_artwork_merge_with_local_hierarchy() {
         .await;
     Mock::given(method("POST"))
         .and(body_partial_json(serde_json::json!({
-            "variables": { "id": 154587 }
+            "variables": { "id": 154_587 }
         })))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             include_str!("../../fixer-provider-anilist/tests/fixtures/fetch.json"),
@@ -74,7 +74,7 @@ async fn anilist_titles_and_artwork_merge_with_local_hierarchy() {
     let local = LocalProvider::from_anime_documents([local_anime()]).unwrap();
     let fixer = Fixer::builder()
         .provider(local)
-        .provider(anilist(&server).await)
+        .provider(anilist(&server))
         .preferred_languages(["ja", "ja-Latn", "zh-Hans", "zh-Hant", "en"])
         .unwrap()
         .build()
@@ -141,7 +141,7 @@ async fn anilist_failure_is_a_warning_when_local_anime_is_sufficient() {
     let local = LocalProvider::from_anime_documents([local_anime()]).unwrap();
     let fixer = Fixer::builder()
         .provider(local)
-        .provider(anilist(&server).await)
+        .provider(anilist(&server))
         .build()
         .unwrap();
 

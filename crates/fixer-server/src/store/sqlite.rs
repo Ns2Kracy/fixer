@@ -155,8 +155,8 @@ impl SqliteJobStore {
         )
         .bind(digest(token).as_slice())
         .bind(timestamp_ms()?)
-        .bind(csrf_digest.as_ref().map(|value| value.as_slice()))
-        .bind(csrf_digest.as_ref().map(|value| value.as_slice()))
+        .bind(csrf_digest.as_ref().map(<[u8; 32]>::as_slice))
+        .bind(csrf_digest.as_ref().map(<[u8; 32]>::as_slice))
         .fetch_one(&self.pool)
         .await?;
         Ok(authenticated == 1)

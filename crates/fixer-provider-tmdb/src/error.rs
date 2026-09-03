@@ -56,12 +56,12 @@ impl TmdbError {
 impl From<TmdbError> for ProviderError {
     fn from(error: TmdbError) -> Self {
         match error {
-            TmdbError::NotFound => ProviderError::NotFound,
-            TmdbError::MalformedResponse(message) => ProviderError::InvalidResponse(message),
+            TmdbError::NotFound => Self::NotFound,
+            TmdbError::MalformedResponse(message) => Self::InvalidResponse(message),
             TmdbError::InvalidData(message) | TmdbError::InvalidConfig(message) => {
-                ProviderError::InvalidInput(message)
+                Self::InvalidInput(message)
             }
-            other => ProviderError::Transport(other.to_string()),
+            other => Self::Transport(other.to_string()),
         }
     }
 }

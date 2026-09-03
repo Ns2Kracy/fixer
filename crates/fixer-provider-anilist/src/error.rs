@@ -1,7 +1,7 @@
 use fixer_core::{HttpError, ProviderError};
 use thiserror::Error;
 
-/// Structured AniList provider failures.
+/// Structured `AniList` provider failures.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum AniListError {
@@ -64,14 +64,14 @@ impl AniListError {
 impl From<AniListError> for ProviderError {
     fn from(error: AniListError) -> Self {
         match error {
-            AniListError::NotFound => ProviderError::NotFound,
+            AniListError::NotFound => Self::NotFound,
             AniListError::GraphQl(message) | AniListError::MalformedResponse(message) => {
-                ProviderError::InvalidResponse(message)
+                Self::InvalidResponse(message)
             }
             AniListError::InvalidConfig(message) | AniListError::InvalidData(message) => {
-                ProviderError::InvalidInput(message)
+                Self::InvalidInput(message)
             }
-            other => ProviderError::Transport(other.to_string()),
+            other => Self::Transport(other.to_string()),
         }
     }
 }

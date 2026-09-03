@@ -16,14 +16,14 @@ async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-fn put_json(uri: &str, value: Value) -> Request<Body> {
+fn put_json(uri: &str, value: &Value) -> Request<Body> {
     Request::put(uri)
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(value.to_string()))
         .unwrap()
 }
 
-fn post_json(uri: &str, value: Value) -> Request<Body> {
+fn post_json(uri: &str, value: &Value) -> Request<Body> {
     Request::post(uri)
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(value.to_string()))
@@ -62,7 +62,10 @@ async fn settings_are_validated_and_secrets_are_write_only() {
     let app = workspace_app(WorkspaceState::default());
     let update = app
         .clone()
-        .oneshot(put_json("/api/v1/settings", settings("http://127.0.0.1:9")))
+        .oneshot(put_json(
+            "/api/v1/settings",
+            &settings("http://127.0.0.1:9"),
+        ))
         .await
         .unwrap();
 
@@ -103,7 +106,7 @@ async fn settings_are_validated_and_secrets_are_write_only() {
     invalid["review_confidence"] = json!(0.95);
     let response = app
         .clone()
-        .oneshot(put_json("/api/v1/settings", invalid))
+        .oneshot(put_json("/api/v1/settings", &invalid))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -117,7 +120,7 @@ async fn settings_are_validated_and_secrets_are_write_only() {
     let mut credentialed_proxy = settings("http://127.0.0.1:9");
     credentialed_proxy["proxy"] = json!("socks5://user:password@127.0.0.1:1080");
     let response = app
-        .oneshot(put_json("/api/v1/settings", credentialed_proxy))
+        .oneshot(put_json("/api/v1/settings", &credentialed_proxy))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -130,6 +133,10 @@ async fn settings_are_validated_and_secrets_are_write_only() {
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the persistence test keeps one complete save-and-reload scenario together"
+)]
 async fn settings_persist_through_config_handle_and_survive_restart() {
     let root = tempfile::tempdir().unwrap();
     let media = root.path().join("media");
@@ -193,7 +200,7 @@ worker_count = 3
     request["anilist_access_token"] = Value::Null;
     let update = app
         .clone()
-        .oneshot(put_json("/api/v1/settings", request))
+        .oneshot(put_json("/api/v1/settings", &request))
         .await
         .unwrap();
     assert_eq!(update.status(), StatusCode::OK);
@@ -230,7 +237,7 @@ worker_count = 3
     forbidden["server"] = json!({"bind": "0.0.0.0:9999", "worker_count": 99});
     let response = app
         .clone()
-        .oneshot(put_json("/api/v1/settings", forbidden))
+        .oneshot(put_json("/api/v1/settings", &forbidden))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -243,7 +250,7 @@ worker_count = 3
     let mut invalid = settings("http://127.0.0.1:9");
     invalid["review_confidence"] = json!(0.95);
     let response = app
-        .oneshot(put_json("/api/v1/settings", invalid))
+        .oneshot(put_json("/api/v1/settings", &invalid))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -279,7 +286,7 @@ async fn direct_secret_replacement_and_clear_update_reference_metadata() {
     replacement["anilist_access_token"] = Value::Null;
     let response = app
         .clone()
-        .oneshot(put_json("/api/v1/settings", replacement))
+        .oneshot(put_json("/api/v1/settings", &replacement))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -312,7 +319,7 @@ async fn direct_secret_replacement_and_clear_update_reference_metadata() {
     clear["anilist_access_token"] = Value::Null;
     clear["clear_tmdb_api_token"] = json!(true);
     let response = app
-        .oneshot(put_json("/api/v1/settings", clear))
+        .oneshot(put_json("/api/v1/settings", &clear))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -353,7 +360,10 @@ async fn settings_persistence_failure_keeps_shared_memory_unchanged() {
     std::fs::write(&config_dir, b"blocker").unwrap();
 
     let response = app
-        .oneshot(put_json("/api/v1/settings", settings("http://127.0.0.1:9")))
+        .oneshot(put_json(
+            "/api/v1/settings",
+            &settings("http://127.0.0.1:9"),
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -467,14 +477,14 @@ async fn provider_connectivity_returns_precise_safe_categories() {
 
     let update = app
         .clone()
-        .oneshot(put_json("/api/v1/settings", settings(&endpoint)))
+        .oneshot(put_json("/api/v1/settings", &settings(&endpoint)))
         .await
         .unwrap();
     assert_eq!(update.status(), StatusCode::OK);
 
     let ready = app
         .clone()
-        .oneshot(post_json("/api/v1/providers/tmdb/test", json!({})))
+        .oneshot(post_json("/api/v1/providers/tmdb/test", &json!({})))
         .await
         .unwrap();
     assert_eq!(ready.status(), StatusCode::OK);
@@ -491,7 +501,7 @@ async fn provider_connectivity_returns_precise_safe_categories() {
 
     let disabled = app
         .clone()
-        .oneshot(post_json("/api/v1/providers/anilist/test", json!({})))
+        .oneshot(post_json("/api/v1/providers/anilist/test", &json!({})))
         .await
         .unwrap();
     assert_eq!(disabled.status(), StatusCode::OK);
@@ -500,7 +510,7 @@ async fn provider_connectivity_returns_precise_safe_categories() {
     assert_eq!(disabled["category"], "disabled");
 
     let unknown = app
-        .oneshot(post_json("/api/v1/providers/not-real/test", json!({})))
+        .oneshot(post_json("/api/v1/providers/not-real/test", &json!({})))
         .await
         .unwrap();
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
@@ -528,7 +538,7 @@ async fn template_preview_validates_and_renders_without_writing() {
 
     let response = app
         .clone()
-        .oneshot(post_json("/api/v1/templates/preview", request))
+        .oneshot(post_json("/api/v1/templates/preview", &request))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -546,7 +556,7 @@ async fn template_preview_validates_and_renders_without_writing() {
     let invalid = app
         .oneshot(post_json(
             "/api/v1/templates/preview",
-            json!({
+            &json!({
                 "path_template": "../{{title}}",
                 "content_template": "{{unknown}}",
                 "sample": {"title": "Fixture", "id": "fixture", "year": null, "edition": null}

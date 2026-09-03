@@ -9,10 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 struct FakeHttp;
 
 impl HttpClient for FakeHttp {
-    fn execute<'a>(
-        &'a self,
-        request: HttpRequest,
-    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+    fn execute(&self, request: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, HttpError>> {
         Box::pin(async move { Ok(HttpResponse::new(200).with_body(request.url.into_bytes())) })
     }
 }

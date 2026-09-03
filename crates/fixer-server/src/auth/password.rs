@@ -63,7 +63,7 @@ pub fn verify_password(password: &str, encoded: &PasswordHashValue) -> Result<bo
         .is_ok())
 }
 
-fn validate_password(password: &str) -> Result<(), PasswordError> {
+const fn validate_password(password: &str) -> Result<(), PasswordError> {
     if password.is_empty() || password.len() > MAX_PASSWORD_BYTES {
         return Err(PasswordError::InvalidPasswordLength);
     }

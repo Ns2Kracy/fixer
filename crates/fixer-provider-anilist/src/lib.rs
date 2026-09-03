@@ -1,4 +1,4 @@
-//! Optional AniList anime metadata provider.
+//! Optional `AniList` anime metadata provider.
 
 #![forbid(unsafe_code)]
 

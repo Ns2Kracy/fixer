@@ -11,11 +11,11 @@ fn scans_writer_hierarchy_without_flattening_episode_identity() {
     std::fs::create_dir_all(&second_cour).unwrap();
     std::fs::write(
         anime.join("anime.nfo"),
-        r#"<anime>
+        r"<anime>
             <title>葬送のフリーレン</title>
             <plot>旅の終わりから始まる物語。</plot>
             <relation>adaptation</relation>
-        </anime>"#,
+        </anime>",
     )
     .unwrap();
     std::fs::write(
@@ -25,24 +25,24 @@ fn scans_writer_hierarchy_without_flattening_episode_identity() {
     .unwrap();
     std::fs::write(
         first_cour.join("C01E001.nfo"),
-        r#"<episodedetails>
+        r"<episodedetails>
             <title>冒険の終わり</title>
             <cour>1</cour>
             <episodeclass>regular</episodeclass>
             <airednumber>1</airednumber>
             <absolutenumber>1</absolutenumber>
-        </episodedetails>"#,
+        </episodedetails>",
     )
     .unwrap();
     std::fs::write(
         first_cour.join("C01OVA001.nfo"),
-        r#"<episodedetails>
+        r"<episodedetails>
             <title>特別編</title>
             <cour>1</cour>
             <episodeclass>ova</episodeclass>
             <airednumber>1</airednumber>
             <absolutenumber>29</absolutenumber>
-        </episodedetails>"#,
+        </episodedetails>",
     )
     .unwrap();
     std::fs::write(
@@ -52,23 +52,23 @@ fn scans_writer_hierarchy_without_flattening_episode_identity() {
     .unwrap();
     std::fs::write(
         second_cour.join("C02ONA001.nfo"),
-        r#"<episodedetails>
+        r"<episodedetails>
             <title>配信編</title>
             <cour>2</cour>
             <episodeclass>ona</episodeclass>
             <airednumber>1</airednumber>
             <absolutenumber>30</absolutenumber>
-        </episodedetails>"#,
+        </episodedetails>",
     )
     .unwrap();
     std::fs::write(
         second_cour.join("C02SPA0042.nfo"),
-        r#"<episodedetails>
+        r"<episodedetails>
             <title>総集編</title>
             <cour>2</cour>
             <episodeclass>special</episodeclass>
             <absolutenumber>42</absolutenumber>
-        </episodedetails>"#,
+        </episodedetails>",
     )
     .unwrap();
 
@@ -96,10 +96,10 @@ fn scans_writer_hierarchy_without_flattening_episode_identity() {
 struct Offline;
 
 impl fixer_core::HttpClient for Offline {
-    fn execute<'a>(
-        &'a self,
+    fn execute(
+        &self,
         _: fixer_core::HttpRequest,
-    ) -> fixer_core::BoxFuture<'a, Result<fixer_core::HttpResponse, fixer_core::HttpError>> {
+    ) -> fixer_core::BoxFuture<'_, Result<fixer_core::HttpResponse, fixer_core::HttpError>> {
         panic!("scanned anime provider must not call HTTP")
     }
 }

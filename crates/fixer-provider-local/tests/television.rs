@@ -9,10 +9,10 @@ use std::path::Path;
 
 struct Offline;
 impl HttpClient for Offline {
-    fn execute<'a>(
-        &'a self,
+    fn execute(
+        &self,
         _: HttpRequest,
-    ) -> fixer_core::BoxFuture<'a, Result<HttpResponse, HttpError>> {
+    ) -> fixer_core::BoxFuture<'_, Result<HttpResponse, HttpError>> {
         Box::pin(async { Err(HttpError::Offline) })
     }
 }
@@ -46,14 +46,14 @@ fn recognizes_sxe_season_folders_specials_and_external_ids() {
 #[test]
 fn parses_matroska_tags_without_flattening_sequence() {
     let tags = parse_matroska_tags(
-        r#"<Tags><Tag>
+        r"<Tags><Tag>
             <Simple><Name>TVSHOW</Name><String>Example Show</String></Simple>
             <Simple><Name>TITLE</Name><String>The Tagged Episode</String></Simple>
             <Simple><Name>SEASON</Name><String>1</String></Simple>
             <Simple><Name>EPISODE</Name><String>2</String></Simple>
             <Simple><Name>ORDERING</Name><String>dvd</String></Simple>
             <Simple><Name>TMDBID</Name><String>1399</String></Simple>
-        </Tag></Tags>"#,
+        </Tag></Tags>",
     )
     .unwrap();
     assert_eq!(tags.series_title.as_deref(), Some("Example Show"));
@@ -72,12 +72,12 @@ fn scans_episode_files_into_series_season_episode_hierarchy() {
     std::fs::write(season.join("Example.Show.S01E02.mkv"), []).unwrap();
     std::fs::write(
         season.join("Example.Show.S01E02.tags.xml"),
-        r#"<Tags><Tag>
+        r"<Tags><Tag>
             <Simple><Name>TVSHOW</Name><String>Example Show</String></Simple>
             <Simple><Name>TITLE</Name><String>The Tagged Episode</String></Simple>
             <Simple><Name>SEASON</Name><String>1</String></Simple>
             <Simple><Name>EPISODE</Name><String>2</String></Simple>
-        </Tag></Tags>"#,
+        </Tag></Tags>",
     )
     .unwrap();
 
@@ -103,9 +103,9 @@ fn scan_rejects_mixed_ordering_schemes_within_one_series() {
     std::fs::write(season.join("Example.Show.S01E02.mkv"), []).unwrap();
     std::fs::write(
         season.join("Example.Show.S01E02.tags.xml"),
-        r#"<Tags><Tag>
+        r"<Tags><Tag>
             <Simple><Name>ORDERING</Name><String>dvd</String></Simple>
-        </Tag></Tags>"#,
+        </Tag></Tags>",
     )
     .unwrap();
 

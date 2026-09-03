@@ -162,7 +162,7 @@ struct RecordingHttp {
 }
 
 impl HttpClient for RecordingHttp {
-    fn execute<'a>(&'a self, _: HttpRequest) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+    fn execute(&self, _: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, HttpError>> {
         let starts = self.starts.clone();
         Box::pin(async move {
             starts.lock().unwrap().push(Instant::now());
@@ -194,4 +194,5 @@ async fn cloned_providers_share_the_request_pacing_gate() {
     let starts = starts.lock().unwrap();
     assert_eq!(starts.len(), 2);
     assert!(starts[1].duration_since(starts[0]) >= Duration::from_millis(40));
+    drop(starts);
 }

@@ -4,7 +4,7 @@ use std::{fs, io, path::Path, time::UNIX_EPOCH};
 
 /// Relevant observed filesystem state for one path.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PathFingerprint {
+pub enum PathFingerprint {
     Missing,
     Present {
         kind: FileKind,
@@ -15,7 +15,7 @@ pub(crate) enum PathFingerprint {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FileKind {
+pub enum FileKind {
     File,
     Directory,
     Symlink,
@@ -23,13 +23,13 @@ pub(crate) enum FileKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct FileIdentity {
+pub struct FileIdentity {
     device: u64,
     inode: u64,
 }
 
 impl PathFingerprint {
-    pub(crate) fn capture(path: &Path) -> io::Result<Self> {
+    pub fn capture(path: &Path) -> io::Result<Self> {
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::Missing),

@@ -10,7 +10,7 @@ use tempfile::tempdir;
 struct NoHttp;
 
 impl HttpClient for NoHttp {
-    fn execute<'a>(&'a self, _: HttpRequest) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+    fn execute(&self, _: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, HttpError>> {
         Box::pin(async { panic!("local music provider must not use HTTP") })
     }
 }

@@ -9,7 +9,7 @@ const DEFAULT_USER_AGENT: &str = concat!(
     " (https://github.com/ns2kracy/fixer)"
 );
 
-/// MusicBrainz endpoint, identity, and request pacing configuration.
+/// `MusicBrainz` endpoint, identity, and request pacing configuration.
 #[derive(Clone)]
 pub struct MusicBrainzConfig {
     base_url: Url,
@@ -95,7 +95,7 @@ impl MusicBrainzConfig {
         &self.user_agent
     }
 
-    /// Returns the minimum delay between MusicBrainz requests.
+    /// Returns the minimum delay between `MusicBrainz` requests.
     pub const fn minimum_request_interval(&self) -> Duration {
         self.minimum_request_interval
     }

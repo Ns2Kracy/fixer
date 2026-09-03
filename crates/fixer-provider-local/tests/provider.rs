@@ -7,10 +7,10 @@ use std::path::Path;
 
 struct Offline;
 impl HttpClient for Offline {
-    fn execute<'a>(
-        &'a self,
+    fn execute(
+        &self,
         _: HttpRequest,
-    ) -> fixer_core::BoxFuture<'a, Result<HttpResponse, HttpError>> {
+    ) -> fixer_core::BoxFuture<'_, Result<HttpResponse, HttpError>> {
         Box::pin(async { Err(HttpError::Offline) })
     }
 }

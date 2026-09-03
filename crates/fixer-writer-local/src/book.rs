@@ -5,6 +5,7 @@ use fixer_core::{
     PlannedContent, PlanningError, ProvenanceMap, Resolved, WriteRequest, Writer,
 };
 use serde::Serialize;
+use std::fmt::Write as _;
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
@@ -216,7 +217,7 @@ fn plan_cover(
             schema_version: 1,
             requires_network: true,
             source,
-            target: target.clone(),
+            target,
         };
         plan.push(write_json("cover-acquisition-intent.json", &intent)?);
         planned_files.insert("cover-acquisition-intent.json".to_owned());
@@ -228,10 +229,14 @@ fn plan_cover(
 }
 
 fn opf(title: &str, authors: &[&str], edition: &BookEdition) -> String {
-    let creators = authors
-        .iter()
-        .map(|author| format!("    <dc:creator>{}</dc:creator>\n", escape_xml(author)))
-        .collect::<String>();
+    let mut creators = String::new();
+    for author in authors {
+        let _ = writeln!(
+            creators,
+            "    <dc:creator>{}</dc:creator>",
+            escape_xml(author)
+        );
+    }
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" version=\"3.0\">\n  <metadata>\n    <dc:identifier>urn:isbn:{}</dc:identifier>\n    <dc:title>{}</dc:title>\n{}    <dc:publisher>{}</dc:publisher>\n  </metadata>\n</package>\n",
         edition.isbn_13.as_str(),

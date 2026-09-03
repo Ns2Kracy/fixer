@@ -97,7 +97,7 @@ pub struct AnimeSeries {
 
 impl AnimeSeries {
     /// Constructs an anime series.
-    pub fn new(
+    pub const fn new(
         id: WorkId,
         titles: Titles,
         relation: AnimeSeriesRelation,

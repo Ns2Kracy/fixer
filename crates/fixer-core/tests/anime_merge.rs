@@ -120,7 +120,7 @@ fn complementary_titles_and_artwork_merge_without_replacing_hierarchy() {
             .as_str(),
         "local"
     );
-    assert_eq!(resolved.completeness, 1.0);
+    assert!((resolved.completeness - 1.0).abs() < f32::EPSILON);
 }
 
 #[test]

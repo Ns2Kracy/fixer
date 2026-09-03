@@ -6,7 +6,7 @@ use fixer_core::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-const SEARCH_QUERY: &str = r#"
+const SEARCH_QUERY: &str = r"
 query SearchAnime($search: String!) {
   Page(page: 1, perPage: 25) {
     media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
@@ -20,9 +20,9 @@ query SearchAnime($search: String!) {
     }
   }
 }
-"#;
+";
 
-const FETCH_QUERY: &str = r#"
+const FETCH_QUERY: &str = r"
 query FetchAnime($id: Int!) {
   Media(id: $id, type: ANIME) {
     id
@@ -35,7 +35,7 @@ query FetchAnime($id: Int!) {
     bannerImage
   }
 }
-"#;
+";
 
 #[derive(Debug, Serialize)]
 struct GraphQlRequest<V> {
@@ -235,7 +235,7 @@ fn map_media(media: Media) -> Result<AnimeSeries, AniListError> {
         insert_title(&mut titles, locale, Some(native))?;
     }
     for synonym in media.synonyms {
-        insert_untagged_title(&mut titles, synonym);
+        insert_untagged_title(&mut titles, &synonym);
     }
     if titles.entries().is_empty() {
         return Err(AniListError::InvalidData(format!(
@@ -307,7 +307,7 @@ fn insert_title(
     titles.insert(locale, value).map_err(data_error)
 }
 
-fn insert_untagged_title(titles: &mut LocalizedValue<String>, value: String) {
+fn insert_untagged_title(titles: &mut LocalizedValue<String>, value: &str) {
     let value = value.trim().to_owned();
     if !value.is_empty() && !contains_title(titles, &value) {
         titles.insert_untagged(value);

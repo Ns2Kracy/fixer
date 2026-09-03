@@ -31,10 +31,7 @@ impl Writer for TelevisionWriter {
     }
 }
 
-pub(crate) fn plan_series(
-    series: &Series,
-    output_root: &Path,
-) -> Result<OutputPlan, PlanningError> {
+pub fn plan_series(series: &Series, output_root: &Path) -> Result<OutputPlan, PlanningError> {
     let mut plan = OutputPlan::new(output_root);
     plan.push(OutputOperation::write_bytes(
         "tvshow.nfo",

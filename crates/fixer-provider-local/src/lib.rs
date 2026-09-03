@@ -486,8 +486,7 @@ fn matching_title(
                 == normalized_query
         })
         .map(|entry| entry.value().clone())
-        .map(Ok)
-        .unwrap_or_else(|| first_title(titles, error))
+        .map_or_else(|| first_title(titles, error), Ok)
 }
 
 fn first_title(

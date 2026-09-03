@@ -27,7 +27,7 @@ use crate::{
 
 const SCHEMA_VERSION: u8 = 1;
 
-pub(crate) fn router(runtime: JobRuntime) -> Router {
+pub fn router(runtime: JobRuntime) -> Router {
     Router::new()
         .route("/jobs", get(list).post(create).fallback(get_or_post_only))
         .route("/jobs/{id}", get(get_job).fallback(get_only))
@@ -142,7 +142,7 @@ async fn create(
     }
     let input = JobInputDto::new(request.media_kind, request.input_path, request.apply);
     let job = runtime.create(input).await.map_err(map_runtime_error)?;
-    Ok((StatusCode::ACCEPTED, Json(envelope(job))))
+    Ok((StatusCode::ACCEPTED, Json(envelope(&job))))
 }
 
 async fn list(
@@ -163,7 +163,7 @@ async fn list(
     jobs.truncate(limit);
     Ok(Json(JobListEnvelope {
         schema_version: SCHEMA_VERSION,
-        jobs: jobs.into_iter().map(job_dto).collect(),
+        jobs: jobs.iter().map(job_dto).collect(),
         has_more,
     }))
 }
@@ -174,7 +174,7 @@ async fn get_job(
 ) -> Result<Json<JobEnvelope>, ApiError> {
     let id = extract_id(path)?;
     let job = runtime.get(id).await.map_err(map_runtime_error)?;
-    Ok(Json(envelope(job)))
+    Ok(Json(envelope(&job)))
 }
 
 async fn review_details(
@@ -227,7 +227,7 @@ async fn retry(
 ) -> Result<Json<JobEnvelope>, ApiError> {
     let id = extract_id(path)?;
     let job = runtime.retry(id).await.map_err(map_runtime_error)?;
-    Ok(Json(envelope(job)))
+    Ok(Json(envelope(&job)))
 }
 
 async fn cancel(
@@ -236,7 +236,7 @@ async fn cancel(
 ) -> Result<Json<JobEnvelope>, ApiError> {
     let id = extract_id(path)?;
     let job = runtime.cancel(id).await.map_err(map_runtime_error)?;
-    Ok(Json(envelope(job)))
+    Ok(Json(envelope(&job)))
 }
 
 async fn review(
@@ -268,7 +268,7 @@ async fn review(
         .review(id, decision)
         .await
         .map_err(map_runtime_error)?;
-    Ok(Json(envelope(job)))
+    Ok(Json(envelope(&job)))
 }
 
 async fn execute(
@@ -284,7 +284,7 @@ async fn execute(
     }
     let key = idempotency_key(&headers)?;
     let job = runtime.execute(id, key).await.map_err(map_runtime_error)?;
-    Ok(Json(envelope(job)))
+    Ok(Json(envelope(&job)))
 }
 
 async fn events(
@@ -337,7 +337,7 @@ fn parse_id(value: i64) -> Result<JobId, ApiError> {
         .filter(|value| value.get() > 0)
         .map(|_| JobId::from_database(value))
         .transpose()
-        .map_err(map_store_error)?
+        .map_err(|error| map_store_error(&error))?
         .ok_or_else(|| not_found(value))
 }
 
@@ -370,14 +370,14 @@ fn event_cursor(headers: &HeaderMap) -> Result<Option<&str>, ApiError> {
         .transpose()
 }
 
-fn envelope(job: JobRecord) -> JobEnvelope {
+fn envelope(job: &JobRecord) -> JobEnvelope {
     JobEnvelope {
         schema_version: SCHEMA_VERSION,
         job: job_dto(job),
     }
 }
 
-fn job_dto(job: JobRecord) -> JobDto {
+fn job_dto(job: &JobRecord) -> JobDto {
     JobDto {
         id: job.id().get(),
         input: job.input().clone(),
@@ -398,7 +398,7 @@ fn map_json_rejection(_error: JsonRejection) -> ApiError {
 
 fn map_runtime_error(error: RuntimeError) -> ApiError {
     match error {
-        RuntimeError::Store(error) => map_store_error(error),
+        RuntimeError::Store(error) => map_store_error(&error),
         RuntimeError::FilesystemPolicy(_) => invalid_input(
             "input_path",
             "must resolve beneath a configured media root without symlink escapes",
@@ -482,9 +482,9 @@ fn map_runtime_error(error: RuntimeError) -> ApiError {
     }
 }
 
-fn map_store_error(error: StoreError) -> ApiError {
+fn map_store_error(error: &StoreError) -> ApiError {
     match error {
-        StoreError::NotFound { id } => not_found(id),
+        StoreError::NotFound { id } => not_found(*id),
         StoreError::IdempotencyConflict { .. } => ApiError::new(
             StatusCode::CONFLICT,
             "idempotency_conflict",

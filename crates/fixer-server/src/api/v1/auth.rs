@@ -20,7 +20,7 @@ const MAX_USERNAME_CHARS: usize = 64;
 const MIN_REGISTRATION_PASSWORD_BYTES: usize = 8;
 const MAX_PASSWORD_BYTES: usize = 1024;
 
-pub(crate) fn public_router(state: AuthState) -> Router {
+pub fn public_router(state: AuthState) -> Router {
     Router::new()
         .route("/auth/status", get(status))
         .route("/auth/register", post(register))
@@ -28,7 +28,7 @@ pub(crate) fn public_router(state: AuthState) -> Router {
         .with_state(state)
 }
 
-pub(crate) fn protected_router(state: AuthState) -> Router {
+pub fn protected_router(state: AuthState) -> Router {
     Router::new()
         .route("/auth/logout", post(logout))
         .with_state(state)
@@ -75,12 +75,12 @@ async fn status(State(state): State<AuthState>, headers: HeaderMap) -> Result<Re
     } else {
         false
     };
-    no_store_json(AuthStatusResponse {
+    Ok(no_store_json(AuthStatusResponse {
         schema_version: SCHEMA_VERSION,
         registration_required,
         authenticated,
         username: if authenticated { username } else { None },
-    })
+    }))
 }
 
 async fn register(
@@ -210,12 +210,12 @@ fn validate_registration(username: &str, password: &str) -> Result<(), ApiError>
     }
 }
 
-fn no_store_json<T: Serialize>(body: T) -> Result<Response, ApiError> {
+fn no_store_json<T: Serialize>(body: T) -> Response {
     let mut response = Json(body).into_response();
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    Ok(response)
+    response
 }
 
 fn invalid_registration(details: Option<BTreeMap<String, String>>) -> ApiError {

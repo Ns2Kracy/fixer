@@ -295,7 +295,7 @@ pub fn plan_media_placement(
         PlacementMode::Copy => OutputOperation::copy(canonical_source, target),
         PlacementMode::Reflink => OutputOperation::reflink(canonical_source, target),
     }
-    .map_err(core_error)?;
+    .map_err(|error| core_error(&error))?;
     plan.push(operation);
     Ok(plan)
 }
@@ -460,7 +460,7 @@ fn publish_temp(
     let result = match overwrite {
         OverwritePolicy::NoOverwrite => fs::hard_link(temp, target)
             .map_err(|error| map_target_io("publish temporary file", target, error))
-            .and_then(|_| {
+            .and_then(|()| {
                 fs::remove_file(temp)
                     .map_err(|error| io_error("remove temporary file", temp, error))
             }),
@@ -725,7 +725,7 @@ fn create_symlink(_source: &Path, _target: &Path) -> io::Result<()> {
     ))
 }
 
-fn core_error(error: CoreError) -> ExecutionError {
+fn core_error(error: &CoreError) -> ExecutionError {
     ExecutionError::InvalidPlan(error.to_string())
 }
 fn map_target_io(action: &'static str, path: &Path, source: io::Error) -> ExecutionError {

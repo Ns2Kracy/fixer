@@ -20,9 +20,9 @@ pub enum HttpConfigError {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct ProxyAddress(String);
+pub struct ProxyAddress(String);
 impl ProxyAddress {
-    pub(crate) fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -63,7 +63,7 @@ impl fmt::Debug for HttpConfig {
 
 impl HttpConfig {
     /// Sets a positive request timeout.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
@@ -99,7 +99,7 @@ impl HttpConfig {
         Ok(self)
     }
 
-    pub(crate) fn validate(&self) -> Result<(), HttpConfigError> {
+    pub(crate) const fn validate(&self) -> Result<(), HttpConfigError> {
         if self.timeout.is_zero() {
             Err(HttpConfigError::InvalidTimeout)
         } else {

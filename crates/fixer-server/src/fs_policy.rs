@@ -63,6 +63,11 @@ impl FsPolicy {
     }
 
     /// Revalidates all paths in an output plan immediately before execution.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the plan contains an operation without a target, which violates
+    /// the `OutputOperation` invariant.
     pub fn validate_plan(&self, plan: &OutputPlan) -> Result<(), FsPolicyError> {
         let root = self.validate_write(&plan.output_root)?;
         for operation in plan.operations() {

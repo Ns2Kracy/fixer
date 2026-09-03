@@ -30,7 +30,7 @@ impl From<CoreError> for TemplateError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Expression {
+pub struct Expression {
     variable: String,
     filters: Vec<String>,
 }
@@ -125,7 +125,7 @@ impl PathTemplate {
     }
 }
 
-pub(crate) fn parse_expressions(source: &str) -> Result<Vec<Expression>, TemplateError> {
+pub fn parse_expressions(source: &str) -> Result<Vec<Expression>, TemplateError> {
     if source.contains('\0') {
         return Err(TemplateError::UnsafePath(source.to_owned()));
     }
@@ -158,7 +158,7 @@ pub(crate) fn parse_expressions(source: &str) -> Result<Vec<Expression>, Templat
     Ok(expressions)
 }
 
-pub(crate) fn render_source(
+pub fn render_source(
     source: &str,
     expressions: &[Expression],
     context: &TemplateContext,

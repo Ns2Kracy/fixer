@@ -7,7 +7,7 @@ use super::common::{
 use serde::{Deserialize, Serialize};
 
 /// A particular movie release or edition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MovieRelease {
     /// Stable release identity.
     pub id: ReleaseId,
@@ -47,7 +47,7 @@ pub struct Movie {
 
 impl Movie {
     /// Constructs a movie with empty optional metadata collections.
-    pub fn new(id: WorkId, titles: Titles) -> Self {
+    pub const fn new(id: WorkId, titles: Titles) -> Self {
         Self {
             id,
             titles,

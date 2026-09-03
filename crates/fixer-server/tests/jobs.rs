@@ -72,7 +72,7 @@ impl TestApp {
     }
 }
 
-fn capacity(value: usize) -> NonZeroUsize {
+const fn capacity(value: usize) -> NonZeroUsize {
     NonZeroUsize::new(value).unwrap()
 }
 

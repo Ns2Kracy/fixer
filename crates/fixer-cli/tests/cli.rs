@@ -9,7 +9,7 @@ fn fixer() -> Command {
 fn run(command: &mut Command) -> Output {
     command.output().unwrap()
 }
-fn fixture() -> &'static str {
+const fn fixture() -> &'static str {
     include_str!("../../fixer-provider-local/tests/fixtures/movie.json")
 }
 
@@ -241,6 +241,10 @@ fn scrape_warnings_return_partial_success_exit_code() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "this end-to-end CLI scenario keeps command setup and contract assertions together"
+)]
 fn television_search_resolve_and_scrape_work_offline() {
     let root = tempfile::tempdir().unwrap();
     let season = root.path().join("Example Show").join("Season 01");
@@ -363,10 +367,10 @@ fn television_copy_placement_keeps_media_in_its_season_directory() {
     fs::write(&source, b"episode").unwrap();
     fs::write(
         source.with_extension("tags.xml"),
-        r#"<Tags><Tag>
+        r"<Tags><Tag>
             <Simple><Name>SEASON</Name><String>2</String></Simple>
             <Simple><Name>EPISODE</Name><String>2</String></Simple>
-        </Tag></Tags>"#,
+        </Tag></Tags>",
     )
     .unwrap();
 

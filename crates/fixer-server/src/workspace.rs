@@ -1,3 +1,8 @@
+#![allow(
+    clippy::redundant_pub_crate,
+    reason = "workspace HTTP DTOs and operations must remain internal to the server crate"
+)]
+
 use std::{
     collections::{HashSet, VecDeque},
     fmt, fs,
@@ -33,61 +38,61 @@ const MAX_SECRET_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ProviderEndpoints {
-    pub(crate) tmdb: String,
-    pub(crate) bangumi: String,
-    pub(crate) anilist: String,
-    pub(crate) musicbrainz: String,
-    pub(crate) openlibrary: String,
-    pub(crate) openlibrary_cover: String,
+pub(super) struct ProviderEndpoints {
+    pub(super) tmdb: String,
+    pub(super) bangumi: String,
+    pub(super) anilist: String,
+    pub(super) musicbrainz: String,
+    pub(super) openlibrary: String,
+    pub(super) openlibrary_cover: String,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct WorkspaceSettingsInput {
-    pub(crate) offline: bool,
-    pub(crate) proxy: Option<String>,
-    pub(crate) preferred_locales: Vec<String>,
-    pub(crate) timeout_seconds: u64,
-    pub(crate) auto_accept_confidence: f32,
-    pub(crate) review_confidence: f32,
-    pub(crate) output_preset: OutputPreset,
-    pub(crate) placement: PlacementPolicy,
-    pub(crate) conflict_policy: ConflictPolicy,
-    pub(crate) enabled_providers: Vec<String>,
-    pub(crate) provider_endpoints: ProviderEndpoints,
-    pub(crate) tmdb_api_token: Option<String>,
-    pub(crate) anilist_access_token: Option<String>,
+pub(super) struct WorkspaceSettingsInput {
+    pub(super) offline: bool,
+    pub(super) proxy: Option<String>,
+    pub(super) preferred_locales: Vec<String>,
+    pub(super) timeout_seconds: u64,
+    pub(super) auto_accept_confidence: f32,
+    pub(super) review_confidence: f32,
+    pub(super) output_preset: OutputPreset,
+    pub(super) placement: PlacementPolicy,
+    pub(super) conflict_policy: ConflictPolicy,
+    pub(super) enabled_providers: Vec<String>,
+    pub(super) provider_endpoints: ProviderEndpoints,
+    pub(super) tmdb_api_token: Option<String>,
+    pub(super) anilist_access_token: Option<String>,
     #[serde(default)]
-    pub(crate) clear_tmdb_api_token: bool,
+    pub(super) clear_tmdb_api_token: bool,
     #[serde(default)]
-    pub(crate) clear_anilist_access_token: bool,
+    pub(super) clear_anilist_access_token: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub(crate) struct WorkspaceSettingsSnapshot {
-    pub(crate) offline: bool,
-    pub(crate) proxy: Option<String>,
-    pub(crate) preferred_locales: Vec<String>,
-    pub(crate) timeout_seconds: u64,
-    pub(crate) auto_accept_confidence: f32,
-    pub(crate) review_confidence: f32,
-    pub(crate) output_preset: OutputPreset,
-    pub(crate) placement: PlacementPolicy,
-    pub(crate) conflict_policy: ConflictPolicy,
-    pub(crate) enabled_providers: Vec<String>,
-    pub(crate) provider_endpoints: ProviderEndpoints,
-    pub(crate) secrets: SecretStatus,
+pub(super) struct WorkspaceSettingsSnapshot {
+    pub(super) offline: bool,
+    pub(super) proxy: Option<String>,
+    pub(super) preferred_locales: Vec<String>,
+    pub(super) timeout_seconds: u64,
+    pub(super) auto_accept_confidence: f32,
+    pub(super) review_confidence: f32,
+    pub(super) output_preset: OutputPreset,
+    pub(super) placement: PlacementPolicy,
+    pub(super) conflict_policy: ConflictPolicy,
+    pub(super) enabled_providers: Vec<String>,
+    pub(super) provider_endpoints: ProviderEndpoints,
+    pub(super) secrets: SecretStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct SecretStatus {
-    pub(crate) tmdb_api_token_configured: bool,
-    pub(crate) anilist_access_token_configured: bool,
+pub(super) struct SecretStatus {
+    pub(super) tmdb_api_token_configured: bool,
+    pub(super) anilist_access_token_configured: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) tmdb_api_token_env: Option<String>,
+    pub(super) tmdb_api_token_env: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) anilist_access_token_env: Option<String>,
+    pub(super) anilist_access_token_env: Option<String>,
 }
 
 impl WorkspaceSettingsSnapshot {
@@ -126,54 +131,54 @@ impl WorkspaceSettingsSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct RootSummary {
-    pub(crate) id: String,
-    pub(crate) label: String,
+pub(super) struct RootSummary {
+    pub(super) id: String,
+    pub(super) label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum LibraryEntryKind {
+pub(super) enum LibraryEntryKind {
     Directory,
     File,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct LibraryEntry {
-    pub(crate) name: String,
-    pub(crate) path: String,
-    pub(crate) kind: LibraryEntryKind,
+pub(super) struct LibraryEntry {
+    pub(super) name: String,
+    pub(super) path: String,
+    pub(super) kind: LibraryEntryKind,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) size_bytes: Option<u64>,
+    pub(super) size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LibraryListing {
-    pub(crate) root_id: String,
-    pub(crate) path: String,
-    pub(crate) entries: Vec<LibraryEntry>,
-    pub(crate) truncated: bool,
+pub(super) struct LibraryListing {
+    pub(super) root_id: String,
+    pub(super) path: String,
+    pub(super) entries: Vec<LibraryEntry>,
+    pub(super) truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct SearchMatch {
-    pub(crate) root_id: String,
-    pub(crate) path: String,
-    pub(crate) name: String,
+pub(super) struct SearchMatch {
+    pub(super) root_id: String,
+    pub(super) path: String,
+    pub(super) name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SearchMatches {
-    pub(crate) results: Vec<SearchMatch>,
-    pub(crate) truncated: bool,
+pub(super) struct SearchMatches {
+    pub(super) results: Vec<SearchMatch>,
+    pub(super) truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct ProviderProbeResult {
-    pub(crate) provider: String,
-    pub(crate) ok: bool,
-    pub(crate) category: &'static str,
-    pub(crate) message: &'static str,
+pub(super) struct ProviderProbeResult {
+    pub(super) provider: String,
+    pub(super) ok: bool,
+    pub(super) category: &'static str,
+    pub(super) message: &'static str,
 }
 
 #[derive(Clone)]
@@ -315,11 +320,11 @@ impl WorkspaceState {
         })
     }
 
-    pub(crate) async fn settings(&self) -> WorkspaceSettingsSnapshot {
+    pub(super) fn settings(&self) -> WorkspaceSettingsSnapshot {
         WorkspaceSettingsSnapshot::from_config(&self.inner.config.snapshot())
     }
 
-    pub(crate) async fn update_settings(
+    pub(super) async fn update_settings(
         &self,
         input: WorkspaceSettingsInput,
     ) -> Result<WorkspaceSettingsSnapshot, WorkspaceStateError> {
@@ -332,7 +337,7 @@ impl WorkspaceState {
         ))
     }
 
-    pub(crate) fn roots(&self) -> Vec<RootSummary> {
+    pub(super) fn roots(&self) -> Vec<RootSummary> {
         self.inner
             .roots
             .iter()
@@ -343,7 +348,7 @@ impl WorkspaceState {
             .collect()
     }
 
-    pub(crate) fn list(
+    pub(super) fn list(
         &self,
         root_id: &str,
         relative: &str,
@@ -356,7 +361,7 @@ impl WorkspaceState {
         let mut entries = fs::read_dir(&directory)
             .map_err(|_| WorkspaceStateError::Inspect)?
             .filter_map(Result::ok)
-            .filter_map(|entry| library_entry(root, entry).transpose())
+            .filter_map(|entry| library_entry(root, &entry).transpose())
             .collect::<Result<Vec<_>, _>>()?;
         entries.sort_by(|left, right| {
             matches!(left.kind, LibraryEntryKind::File)
@@ -373,7 +378,7 @@ impl WorkspaceState {
         })
     }
 
-    pub(crate) fn search(
+    pub(super) fn search(
         &self,
         query: &str,
         limit: usize,
@@ -447,7 +452,11 @@ impl WorkspaceState {
         })
     }
 
-    pub(crate) async fn probe_provider(
+    #[allow(
+        clippy::too_many_lines,
+        reason = "provider probing is one cohesive validation, request, and outcome-mapping flow"
+    )]
+    pub(super) async fn probe_provider(
         &self,
         provider: &str,
     ) -> Result<ProviderProbeResult, WorkspaceStateError> {
@@ -494,11 +503,9 @@ impl WorkspaceState {
             ReqwestHttpClient::new(config).map_err(|_| WorkspaceStateError::ProbeConfiguration)?;
         let mut request = HttpRequest::new(HttpMethod::Head, endpoint);
         if provider == "tmdb" {
-            let token = settings
-                .providers
-                .tmdb
-                .resolved_api_token()
-                .expect("TMDB credentials were checked above");
+            let Some(token) = settings.providers.tmdb.resolved_api_token() else {
+                return Err(WorkspaceStateError::ProbeConfiguration);
+            };
             request = request.with_header(
                 Header::new("authorization", format!("Bearer {token}"))
                     .map_err(|_| WorkspaceStateError::ProbeConfiguration)?,
@@ -546,12 +553,6 @@ impl WorkspaceState {
                 false,
                 "unreachable",
                 "Provider endpoint could not be reached",
-            ),
-            Err(HttpError::InvalidMessage(_) | HttpError::Offline) => probe(
-                provider,
-                false,
-                "configuration_error",
-                "Provider connectivity test could not be configured",
             ),
             Err(_) => probe(
                 provider,
@@ -761,7 +762,7 @@ fn deduplicate(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn invalid(field: &'static str, reason: &'static str) -> WorkspaceStateError {
+const fn invalid(field: &'static str, reason: &'static str) -> WorkspaceStateError {
     WorkspaceStateError::InvalidInput { field, reason }
 }
 
@@ -794,7 +795,7 @@ fn resolve_relative(root: &WorkspaceRoot, relative: &str) -> Result<PathBuf, Wor
 
 fn library_entry(
     root: &WorkspaceRoot,
-    entry: fs::DirEntry,
+    entry: &fs::DirEntry,
 ) -> Result<Option<LibraryEntry>, WorkspaceStateError> {
     let file_type = entry
         .file_type()

@@ -6,8 +6,8 @@ use std::time::{Duration, UNIX_EPOCH};
 
 #[test]
 fn confidence_accepts_only_finite_unit_interval_values() {
-    assert_eq!(Confidence::new(0.0).unwrap().get(), 0.0);
-    assert_eq!(Confidence::new(1.0).unwrap().get(), 1.0);
+    assert!(Confidence::new(0.0).unwrap().get().abs() < f32::EPSILON);
+    assert!((Confidence::new(1.0).unwrap().get() - 1.0).abs() < f32::EPSILON);
     assert!(Confidence::new(-0.01).is_err());
     assert!(Confidence::new(1.01).is_err());
     assert!(Confidence::new(f32::NAN).is_err());

@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// MusicBrainz release-group provider with a shared request pacing gate.
+/// `MusicBrainz` release-group provider with a shared request pacing gate.
 #[derive(Debug, Clone)]
 pub struct MusicBrainzProvider {
     descriptor: ProviderDescriptor,
@@ -32,7 +32,7 @@ impl MusicBrainzProvider {
         })
     }
 
-    /// Searches MusicBrainz release groups.
+    /// Searches `MusicBrainz` release groups.
     pub async fn search_music(
         &self,
         request: SearchRequest,
@@ -95,7 +95,7 @@ impl Provider for MusicBrainzProvider {
 }
 
 #[derive(Debug)]
-pub(crate) struct RequestGate {
+pub struct RequestGate {
     interval: Duration,
     next_start: Mutex<Option<Instant>>,
 }

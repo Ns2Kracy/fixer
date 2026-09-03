@@ -65,12 +65,12 @@ impl BangumiError {
 impl From<BangumiError> for ProviderError {
     fn from(error: BangumiError) -> Self {
         match error {
-            BangumiError::NotFound => ProviderError::NotFound,
-            BangumiError::MalformedResponse(message) => ProviderError::InvalidResponse(message),
+            BangumiError::NotFound => Self::NotFound,
+            BangumiError::MalformedResponse(message) => Self::InvalidResponse(message),
             BangumiError::InvalidConfig(message) | BangumiError::InvalidData(message) => {
-                ProviderError::InvalidInput(message)
+                Self::InvalidInput(message)
             }
-            other => ProviderError::Transport(other.to_string()),
+            other => Self::Transport(other.to_string()),
         }
     }
 }

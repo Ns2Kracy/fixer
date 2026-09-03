@@ -9,6 +9,10 @@ use wiremock::{
 };
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "this end-to-end scenario keeps its fixture setup and assertions together for readability"
+)]
 async fn local_episode_facts_merge_with_tmdb_series_and_episode_metadata() {
     let root = tempfile::tempdir().unwrap();
     let season = root.path().join("Example Show").join("Season 01");
@@ -20,13 +24,13 @@ async fn local_episode_facts_merge_with_tmdb_series_and_episode_metadata() {
     .unwrap();
     std::fs::write(
         season.join("Example.Show.S01E02.{imdb-tt0944947}.{tmdb-1399}.tags.xml"),
-        r#"<Tags><Tag>
+        r"<Tags><Tag>
             <Simple><Name>TVSHOW</Name><String>本地剧名</String></Simple>
             <Simple><Name>TITLE</Name><String>Local Episode Title</String></Simple>
             <Simple><Name>SEASON</Name><String>1</String></Simple>
             <Simple><Name>EPISODE</Name><String>2</String></Simple>
             <Simple><Name>TMDBID</Name><String>1399</String></Simple>
-        </Tag></Tags>"#,
+        </Tag></Tags>",
     )
     .unwrap();
     let (local, warnings) = LocalProvider::from_scan(root.path()).unwrap();

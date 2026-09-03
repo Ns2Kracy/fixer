@@ -30,10 +30,7 @@ impl ReqwestHttpClient {
 }
 
 impl HttpClient for ReqwestHttpClient {
-    fn execute<'a>(
-        &'a self,
-        request: HttpRequest,
-    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+    fn execute(&self, request: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             let method = match request.method {
                 HttpMethod::Get => reqwest::Method::GET,
@@ -54,7 +51,10 @@ impl HttpClient for ReqwestHttpClient {
             if !request.body.is_empty() {
                 outgoing = outgoing.body(request.body);
             }
-            let response = outgoing.send().await.map_err(map_reqwest_error)?;
+            let response = outgoing
+                .send()
+                .await
+                .map_err(|error| map_reqwest_error(&error))?;
             let status = response.status().as_u16();
             if !(200..300).contains(&status) {
                 return Err(HttpError::Status { status });
@@ -64,7 +64,11 @@ impl HttpClient for ReqwestHttpClient {
                 .iter()
                 .filter_map(|(name, value)| Header::new(name.as_str(), value.to_str().ok()?).ok())
                 .collect();
-            let body = response.bytes().await.map_err(map_reqwest_error)?.to_vec();
+            let body = response
+                .bytes()
+                .await
+                .map_err(|error| map_reqwest_error(&error))?
+                .to_vec();
             Ok(HttpResponse {
                 status,
                 headers,
@@ -74,7 +78,7 @@ impl HttpClient for ReqwestHttpClient {
     }
 }
 
-fn map_reqwest_error(error: reqwest::Error) -> HttpError {
+fn map_reqwest_error(error: &reqwest::Error) -> HttpError {
     if error.is_timeout() {
         HttpError::Timeout
     } else if error.is_builder() {

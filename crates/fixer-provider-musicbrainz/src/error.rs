@@ -1,7 +1,7 @@
 use fixer_core::{HttpError, ProviderError};
 use thiserror::Error;
 
-/// Structured MusicBrainz provider failures.
+/// Structured `MusicBrainz` provider failures.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum MusicBrainzError {
@@ -57,12 +57,12 @@ impl MusicBrainzError {
 impl From<MusicBrainzError> for ProviderError {
     fn from(error: MusicBrainzError) -> Self {
         match error {
-            MusicBrainzError::NotFound => ProviderError::NotFound,
-            MusicBrainzError::MalformedResponse(message) => ProviderError::InvalidResponse(message),
+            MusicBrainzError::NotFound => Self::NotFound,
+            MusicBrainzError::MalformedResponse(message) => Self::InvalidResponse(message),
             MusicBrainzError::InvalidConfig(message) | MusicBrainzError::InvalidData(message) => {
-                ProviderError::InvalidInput(message)
+                Self::InvalidInput(message)
             }
-            other => ProviderError::Transport(other.to_string()),
+            other => Self::Transport(other.to_string()),
         }
     }
 }

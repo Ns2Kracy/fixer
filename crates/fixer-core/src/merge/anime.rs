@@ -8,7 +8,7 @@ use crate::{
 use std::collections::BTreeSet;
 
 /// An anime document paired with provider source metadata.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnimeDocument {
     pub value: AnimeSeries,
     pub source: SourceRef,
@@ -170,6 +170,10 @@ fn normalize(value: &str) -> String {
         .to_lowercase()
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "the count is bounded by this fixed three-element completeness checklist"
+)]
 fn anime_completeness(anime: &AnimeSeries) -> f32 {
     let present = [
         !anime.titles.entries().is_empty(),

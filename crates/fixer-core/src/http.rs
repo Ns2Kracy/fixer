@@ -186,8 +186,5 @@ pub enum HttpError {
 
 /// Runtime-neutral HTTP transport contract.
 pub trait HttpClient: Send + Sync {
-    fn execute<'a>(
-        &'a self,
-        request: HttpRequest,
-    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>>;
+    fn execute(&self, request: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, HttpError>>;
 }

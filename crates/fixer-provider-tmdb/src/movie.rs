@@ -169,6 +169,10 @@ async fn get_json<T: DeserializeOwned>(
         .map_err(|error| TmdbError::MalformedResponse(error.to_string()))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "keeping the complete TMDB movie payload mapping together makes field provenance auditable"
+)]
 fn map_details(
     config: &TmdbConfig,
     details: Details,

@@ -1,4 +1,4 @@
-//! MusicBrainz album metadata provider.
+//! `MusicBrainz` album metadata provider.
 
 #![forbid(unsafe_code)]
 

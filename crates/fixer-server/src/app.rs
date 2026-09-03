@@ -48,7 +48,7 @@ pub fn secure_workspace_app(
     ))
 }
 
-pub(crate) fn secure_workspace_routes(
+pub fn secure_workspace_routes(
     runtime: JobRuntime,
     auth_state: AuthState,
     workspace_state: WorkspaceState,

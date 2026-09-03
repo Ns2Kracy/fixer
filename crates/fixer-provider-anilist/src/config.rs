@@ -4,7 +4,7 @@ use url::Url;
 
 const DEFAULT_ENDPOINT: &str = "https://graphql.anilist.co";
 
-/// AniList GraphQL endpoint and optional bearer-token configuration.
+/// `AniList` GraphQL endpoint and optional bearer-token configuration.
 #[derive(Clone)]
 pub struct AniListConfig {
     endpoint: Url,

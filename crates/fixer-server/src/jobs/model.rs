@@ -127,7 +127,7 @@ pub struct ReviewDecisionDto {
 }
 
 impl ReviewDecisionDto {
-    pub fn new(candidate_index: u64, accepted_conflict_indexes: Vec<u64>) -> Self {
+    pub const fn new(candidate_index: u64, accepted_conflict_indexes: Vec<u64>) -> Self {
         Self {
             schema_version: SchemaVersion,
             candidate_index,

@@ -38,7 +38,7 @@ pub struct AuthState {
 }
 
 impl AuthState {
-    pub fn new(store: SqliteJobStore) -> Self {
+    pub const fn new(store: SqliteJobStore) -> Self {
         Self {
             store,
             secure_cookie: false,
@@ -48,7 +48,7 @@ impl AuthState {
         }
     }
 
-    pub fn with_secure_cookie(mut self, secure: bool) -> Self {
+    pub const fn with_secure_cookie(mut self, secure: bool) -> Self {
         self.secure_cookie = secure;
         self
     }
@@ -277,7 +277,7 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     (!token.is_empty() && !token.bytes().any(|byte| byte.is_ascii_whitespace())).then_some(token)
 }
 
-fn is_state_changing(method: &Method) -> bool {
+const fn is_state_changing(method: &Method) -> bool {
     matches!(
         *method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE

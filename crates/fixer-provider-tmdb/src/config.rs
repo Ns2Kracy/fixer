@@ -32,11 +32,14 @@ impl TmdbConfig {
         if token.trim().is_empty() || token.chars().any(char::is_control) {
             return Err(TmdbError::MissingToken);
         }
+        let base_url = Url::parse("https://api.themoviedb.org")
+            .map_err(|error| TmdbError::InvalidConfig(error.to_string()))?;
+        let image_base_url = Url::parse("https://image.tmdb.org/t/p/original/")
+            .map_err(|error| TmdbError::InvalidConfig(error.to_string()))?;
         Ok(Self {
             token: SecretToken(token),
-            base_url: Url::parse("https://api.themoviedb.org").expect("static TMDB URL"),
-            image_base_url: Url::parse("https://image.tmdb.org/t/p/original/")
-                .expect("static TMDB image URL"),
+            base_url,
+            image_base_url,
         })
     }
     pub fn from_env() -> Result<Self, TmdbError> {

@@ -11,7 +11,8 @@ pub struct Isbn10(String);
 impl Isbn10 {
     /// Parses digits, allowing `X` only as the check digit.
     pub fn new(value: impl Into<String>) -> Result<Self, CoreError> {
-        let value = compact(value.into());
+        let value = value.into();
+        let value = compact(&value);
         let valid_shape = value.len() == 10
             && value
                 .chars()
@@ -40,7 +41,8 @@ pub struct Isbn13(String);
 impl Isbn13 {
     /// Parses and validates an ISBN-13 check digit.
     pub fn new(value: impl Into<String>) -> Result<Self, CoreError> {
-        let value = compact(value.into());
+        let value = value.into();
+        let value = compact(&value);
         let digits = value
             .chars()
             .map(|ch| ch.to_digit(10))
@@ -66,14 +68,14 @@ impl Isbn13 {
     }
 }
 
-fn compact(value: String) -> String {
+fn compact(value: &str) -> String {
     value
         .chars()
         .filter(|ch| !matches!(ch, '-' | ' '))
         .collect::<String>()
         .to_ascii_uppercase()
 }
-fn invalid(field: &'static str, value: String) -> CoreError {
+const fn invalid(field: &'static str, value: String) -> CoreError {
     CoreError::InvalidDomainValue { field, value }
 }
 

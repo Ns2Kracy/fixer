@@ -136,7 +136,7 @@ impl JobUpdate {
         self
     }
 
-    pub fn with_review(mut self, review: ReviewSummary) -> Self {
+    pub const fn with_review(mut self, review: ReviewSummary) -> Self {
         self.review = Some(review);
         self
     }
@@ -151,7 +151,7 @@ impl JobUpdate {
         self
     }
 
-    pub fn with_execution(mut self, execution: ExecutionSummary) -> Self {
+    pub const fn with_execution(mut self, execution: ExecutionSummary) -> Self {
         self.execution = Some(execution);
         self
     }

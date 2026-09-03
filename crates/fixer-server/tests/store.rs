@@ -68,8 +68,12 @@ async fn migration_and_job_round_trip_persist_versioned_dtos_and_timestamps() {
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the reservation test keeps one complete concurrency and restart scenario together"
+)]
 async fn execution_reservation_is_atomic_and_idempotent_per_job() {
-    let (_root, store) = store().await;
+    let (root, store) = store().await;
     let job = store
         .create_job(JobInputDto::new(JobMediaKind::Movie, "/media/a.mkv", true))
         .await
@@ -186,7 +190,7 @@ async fn execution_reservation_is_atomic_and_idempotent_per_job() {
     drop(first);
     drop(second);
     drop(store);
-    let database = _root.path().join("jobs.sqlite3");
+    let database = root.path().join("jobs.sqlite3");
     let reopened = SqliteJobStore::open(database).await.unwrap();
     let interrupted = reopened.get_job(id).await.unwrap();
     assert_eq!(interrupted.state(), JobState::Interrupted);
@@ -239,7 +243,7 @@ async fn concurrent_transitions_compare_and_set_and_return_their_own_row() {
     let first = store.clone();
     let second = store.clone();
     let id = job.id();
-    let (left, right) = tokio::join!(
+    let outcomes: [_; 2] = tokio::join!(
         first.transition(
             id,
             JobState::Queued,
@@ -252,9 +256,8 @@ async fn concurrent_transitions_compare_and_set_and_return_their_own_row() {
             JobState::Scanning,
             JobUpdate::default().with_progress(ProgressSummary::new("right", 1, Some(1))),
         )
-    );
-
-    let outcomes = [left, right];
+    )
+    .into();
     assert_eq!(outcomes.iter().filter(|result| result.is_ok()).count(), 1);
     assert_eq!(
         outcomes
@@ -361,11 +364,8 @@ async fn a_second_open_is_rejected_without_interrupting_live_jobs() {
     }
 
     for alias in aliases {
-        let error = match SqliteJobStore::open(&alias).await {
-            Ok(_) => {
-                panic!("second store unexpectedly acquired the database lease through {alias:?}")
-            }
-            Err(error) => error,
+        let Err(error) = SqliteJobStore::open(&alias).await else {
+            panic!("second store unexpectedly acquired the database lease through {alias:?}")
         };
         assert!(matches!(error, StoreError::AlreadyOpen { .. }));
     }
@@ -405,9 +405,8 @@ async fn tracked_migration_reruns_and_rejects_an_incompatible_existing_schema() 
         .await
         .unwrap();
     pool.close().await;
-    let error = match SqliteJobStore::open(&incompatible).await {
-        Ok(_) => panic!("incompatible schema unexpectedly passed migration"),
-        Err(error) => error,
+    let Err(error) = SqliteJobStore::open(&incompatible).await else {
+        panic!("incompatible schema unexpectedly passed migration")
     };
     assert!(matches!(error, StoreError::Migration(_)));
 

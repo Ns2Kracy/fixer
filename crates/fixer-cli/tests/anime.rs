@@ -24,11 +24,11 @@ fn anime_library() -> tempfile::TempDir {
     fs::create_dir_all(&cour).unwrap();
     fs::write(
         anime.join("anime.nfo"),
-        r#"<anime>
+        r"<anime>
             <title>葬送のフリーレン</title>
             <plot>旅の終わりから始まる物語。</plot>
             <relation>adaptation</relation>
-        </anime>"#,
+        </anime>",
     )
     .unwrap();
     fs::write(
@@ -38,13 +38,13 @@ fn anime_library() -> tempfile::TempDir {
     .unwrap();
     fs::write(
         cour.join("C01E001.nfo"),
-        r#"<episodedetails>
+        r"<episodedetails>
             <title>冒険の終わり</title>
             <cour>1</cour>
             <episodeclass>regular</episodeclass>
             <airednumber>1</airednumber>
             <absolutenumber>1</absolutenumber>
-        </episodedetails>"#,
+        </episodedetails>",
     )
     .unwrap();
     root
