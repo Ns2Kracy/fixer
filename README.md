@@ -185,9 +185,14 @@ cargo check --workspace --all-targets --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 cargo test --workspace --doc --locked
+pnpm --dir web format:check
+pnpm --dir web lint
+pnpm --dir web typecheck
 pnpm --dir web test
 pnpm --dir web build
 ```
+
+Oxfmt and Oxlint resolve `web/.oxfmtrc.json` and `web/.oxlintrc.json` from the Web package root. Install their pinned versions through `pnpm --dir web install --frozen-lockfile` before running these gates.
 
 The real local browser flow is self-contained and may take longer than 60 seconds on a cold build cache:
 

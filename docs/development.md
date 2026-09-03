@@ -55,10 +55,14 @@ cargo test -p fixer-server --test e2e_jobs
 Web loop:
 
 ```bash
+pnpm --dir web format:check
+pnpm --dir web lint
 pnpm --dir web typecheck
 pnpm --dir web test
 pnpm --dir web build
 ```
+
+Oxfmt and Oxlint load `web/.oxfmtrc.json` and `web/.oxlintrc.json` from the Web package root. Their exact versions come from `web/pnpm-lock.yaml`, so install with `pnpm --dir web install --frozen-lockfile` before running the loop.
 
 Vitest is restricted to `web/src/**/*.test.{ts,tsx}`. Playwright owns `web/e2e/**/*.spec.ts`.
 
@@ -73,6 +77,9 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 cargo test --workspace --doc --locked
 pnpm --dir web install --frozen-lockfile --offline
+pnpm --dir web format:check
+pnpm --dir web lint
+pnpm --dir web typecheck
 pnpm --dir web test
 pnpm --dir web build
 ```
