@@ -297,6 +297,51 @@ fn config_handle_persists_atomically_and_updates_its_snapshot() {
     assert_eq!(reloaded.config().timeout_seconds, 52);
 }
 
+#[test]
+fn canonical_secret_environment_overrides_remain_runtime_only_when_persisted() {
+    let root = tempfile::tempdir().unwrap();
+    let environment = env(&[
+        (
+            "FIXER_PROVIDERS__TMDB__API_TOKEN",
+            "environment-tmdb-secret",
+        ),
+        (
+            "FIXER_PROVIDERS__ANILIST__ACCESS_TOKEN",
+            "environment-anilist-secret",
+        ),
+    ]);
+    let handle = ConfigLoader::new(root.path())
+        .with_environment(environment.clone())
+        .load()
+        .unwrap()
+        .into_handle();
+
+    assert_eq!(
+        handle.snapshot().providers.tmdb.resolved_api_token(),
+        Some("environment-tmdb-secret")
+    );
+    assert_eq!(
+        handle.snapshot().providers.anilist.resolved_access_token(),
+        Some("environment-anilist-secret")
+    );
+
+    let mut next = handle.snapshot();
+    next.offline = true;
+    handle.replace_and_persist(next).unwrap();
+
+    let persisted = fs::read_to_string(handle.path()).unwrap();
+    assert!(!persisted.contains("environment-tmdb-secret"));
+    assert!(!persisted.contains("environment-anilist-secret"));
+    let reloaded = ConfigLoader::new(root.path())
+        .with_environment(environment)
+        .load()
+        .unwrap();
+    assert_eq!(
+        reloaded.config().providers.tmdb.resolved_api_token(),
+        Some("environment-tmdb-secret")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn config_handle_writes_private_file_permissions() {

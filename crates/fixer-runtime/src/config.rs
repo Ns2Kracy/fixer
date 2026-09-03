@@ -466,6 +466,7 @@ impl FixerConfig {
         self.providers.tmdb.resolved_api_token = environment
             .get("TMDB_API_TOKEN")
             .or_else(|| environment.get("FIXER_API_KEY"))
+            .or_else(|| environment.get("FIXER_PROVIDERS__TMDB__API_TOKEN"))
             .map(|v| SecretString::new(v.clone()))
             .or(resolve_reference(
                 "providers.tmdb.api_token_env",
@@ -474,6 +475,7 @@ impl FixerConfig {
             )?);
         self.providers.anilist.resolved_access_token = environment
             .get("ANILIST_ACCESS_TOKEN")
+            .or_else(|| environment.get("FIXER_PROVIDERS__ANILIST__ACCESS_TOKEN"))
             .map(|v| SecretString::new(v.clone()))
             .or(resolve_reference(
                 "providers.anilist.access_token_env",
@@ -1054,6 +1056,8 @@ fn filtered_environment(
     const EXCLUDED: &[&str] = &[
         "FIXER_CONFIG",
         "FIXER_API_KEY",
+        "FIXER_PROVIDERS__TMDB__API_TOKEN",
+        "FIXER_PROVIDERS__ANILIST__ACCESS_TOKEN",
         "FIXER_ANILIST_ENABLED",
         "FIXER_BANGUMI_ACCESS_TOKEN",
         "FIXER_SERVER_BIND",
