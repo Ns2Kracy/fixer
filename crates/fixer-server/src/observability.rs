@@ -11,18 +11,45 @@ use axum::{
     middleware::{self, Next},
     response::Response,
 };
+use fixer_runtime::{LoggingConfig, LoggingFormat};
+use thiserror::Error;
 use tower::ServiceBuilder;
 use tower_http::{
     request_id::{MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer},
     trace::{DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 static FALLBACK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 tokio::task_local! {
     static CURRENT_REQUEST_ID: String;
+}
+
+#[derive(Debug, Error)]
+pub enum TracingInitError {
+    #[error("invalid tracing filter: {0}")]
+    Filter(String),
+    #[error("failed to install tracing subscriber: {0}")]
+    Install(String),
+}
+
+pub fn init_tracing(config: &LoggingConfig) -> Result<(), TracingInitError> {
+    let filter = EnvFilter::try_new(&config.filter)
+        .map_err(|error| TracingInitError::Filter(error.to_string()))?;
+    let result = match config.format {
+        LoggingFormat::Pretty => tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer())
+            .try_init(),
+        LoggingFormat::Json => tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer().json())
+            .try_init(),
+    };
+    result.map_err(|error| TracingInitError::Install(error.to_string()))
 }
 
 #[derive(Debug, Clone, Copy, Default)]

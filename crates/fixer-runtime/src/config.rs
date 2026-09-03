@@ -433,6 +433,12 @@ impl FixerConfig {
                 )));
             }
         }
+        if self.server.database.is_relative() {
+            self.server.database = base.join(&self.server.database);
+        }
+        if self.server.web_root.is_relative() {
+            self.server.web_root = base.join(&self.server.web_root);
+        }
         let mut seen = HashSet::new();
         self.enabled_providers.retain(|p| seen.insert(p.clone()));
         for root in &mut self.server.media_roots {

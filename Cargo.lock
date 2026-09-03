@@ -891,6 +891,7 @@ dependencies = [
  "fixer-core",
  "fixer-http",
  "fixer-provider-local",
+ "fixer-runtime",
  "fixer-sdk",
  "fixer-writer-local",
  "fs2",
@@ -910,6 +911,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
  "url",
 ]
 

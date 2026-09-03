@@ -1,15 +1,11 @@
-use std::{env, path::PathBuf};
-
-use fixer_server::ServerConfig;
-
-const DEFAULT_WEB_ROOT: &str = "web/dist";
+use fixer_runtime::ConfigLoader;
+use fixer_server::{ServerConfig, init_tracing};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = ServerConfig::from_env()?;
-    let web_root = env::var_os("FIXER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_WEB_ROOT));
-    fixer_server::serve(config, web_root).await?;
+    let loaded = ConfigLoader::default().load()?;
+    init_tracing(&loaded.config().logging)?;
+    let server = ServerConfig::from_shared(&loaded.config().server)?;
+    fixer_server::serve(server, &loaded.config().server.web_root).await?;
     Ok(())
 }

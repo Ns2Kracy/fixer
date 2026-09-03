@@ -73,11 +73,15 @@ format = "json"
     assert_eq!(config.conflict_policy, ConflictPolicy::PreferFirst);
     assert_eq!(config.enabled_provider_names(), ["local", "anilist"]);
     assert_eq!(config.server.bind.to_string(), "127.0.0.1:4312");
-    assert_eq!(config.server.database, Path::new("state/fixer.sqlite3"));
+    assert_eq!(
+        config.server.database,
+        root.path().join("state/fixer.sqlite3")
+    );
     assert_eq!(
         config.server.media_roots,
         [root.path().join("media").canonicalize().unwrap()]
     );
+    assert_eq!(config.server.web_root, root.path().join("public"));
     assert_eq!(config.logging.format, LoggingFormat::Json);
 }
 
@@ -237,12 +241,18 @@ fn legacy_server_environment_names_override_nested_server_config() {
         .unwrap();
 
     assert_eq!(loaded.config().server.bind.to_string(), "127.0.0.1:4555");
-    assert_eq!(loaded.config().server.database, Path::new("legacy.sqlite3"));
+    assert_eq!(
+        loaded.config().server.database,
+        root.path().join("legacy.sqlite3")
+    );
     assert_eq!(
         loaded.config().server.media_roots,
         [root.path().join("legacy-media").canonicalize().unwrap()]
     );
-    assert_eq!(loaded.config().server.web_root, Path::new("legacy-web"));
+    assert_eq!(
+        loaded.config().server.web_root,
+        root.path().join("legacy-web")
+    );
 }
 
 #[test]

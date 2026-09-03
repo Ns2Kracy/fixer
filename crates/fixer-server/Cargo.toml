@@ -9,6 +9,7 @@ rust-version.workspace = true
 fixer-core = { path = "../fixer-core" }
 fixer-http = { path = "../fixer-http" }
 fixer-provider-local = { path = "../fixer-provider-local" }
+fixer-runtime = { path = "../fixer-runtime" }
 fixer-sdk = { path = "../fixer-sdk" }
 fixer-writer-local = { path = "../fixer-writer-local" }
 argon2.workspace = true
@@ -29,6 +30,7 @@ tokio = { workspace = true, features = ["net", "signal", "sync"] }
 tower.workspace = true
 tower-http = { version = "0.6.11", features = ["fs", "request-id", "trace"] }
 tracing.workspace = true
+tracing-subscriber.workspace = true
 url.workspace = true
 
 [dev-dependencies]

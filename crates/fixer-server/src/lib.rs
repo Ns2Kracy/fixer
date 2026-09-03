@@ -23,6 +23,7 @@ pub use auth::{AuthConfigError, AuthState, ClientIp};
 pub use fs_policy::{FsPolicy, FsPolicyError};
 pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
 pub use network_policy::{TrustedProxyError, TrustedProxyPolicy};
+pub use observability::{TracingInitError, init_tracing};
 pub use store::SqliteJobStore;
 use thiserror::Error;
 pub use web::web_app;
@@ -43,6 +44,7 @@ pub struct ServerConfig {
     https_termination: bool,
     allowed_origins: Vec<String>,
     trusted_proxy_policy: TrustedProxyPolicy,
+    worker_count: NonZeroUsize,
 }
 
 impl fmt::Debug for ServerConfig {
@@ -55,6 +57,7 @@ impl fmt::Debug for ServerConfig {
             .field("https_termination", &self.https_termination)
             .field("allowed_origins", &self.allowed_origins)
             .field("trusted_proxy_policy", &self.trusted_proxy_policy)
+            .field("worker_count", &self.worker_count)
             .finish()
     }
 }
@@ -70,6 +73,27 @@ impl ServerConfig {
         Self::new(parse_bind(value)?)
     }
 
+    /// Adapts the validated shared `fixer.toml` server subsection.
+    pub fn from_shared(shared: &fixer_runtime::ServerConfig) -> Result<Self, ServerConfigError> {
+        let worker_count =
+            NonZeroUsize::new(shared.worker_count).ok_or(ServerConfigError::InvalidWorkerCount)?;
+        let mut config = Self::new(shared.bind)?
+            .with_database_path(shared.database.clone())?
+            .with_https_termination(shared.https_termination)
+            .with_allowed_origins(shared.allowed_origins.iter().map(String::as_str))?;
+        if !shared.media_roots.is_empty() {
+            config = config.with_media_roots(&shared.media_roots)?;
+        }
+        if !shared.trusted_proxy.ranges.is_empty() {
+            config = config.with_trusted_proxy(
+                shared.trusted_proxy.ranges.iter().map(String::as_str),
+                &shared.trusted_proxy.header,
+            )?;
+        }
+        config.worker_count = worker_count;
+        Ok(config)
+    }
+
     fn base(bind_addr: SocketAddr) -> Self {
         Self {
             bind_addr,
@@ -78,6 +102,7 @@ impl ServerConfig {
             https_termination: false,
             allowed_origins: Vec::new(),
             trusted_proxy_policy: TrustedProxyPolicy::disabled(),
+            worker_count: DEFAULT_WORKER_COUNT,
         }
     }
 
@@ -194,6 +219,10 @@ impl ServerConfig {
     pub const fn trusted_proxy_policy(&self) -> &TrustedProxyPolicy {
         &self.trusted_proxy_policy
     }
+
+    pub const fn worker_count(&self) -> NonZeroUsize {
+        self.worker_count
+    }
 }
 
 impl Default for ServerConfig {
@@ -226,6 +255,8 @@ pub enum ServerConfigError {
     EmptyDatabasePath,
     #[error("trusted proxy ranges and header must be configured together")]
     IncompleteTrustedProxy,
+    #[error("server worker_count must be greater than zero")]
+    InvalidWorkerCount,
     #[error(transparent)]
     Authentication(#[from] AuthConfigError),
     #[error(transparent)]
@@ -262,7 +293,13 @@ pub async fn serve(config: ServerConfig, web_root: impl AsRef<Path>) -> Result<(
         .map_err(ServerConfigError::from)?
         .with_trusted_proxy_policy(config.trusted_proxy_policy.clone());
     let listener = tokio::net::TcpListener::bind(config.bind_addr()).await?;
-    let workers = runtime.start_local_workers(DEFAULT_WORKER_COUNT);
+    tracing::info!(
+        bind = %listener.local_addr()?,
+        database = %config.database_path().display(),
+        worker_count = config.worker_count().get(),
+        "server listening"
+    );
+    let workers = runtime.start_local_workers(config.worker_count());
     let application = web_app(
         secure_workspace_app(runtime, auth_state, workspace_state),
         web_root,
