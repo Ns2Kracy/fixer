@@ -125,6 +125,20 @@ impl ProgressSummary {
     }
 }
 
+/// Bounded reason automatic execution deferred to manual review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoReviewReason {
+    ManualJob,
+    CandidateListTruncated,
+    NoCandidates,
+    ConfidenceBelowThreshold,
+    TiedTopCandidates,
+    MetadataConflicts,
+    InvalidPlan,
+    DestinationCollision,
+}
+
 /// Versioned candidate/conflict counts persisted for review.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -132,6 +146,8 @@ pub struct ReviewSummary {
     schema_version: SchemaVersion,
     candidate_count: u64,
     conflict_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    automation_reason: Option<AutoReviewReason>,
 }
 
 impl ReviewSummary {
@@ -140,7 +156,17 @@ impl ReviewSummary {
             schema_version: SchemaVersion,
             candidate_count,
             conflict_count,
+            automation_reason: None,
         }
+    }
+
+    pub const fn with_automation_reason(mut self, reason: AutoReviewReason) -> Self {
+        self.automation_reason = Some(reason);
+        self
+    }
+
+    pub const fn automation_reason(self) -> Option<AutoReviewReason> {
+        self.automation_reason
     }
 }
 

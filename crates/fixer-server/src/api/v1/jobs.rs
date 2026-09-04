@@ -144,8 +144,10 @@ async fn create(
         return Err(invalid_input("input_path", "must not be empty"));
     }
     let mut input = JobInputDto::new(request.media_kind, request.input_path, request.apply);
-    if let Some(organization) = request.organization {
+    if let Some(mut organization) = request.organization {
         validate_organization(&organization)?;
+        // Only the ingestion supervisor can authorize automatic execution.
+        organization.auto_execute = false;
         input = input.with_organization(organization);
     }
     let job = runtime.create(input).await.map_err(map_runtime_error)?;

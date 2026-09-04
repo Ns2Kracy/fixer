@@ -9,6 +9,7 @@ use std::{
     sync::{Arc, Mutex as StdMutex, OnceLock},
 };
 
+use fixer_core::{OutputOperation, OutputPlan};
 use fixer_sdk::output::{ExecutionPolicy, OperationStatus, OutputPlanExt};
 use futures_util::FutureExt;
 use thiserror::Error;
@@ -19,8 +20,8 @@ use crate::{
     jobs::{
         events::{JobEventHub, JobEventStream, SubscribeError},
         model::{
-            ExecutionSummary, JobInputDto, JobState, PlanSummary, ProgressSummary,
-            ReviewDecisionDto, ReviewSummary,
+            AutoReviewReason, ExecutionSummary, JobInputDto, JobState, PlanSummary,
+            ProgressSummary, ReviewDecisionDto, ReviewSummary,
         },
         worker::{RETRY_DELAYS, SharedWorkerFlow, WorkerFlow},
     },
@@ -30,6 +31,7 @@ use crate::{
 pub use worker::{JobFlowError, SdkJobFlow, SearchSummary, WorkerPool};
 
 const EXECUTION_FINGERPRINT: &str = "approved-v1";
+const AUTO_EXECUTION_KEY: &str = "ingestion-auto-v1";
 
 const fn is_terminal(state: JobState) -> bool {
     matches!(
@@ -664,20 +666,60 @@ impl JobRuntime {
             return;
         }
 
-        let Ok(summary) = search.resolve().await else {
+        let candidate_count = search.candidate_count();
+        let Ok((candidates, candidates_truncated)) = search.candidate_artifacts() else {
             self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
                 .await;
             return;
         };
+        let mut review = artifacts::ReviewArtifacts {
+            candidates,
+            candidates_truncated,
+            warnings: Vec::new(),
+            warnings_truncated: false,
+            conflicts: Vec::new(),
+            conflicts_truncated: false,
+        };
+        let threshold = flow.auto_accept_confidence(id);
+        let selected_index = match worker::auto_decision(job.input(), &review, 0, threshold) {
+            worker::AutoDecision::Execute { candidate_index } => candidate_index,
+            worker::AutoDecision::NeedsReview { .. } => 0,
+        };
+        let Ok(resolved) = search.resolve_selected(selected_index).await else {
+            self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
+                .await;
+            return;
+        };
+        let Ok(conflict_count) = resolved.conflict_count() else {
+            self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
+                .await;
+            return;
+        };
+        let diagnostics = resolved.review_diagnostics();
+        review.warnings = diagnostics.warnings;
+        review.warnings_truncated = diagnostics.warnings_truncated;
+        review.conflicts = diagnostics.conflicts;
+        review.conflicts_truncated = diagnostics.conflicts_truncated;
+        let mut automatic = worker::auto_decision(job.input(), &review, conflict_count, threshold);
+        if matches!(automatic, worker::AutoDecision::Execute { .. }) {
+            automatic = match resolved.plan() {
+                Ok(plan) => self.auto_plan_decision(&plan, automatic),
+                Err(_) => worker::AutoDecision::NeedsReview {
+                    reason: AutoReviewReason::InvalidPlan,
+                },
+            };
+        }
+
         if self.stop_requested(shutdown, id).await {
             return;
         }
+        let mut summary = ReviewSummary::new(candidate_count, conflict_count);
+        if let worker::AutoDecision::NeedsReview { reason } = automatic {
+            summary = summary.with_automation_reason(reason);
+        }
         let update = JobUpdate::default()
             .with_progress(ProgressSummary::new("awaiting_confirmation", 1, Some(1)))
-            .with_review(ReviewSummary::new(
-                summary.candidate_count(),
-                summary.conflict_count(),
-            ));
+            .with_review(summary);
         if self
             .transition_with_retry(
                 id,
@@ -686,14 +728,59 @@ impl JobRuntime {
                 update,
             )
             .await
-            .is_ok()
+            .is_err()
         {
-            let _ =
-                self.events
-                    .publish_review(id, summary.candidate_count(), summary.conflict_count());
-        } else {
             flow.release(id);
+            return;
         }
+        let _ = self
+            .events
+            .publish_review(id, candidate_count, conflict_count);
+
+        if let worker::AutoDecision::Execute { candidate_index } = automatic {
+            let decision = ReviewDecisionDto::new(candidate_index, Vec::new());
+            if self.review(id, decision).await.is_ok() {
+                let _ = self.execute(id, AUTO_EXECUTION_KEY).await;
+            }
+        }
+    }
+
+    fn auto_plan_decision(
+        &self,
+        plan: &OutputPlan,
+        approved: worker::AutoDecision,
+    ) -> worker::AutoDecision {
+        let Some(policy) = &self.fs_policy else {
+            return worker::AutoDecision::NeedsReview {
+                reason: AutoReviewReason::InvalidPlan,
+            };
+        };
+        if policy.validate_plan(plan).is_err() {
+            return worker::AutoDecision::NeedsReview {
+                reason: AutoReviewReason::InvalidPlan,
+            };
+        }
+        if plan.operations().iter().any(|operation| {
+            let target = operation.target().map_or_else(
+                || plan.output_root.clone(),
+                |target| {
+                    if target.is_absolute() {
+                        target.to_path_buf()
+                    } else {
+                        plan.output_root.join(target)
+                    }
+                },
+            );
+            match operation {
+                OutputOperation::CreateDirectory { .. } => target.exists() && !target.is_dir(),
+                _ => target.exists(),
+            }
+        }) {
+            return worker::AutoDecision::NeedsReview {
+                reason: AutoReviewReason::DestinationCollision,
+            };
+        }
+        approved
     }
 
     async fn stop_requested(&self, shutdown: &watch::Receiver<bool>, id: JobId) -> bool {

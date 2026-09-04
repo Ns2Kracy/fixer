@@ -26,7 +26,7 @@ use crate::{
     ingestion::model::RulePlacement,
     jobs::{
         ExecutionTaskRegistry, artifacts,
-        model::{JobInputDto, JobMediaKind, ReviewDecisionDto},
+        model::{AutoReviewReason, JobInputDto, JobMediaKind, ReviewDecisionDto},
     },
     store::JobId,
 };
@@ -50,6 +50,80 @@ impl SearchSummary {
     }
     pub const fn conflict_count(self) -> u64 {
         self.conflict_count
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoDecision {
+    Execute { candidate_index: u64 },
+    NeedsReview { reason: AutoReviewReason },
+}
+
+pub fn auto_decision(
+    input: &JobInputDto,
+    review: &artifacts::ReviewArtifacts,
+    conflicts: u64,
+    threshold: f32,
+) -> AutoDecision {
+    let automatic = input.apply()
+        && input.organization().is_some_and(|organization| {
+            organization.auto_execute && organization.origin_rule_id.is_some()
+        });
+    if !automatic {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::ManualJob,
+        };
+    }
+    if review.candidates_truncated {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::CandidateListTruncated,
+        };
+    }
+    let Some(top_confidence) = review
+        .candidates
+        .iter()
+        .map(|candidate| normalize_confidence(candidate.confidence))
+        .max_by(f32::total_cmp)
+    else {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::NoCandidates,
+        };
+    };
+    let mut top = review
+        .candidates
+        .iter()
+        .filter(|candidate| normalize_confidence(candidate.confidence) == top_confidence);
+    let Some(candidate) = top.next() else {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::NoCandidates,
+        };
+    };
+    if top.next().is_some() {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::TiedTopCandidates,
+        };
+    }
+    let threshold = normalize_confidence(threshold);
+    if top_confidence < threshold {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::ConfidenceBelowThreshold,
+        };
+    }
+    if conflicts != 0 {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::MetadataConflicts,
+        };
+    }
+    AutoDecision::Execute {
+        candidate_index: candidate.index,
+    }
+}
+
+const fn normalize_confidence(confidence: f32) -> f32 {
+    if confidence.is_finite() {
+        confidence.clamp(0.0, 1.0)
+    } else {
+        0.0
     }
 }
 
@@ -239,6 +313,26 @@ impl WorkerFlow {
         }
     }
 
+    pub fn auto_accept_confidence(&self, job_id: JobId) -> f32 {
+        match self {
+            Self::Configured(flow) => match &flow.source {
+                SdkJobSource::Fixed(_) => {
+                    fixer_runtime::FixerConfig::default().auto_accept_confidence
+                }
+                SdkJobSource::Static(config) => config.auto_accept_confidence,
+                SdkJobSource::Shared { config, snapshots } => snapshots
+                    .lock()
+                    .expect("job configuration snapshots lock is not poisoned")
+                    .get(&job_id)
+                    .map_or_else(
+                        || config.snapshot().auto_accept_confidence,
+                        |snapshot| snapshot.auto_accept_confidence,
+                    ),
+            },
+            Self::Local => fixer_runtime::FixerConfig::default().auto_accept_confidence,
+        }
+    }
+
     pub fn release(&self, job_id: JobId) {
         if let Self::Configured(SdkJobFlow {
             source: SdkJobSource::Shared { snapshots, .. },
@@ -324,6 +418,7 @@ impl ScannedJob {
 }
 
 impl SearchArtifact {
+    #[cfg(test)]
     pub async fn resolve(self) -> Result<SearchSummary, JobFlowError> {
         let candidate_count = self.candidate_count();
         let resolved = self.resolve_selected(0).await?;
@@ -1041,6 +1136,87 @@ pub type SharedWorkerFlow = Arc<WorkerFlow>;
 mod tests {
     fn job_id(value: i64) -> crate::store::JobId {
         crate::store::JobId::from_database(value).unwrap()
+    }
+
+    fn automatic_input(automatic: bool) -> crate::jobs::model::JobInputDto {
+        crate::jobs::model::JobInputDto::new(
+            crate::jobs::model::JobMediaKind::Movie,
+            "/media/movie.mkv",
+            automatic,
+        )
+        .with_organization(crate::jobs::model::JobOrganizationDto {
+            destination_path: "/media/library".to_owned(),
+            placement: crate::ingestion::model::RulePlacement::Copy,
+            path_template: None,
+            origin_rule_id: automatic.then_some(7),
+            auto_execute: automatic,
+        })
+    }
+
+    fn review(confidences: &[f32]) -> crate::jobs::artifacts::ReviewArtifacts {
+        crate::jobs::artifacts::ReviewArtifacts {
+            candidates: confidences
+                .iter()
+                .enumerate()
+                .map(
+                    |(index, confidence)| crate::jobs::artifacts::CandidateArtifact {
+                        index: u64::try_from(index).unwrap(),
+                        media_kind: fixer_core::MediaKind::Movie,
+                        provider: "fixture".to_owned(),
+                        external_id: crate::jobs::artifacts::ExternalIdArtifact {
+                            namespace: "fixture".to_owned(),
+                            value: index.to_string(),
+                        },
+                        title: format!("Movie {index}"),
+                        year: None,
+                        sequence: None,
+                        score: 100,
+                        confidence: *confidence,
+                        evidence: Vec::new(),
+                        evidence_truncated: false,
+                    },
+                )
+                .collect(),
+            candidates_truncated: false,
+            warnings: Vec::new(),
+            warnings_truncated: false,
+            conflicts: Vec::new(),
+            conflicts_truncated: false,
+        }
+    }
+
+    #[test]
+    fn auto_decision_requires_unique_threshold_match_without_conflicts() {
+        use crate::jobs::{model::AutoReviewReason, worker::AutoDecision};
+
+        assert_eq!(
+            super::auto_decision(&automatic_input(true), &review(&[0.9, 0.7]), 0, 0.9),
+            AutoDecision::Execute { candidate_index: 0 }
+        );
+        assert_eq!(
+            super::auto_decision(&automatic_input(true), &review(&[0.899]), 0, 0.9),
+            AutoDecision::NeedsReview {
+                reason: AutoReviewReason::ConfidenceBelowThreshold
+            }
+        );
+        assert_eq!(
+            super::auto_decision(&automatic_input(true), &review(&[0.9, 0.9]), 0, 0.9),
+            AutoDecision::NeedsReview {
+                reason: AutoReviewReason::TiedTopCandidates
+            }
+        );
+        assert_eq!(
+            super::auto_decision(&automatic_input(true), &review(&[0.95]), 1, 0.9),
+            AutoDecision::NeedsReview {
+                reason: AutoReviewReason::MetadataConflicts
+            }
+        );
+        assert_eq!(
+            super::auto_decision(&automatic_input(false), &review(&[1.0]), 0, 0.9),
+            AutoDecision::NeedsReview {
+                reason: AutoReviewReason::ManualJob
+            }
+        );
     }
 
     #[tokio::test]

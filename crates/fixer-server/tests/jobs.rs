@@ -797,7 +797,6 @@ async fn web_settings_update_is_seen_by_the_next_configured_worker_job() {
                     "auto_accept_confidence": 0.9,
                     "review_confidence": 0.6,
                     "output_preset": "full",
-                    "placement": "in_place",
                     "conflict_policy": "review",
                     "enabled_providers": ["tmdb"],
                     "provider_endpoints": {

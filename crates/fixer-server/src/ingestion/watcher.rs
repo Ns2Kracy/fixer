@@ -343,12 +343,12 @@ impl Engine {
                     placement: rule.rule.placement(),
                     path_template: rule.rule.path_template_override().map(str::to_owned),
                     origin_rule_id: Some(rule.rule.id().get()),
-                    auto_execute: false,
+                    auto_execute: true,
                 };
                 let input = JobInputDto::new(
                     media_kind,
                     item.source_root().to_string_lossy().into_owned(),
-                    false,
+                    true,
                 )
                 .with_organization(organization);
                 match self.runtime.jobs.create(input).await {

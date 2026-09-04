@@ -185,9 +185,9 @@ async fn recursive_reconciliation_deduplicates_and_reprocesses_changed_fingerpri
     let jobs = app.store.list_jobs(100, None).await.unwrap();
     assert!(jobs.iter().all(|job| {
         let organization = job.input().organization().unwrap();
-        !job.input().apply()
+        job.input().apply()
             && organization.origin_rule_id == Some(rule_id)
-            && !organization.auto_execute
+            && organization.auto_execute
             && organization.destination_path
                 == app.destination.canonicalize().unwrap().to_string_lossy()
     }));
