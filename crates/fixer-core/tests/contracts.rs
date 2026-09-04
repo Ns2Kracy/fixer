@@ -144,6 +144,25 @@ fn output_plans_serialize_with_previewable_sources_and_targets() {
         .unwrap(),
     );
     plan.push(OutputOperation::copy("incoming/movie.mkv", "Movie (2000)/movie.mkv").unwrap());
+    let move_operation =
+        OutputOperation::move_file("incoming/bonus.mkv", "Movie (2000)/bonus.mkv").unwrap();
+    assert_eq!(
+        move_operation.source(),
+        Some(std::path::Path::new("incoming/bonus.mkv"))
+    );
+    assert_eq!(
+        move_operation.target(),
+        Some(std::path::Path::new("Movie (2000)/bonus.mkv"))
+    );
+    assert_eq!(
+        serde_json::to_value(&move_operation).unwrap(),
+        serde_json::json!({
+            "operation": "move",
+            "source": "incoming/bonus.mkv",
+            "target": "Movie (2000)/bonus.mkv"
+        })
+    );
+    plan.push(move_operation);
     plan.push(OutputOperation::symlink("Movie (2000)/movie.mkv", "by-title/Movie.mkv").unwrap());
     plan.push(
         OutputOperation::hardlink("incoming/movie.mkv", "Movie (2000)/movie-hard.mkv").unwrap(),
@@ -157,6 +176,7 @@ fn output_plans_serialize_with_previewable_sources_and_targets() {
         if matches!(
             operation,
             OutputOperation::Copy { .. }
+                | OutputOperation::Move { .. }
                 | OutputOperation::Symlink { .. }
                 | OutputOperation::Hardlink { .. }
                 | OutputOperation::Reflink { .. }

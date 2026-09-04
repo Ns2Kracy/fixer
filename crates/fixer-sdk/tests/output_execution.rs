@@ -69,6 +69,109 @@ fn changing_a_source_after_prepare_rejects_the_stale_plan() {
 }
 
 #[test]
+fn move_publishes_destination_then_removes_source() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("incoming/movie.mkv");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(&source, [0, 1, 2, 255]).unwrap();
+    let output = root.path().join("library");
+    let mut plan = OutputPlan::new(&output);
+    plan.push(OutputOperation::move_file(&source, "Movie/movie.mkv").unwrap());
+
+    let report = plan.execute(ExecutionPolicy::default()).unwrap();
+
+    assert_eq!(report.operations()[0].status, OperationStatus::Completed);
+    assert_eq!(
+        fs::read(output.join("Movie/movie.mkv")).unwrap(),
+        [0, 1, 2, 255]
+    );
+    assert!(!source.exists());
+}
+
+#[test]
+fn move_collision_does_not_overwrite_and_preserves_source() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("incoming.mkv");
+    let output = root.path().join("library");
+    fs::create_dir_all(&output).unwrap();
+    fs::write(&source, b"incoming").unwrap();
+    fs::write(output.join("movie.mkv"), b"existing").unwrap();
+    let mut plan = OutputPlan::new(&output);
+    plan.push(OutputOperation::move_file(&source, "movie.mkv").unwrap());
+
+    let failure = plan.execute(ExecutionPolicy::default()).unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        ExecutionError::TargetExists { .. }
+    ));
+    assert_eq!(fs::read(&source).unwrap(), b"incoming");
+    assert_eq!(fs::read(output.join("movie.mkv")).unwrap(), b"existing");
+    assert!(walkdir(&output).iter().all(|path| {
+        !path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .contains(".fixer-tmp")
+    }));
+}
+
+#[test]
+fn move_deserialized_traversal_is_rejected_at_the_sdk_boundary() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source.mkv");
+    fs::write(&source, b"media").unwrap();
+    let value = serde_json::json!({
+        "output_root": root.path(),
+        "operations": [{
+            "operation": "move",
+            "source": source,
+            "target": "../escape.mkv"
+        }]
+    });
+    let plan: OutputPlan = serde_json::from_value(value).unwrap();
+
+    assert!(matches!(
+        plan.prepare().unwrap_err(),
+        ExecutionError::UnsafeTarget { .. }
+    ));
+}
+
+#[test]
+fn move_missing_source_is_unavailable() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("missing.mkv");
+    let mut plan = OutputPlan::new(root.path().join("library"));
+    plan.push(OutputOperation::move_file(&source, "movie.mkv").unwrap());
+
+    let failure = plan.execute(ExecutionPolicy::default()).unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        ExecutionError::SourceUnavailable { path } if path == &source
+    ));
+    assert!(!root.path().join("library/movie.mkv").exists());
+}
+
+#[test]
+fn move_replace_policy_replaces_target_and_removes_source() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("incoming.mkv");
+    let output = root.path().join("library");
+    fs::create_dir_all(&output).unwrap();
+    fs::write(&source, b"incoming").unwrap();
+    fs::write(output.join("movie.mkv"), b"existing").unwrap();
+    let mut plan = OutputPlan::new(&output);
+    plan.push(OutputOperation::move_file(&source, "movie.mkv").unwrap());
+
+    plan.execute(ExecutionPolicy::default().with_overwrite(OverwritePolicy::Replace))
+        .unwrap();
+
+    assert!(!source.exists());
+    assert_eq!(fs::read(output.join("movie.mkv")).unwrap(), b"incoming");
+}
+
+#[test]
 fn writes_and_copies_publish_complete_files_and_leave_no_temps() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source.mkv");

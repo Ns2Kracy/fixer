@@ -523,6 +523,11 @@ impl ResolvedArtifact {
                     hash_path(&mut hasher, source);
                     hash_path(&mut hasher, target);
                 }
+                fixer_core::OutputOperation::Move { source, target } => {
+                    hash_frame(&mut hasher, b"move");
+                    hash_path(&mut hasher, source);
+                    hash_path(&mut hasher, target);
+                }
                 fixer_core::OutputOperation::Symlink { source, target } => {
                     hash_frame(&mut hasher, b"symlink");
                     hash_path(&mut hasher, source);

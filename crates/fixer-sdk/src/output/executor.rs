@@ -332,6 +332,7 @@ fn execute_operation(
             publish_temp(&temp, &target, policy.overwrite)?;
             Ok(OperationStatus::Completed)
         }
+        OutputOperation::Move { .. } => execute_move(operation, root, &target, policy.overwrite),
         OutputOperation::Symlink { source, .. } => {
             let resolved = required_source(operation, root)?;
             ensure_source_file(&resolved)?;
@@ -366,6 +367,63 @@ fn execute_operation(
         }
         OutputOperation::Reflink { .. } => execute_reflink(operation, root, &target, policy),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectMoveOutcome {
+    Published,
+    PublishedAndSourceRemoved,
+}
+
+fn execute_move(
+    operation: &OutputOperation,
+    root: &Path,
+    target: &Path,
+    overwrite: OverwritePolicy,
+) -> Result<OperationStatus, ExecutionError> {
+    let source = required_source(operation, root)?;
+    ensure_source_file(&source)?;
+    ensure_parent(target)?;
+    ensure_target_available(target, overwrite)?;
+    execute_move_after_validation(&source, target, overwrite, publish_move_direct)?;
+    Ok(OperationStatus::Completed)
+}
+
+fn execute_move_after_validation(
+    source: &Path,
+    target: &Path,
+    overwrite: OverwritePolicy,
+    direct_move: impl FnOnce(&Path, &Path, OverwritePolicy) -> io::Result<DirectMoveOutcome>,
+) -> Result<(), ExecutionError> {
+    match direct_move(source, target, overwrite) {
+        Ok(DirectMoveOutcome::Published) => remove_moved_source(source),
+        Ok(DirectMoveOutcome::PublishedAndSourceRemoved) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+            let temp = copy_temp(source, target)?;
+            publish_temp(&temp, target, overwrite)?;
+            remove_moved_source(source)
+        }
+        Err(error) => Err(map_target_io("move file", target, error)),
+    }
+}
+
+fn publish_move_direct(
+    source: &Path,
+    target: &Path,
+    overwrite: OverwritePolicy,
+) -> io::Result<DirectMoveOutcome> {
+    match overwrite {
+        OverwritePolicy::NoOverwrite => {
+            fs::hard_link(source, target).map(|()| DirectMoveOutcome::Published)
+        }
+        OverwritePolicy::Replace => {
+            fs::rename(source, target).map(|()| DirectMoveOutcome::PublishedAndSourceRemoved)
+        }
+    }
+}
+
+fn remove_moved_source(source: &Path) -> Result<(), ExecutionError> {
+    fs::remove_file(source).map_err(|error| io_error("remove moved source", source, error))
 }
 
 fn execute_reflink(
@@ -742,5 +800,97 @@ fn io_error(action: &'static str, path: &Path, source: io::Error) -> ExecutionEr
         action,
         path: path.to_path_buf(),
         source,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ExecutionError, OverwritePolicy, execute_move_after_validation};
+    use std::{fs, io};
+
+    #[test]
+    fn move_cross_device_fallback_publishes_then_removes_source() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.mkv");
+        let target = root.path().join("library/movie.mkv");
+        fs::write(&source, [0, 1, 2, 255]).unwrap();
+
+        execute_move_after_validation(&source, &target, OverwritePolicy::NoOverwrite, |_, _, _| {
+            Err(io::Error::new(
+                io::ErrorKind::CrossesDevices,
+                "test boundary",
+            ))
+        })
+        .unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), [0, 1, 2, 255]);
+        assert!(!source.exists());
+    }
+
+    #[test]
+    fn move_cross_device_publication_failure_preserves_source_and_cleans_temp() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.mkv");
+        let target = root.path().join("library/movie.mkv");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&source, b"incoming").unwrap();
+        fs::write(&target, b"existing").unwrap();
+
+        let error = execute_move_after_validation(
+            &source,
+            &target,
+            OverwritePolicy::NoOverwrite,
+            |_, _, _| {
+                Err(io::Error::new(
+                    io::ErrorKind::CrossesDevices,
+                    "test boundary",
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TargetExists { .. }));
+        assert_eq!(fs::read(&source).unwrap(), b"incoming");
+        assert_eq!(fs::read(&target).unwrap(), b"existing");
+        assert!(
+            fs::read_dir(target.parent().unwrap())
+                .unwrap()
+                .all(|entry| {
+                    !entry
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .contains(".fixer-tmp")
+                })
+        );
+    }
+
+    #[test]
+    fn move_does_not_fallback_for_other_direct_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.mkv");
+        let target = root.path().join("library/movie.mkv");
+        fs::write(&source, b"incoming").unwrap();
+
+        let error = execute_move_after_validation(
+            &source,
+            &target,
+            OverwritePolicy::NoOverwrite,
+            |_, _, _| {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "test failure",
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExecutionError::Io { source, .. }
+                if source.kind() == io::ErrorKind::PermissionDenied
+        ));
+        assert_eq!(fs::read(&source).unwrap(), b"incoming");
+        assert!(!target.exists());
     }
 }

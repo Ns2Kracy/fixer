@@ -83,6 +83,7 @@ impl From<&OutputOperation> for PlanOperationDto {
             OutputOperation::CreateDirectory { .. } => "create_directory",
             OutputOperation::WriteBytes { .. } => "write_bytes",
             OutputOperation::Copy { .. } => "copy",
+            OutputOperation::Move { .. } => "move",
             OutputOperation::Symlink { .. } => "symlink",
             OutputOperation::Hardlink { .. } => "hardlink",
             OutputOperation::Reflink { .. } => "reflink",
@@ -98,5 +99,24 @@ impl From<&OutputOperation> for PlanOperationDto {
                 .to_string_lossy()
                 .into_owned(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fixer_core::{OutputOperation, OutputPlan};
+
+    use super::PlanDto;
+
+    #[test]
+    fn move_operation_uses_move_json_name() {
+        let mut plan = OutputPlan::new("library");
+        plan.push(OutputOperation::move_file("incoming.mkv", "movie.mkv").unwrap());
+
+        let value = serde_json::to_value(PlanDto::new("movie", &plan.output_root, &plan)).unwrap();
+
+        assert_eq!(value["operations"][0]["operation"], "move");
+        assert_eq!(value["operations"][0]["source"], "incoming.mkv");
+        assert_eq!(value["operations"][0]["target"], "movie.mkv");
     }
 }

@@ -37,6 +37,10 @@ pub enum OutputOperation {
         source: PathBuf,
         target: PathBuf,
     },
+    Move {
+        source: PathBuf,
+        target: PathBuf,
+    },
     Symlink {
         source: PathBuf,
         target: PathBuf,
@@ -72,6 +76,15 @@ impl OutputOperation {
             target: safe_target(target)?,
         })
     }
+    pub fn move_file(
+        source: impl Into<PathBuf>,
+        target: impl Into<PathBuf>,
+    ) -> Result<Self, CoreError> {
+        Ok(Self::Move {
+            source: non_empty_path(source, "output.source")?,
+            target: safe_target(target)?,
+        })
+    }
     pub fn symlink(
         source: impl Into<PathBuf>,
         target: impl Into<PathBuf>,
@@ -103,6 +116,7 @@ impl OutputOperation {
     pub fn source(&self) -> Option<&Path> {
         match self {
             Self::Copy { source, .. }
+            | Self::Move { source, .. }
             | Self::Symlink { source, .. }
             | Self::Hardlink { source, .. }
             | Self::Reflink { source, .. } => Some(source),
@@ -115,6 +129,7 @@ impl OutputOperation {
             Self::CreateDirectory { target }
             | Self::WriteBytes { target, .. }
             | Self::Copy { target, .. }
+            | Self::Move { target, .. }
             | Self::Symlink { target, .. }
             | Self::Hardlink { target, .. }
             | Self::Reflink { target, .. } => target,

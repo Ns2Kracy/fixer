@@ -252,6 +252,7 @@ fn operation_artifact(
             Some(u64::try_from(content.as_bytes().len()).map_err(|_| JobFlowError::CountOverflow)?),
         ),
         OutputOperation::Copy { .. } => ("copy", None),
+        OutputOperation::Move { .. } => ("move", None),
         OutputOperation::Symlink { .. } => ("symlink", None),
         OutputOperation::Hardlink { .. } => ("hardlink", None),
         OutputOperation::Reflink { .. } => ("reflink", None),
@@ -293,6 +294,7 @@ mod tests {
                 .unwrap(),
         );
         output.push(OutputOperation::copy("source.mkv", "Movie/copy.mkv").unwrap());
+        output.push(OutputOperation::move_file("source.mkv", "Movie/move.mkv").unwrap());
         output.push(OutputOperation::symlink("source.mkv", "Movie/symlink.mkv").unwrap());
         output.push(OutputOperation::hardlink("source.mkv", "Movie/hardlink.mkv").unwrap());
         output.push(OutputOperation::reflink("source.mkv", "Movie/reflink.mkv").unwrap());
@@ -310,6 +312,7 @@ mod tests {
                 "create_directory",
                 "write",
                 "copy",
+                "move",
                 "symlink",
                 "hardlink",
                 "reflink"

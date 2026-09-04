@@ -469,6 +469,7 @@ fn print_plan_text(plan: &fixer_core::OutputPlan, output_root: &Path) {
             fixer_core::OutputOperation::CreateDirectory { .. } => "create_directory",
             fixer_core::OutputOperation::WriteBytes { .. } => "write_bytes",
             fixer_core::OutputOperation::Copy { .. } => "copy",
+            fixer_core::OutputOperation::Move { .. } => "move",
             fixer_core::OutputOperation::Symlink { .. } => "symlink",
             fixer_core::OutputOperation::Hardlink { .. } => "hardlink",
             fixer_core::OutputOperation::Reflink { .. } => "reflink",
@@ -681,6 +682,7 @@ fn apply_output_preset(
                 }
             }
             fixer_core::OutputOperation::Copy { .. }
+            | fixer_core::OutputOperation::Move { .. }
             | fixer_core::OutputOperation::Symlink { .. }
             | fixer_core::OutputOperation::Hardlink { .. }
             | fixer_core::OutputOperation::Reflink { .. } => {}
