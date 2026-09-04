@@ -40,11 +40,8 @@ function NotFound() {
       >
         Page not found
       </h1>
-      <p class="my-8 max-w-[480px] text-muted">
-        The address does not match a workspace view. Nothing was changed.
-      </p>
-      <Link class={buttonStyles()} to="/">
-        Return to workspace
+      <Link class={`${buttonStyles()} mt-8`} to="/">
+        Return to Overview
       </Link>
     </section>
   );

@@ -1,19 +1,19 @@
 import { useQuery } from "@tanstack/solid-query";
-import { createFileRoute } from "@tanstack/solid-router";
+import { Link, createFileRoute } from "@tanstack/solid-router";
 import { Show } from "solid-js";
 
+import { ApiError, api } from "../lib/api";
+import { buttonStyles } from "../components/ui/button";
 import { CountBadge } from "../components/ui/count-badge";
 import { EmptyState } from "../components/ui/empty-state";
 import { Notice } from "../components/ui/notice";
 import { SectionHeader } from "../components/ui/section-header";
-import { buttonStyles } from "../components/ui/button";
-import { ApiError, api } from "../lib/api";
 
 export const Route = createFileRoute("/")({
-  component: Workspace,
+  component: OverviewPage,
 });
 
-function Workspace() {
+function OverviewPage() {
   const health = useQuery(() => ({
     queryKey: ["health"],
     queryFn: () => api.health(),
@@ -22,34 +22,27 @@ function Workspace() {
   return (
     <div class="mx-auto max-w-[1150px]">
       <section
-        class="grid grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)] items-end gap-[clamp(3rem,8vw,8rem)] pt-4 pb-24 max-[800px]:grid-cols-1 max-[800px]:gap-12 max-[800px]:pb-16"
-        aria-labelledby="workspace-title"
+        class="grid grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)] items-end gap-[clamp(3rem,8vw,8rem)] pt-4 pb-16 max-[800px]:grid-cols-1 max-[800px]:gap-12"
+        aria-labelledby="overview-title"
       >
         <div>
-          <p class="mb-4 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
-            Workspace / Overview
-          </p>
           <h1
-            class="m-0 max-w-[800px] font-serif text-[clamp(3.1rem,7vw,6rem)] leading-[0.91] font-medium tracking-[-0.04em] max-[480px]:text-[3.15rem]"
-            id="workspace-title"
-            aria-label="Metadata work, without guesswork."
+            class="m-0 font-serif text-[clamp(3.1rem,7vw,6rem)] leading-[0.91] font-medium tracking-[-0.04em]"
+            id="overview-title"
           >
-            Metadata work,
-            <br />
-            <em class="font-normal text-moss">without guesswork.</em>
+            Overview
           </h1>
-          <p class="my-8 max-w-[590px] text-[clamp(1rem,1.5vw,1.22rem)] text-muted">
-            Inspect evidence, resolve conflicts, and approve every filesystem
-            change before Fixer writes a byte.
-          </p>
-          <div class="flex items-center gap-6 max-[480px]:flex-col max-[480px]:items-start max-[480px]:gap-4">
-            <a class={buttonStyles()} href="#activity-title">
-              Review workspace
-            </a>
+          <div class="mt-8 flex flex-wrap items-center gap-6">
+            <Link class={buttonStyles()} to="/folders" preload="intent">
+              Manage folders
+            </Link>
+            <Link class="font-bold no-underline hover:text-moss" to="/jobs">
+              View jobs <span aria-hidden="true">→</span>
+            </Link>
           </div>
         </div>
         <div
-          class="min-h-[230px] border-t-2 border-ink pt-4"
+          class="min-h-[190px] border-t-2 border-ink pt-4"
           aria-live="polite"
         >
           <p class="mb-4 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
@@ -61,7 +54,7 @@ function Workspace() {
                 class="mr-3 inline-block size-[9px] rounded-full bg-muted"
                 aria-hidden="true"
               />
-              Connecting to server…
+              Connecting…
             </p>
           </Show>
           <Show when={health.isSuccess}>
@@ -83,10 +76,6 @@ function Workspace() {
                 <dt class="text-muted">Server</dt>
                 <dd class="m-0 font-semibold">{health.data?.version}</dd>
               </div>
-              <div class="flex justify-between border-t border-line py-3 text-xs">
-                <dt class="text-muted">Write mode</dt>
-                <dd class="m-0 font-semibold">Approval only</dd>
-              </div>
             </dl>
           </Show>
           <Show when={health.isError}>
@@ -99,16 +88,11 @@ function Workspace() {
         aria-labelledby="activity-title"
       >
         <SectionHeader
-          eyebrow="Queue"
           title="Recent work"
           titleId="activity-title"
           meta={<CountBadge>0 active</CountBadge>}
         />
-        <EmptyState
-          glyph="◇"
-          title="No jobs yet"
-          description="New scans and review sessions will appear here."
-        />
+        <EmptyState glyph="◇" title="No jobs yet" />
       </section>
     </div>
   );

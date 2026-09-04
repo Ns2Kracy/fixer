@@ -74,12 +74,9 @@ test("theme follows the system, persists overrides, and stays responsive", async
     "rgb(243, 240, 232)",
   );
   await expect(page.locator("body")).toHaveCSS("color", "rgb(29, 33, 28)");
-  const reviewWorkspace = page.getByRole("link", { name: "Review workspace" });
-  await expect(reviewWorkspace).toHaveCSS(
-    "background-color",
-    "rgb(29, 33, 28)",
-  );
-  await expect(reviewWorkspace).toHaveCSS("color", "rgb(243, 240, 232)");
+  const manageFolders = page.getByRole("link", { name: "Manage folders" });
+  await expect(manageFolders).toHaveCSS("background-color", "rgb(29, 33, 28)");
+  await expect(manageFolders).toHaveCSS("color", "rgb(243, 240, 232)");
   await page.reload();
   await expect(page.getByLabel("Theme")).toHaveValue("light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -94,7 +91,7 @@ test("theme follows the system, persists overrides, and stays responsive", async
     await page.setViewportSize({ width, height: 900 });
     await expect(
       page.getByRole("heading", {
-        name: "Metadata work, without guesswork.",
+        name: "Overview",
       }),
     ).toBeVisible();
     expect(

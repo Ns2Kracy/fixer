@@ -46,12 +46,7 @@ function PlanPage() {
       >
         ← Metadata review
       </Link>
-      <PageHeader
-        variant="detail"
-        eyebrow={<>Job / #{params().jobId} / Filesystem</>}
-        title="Output plan"
-        description="Review targets and operation types. File contents stay server-owned and are never returned here."
-      />
+      <PageHeader eyebrow={<>Job / #{params().jobId}</>} title="Output plan" />
       <Show when={plan.isPending || job.isPending}>
         <LoadingState>Loading output operations…</LoadingState>
       </Show>

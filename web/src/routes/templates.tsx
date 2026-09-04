@@ -42,11 +42,7 @@ function TemplatesPage() {
 
   return (
     <div class="mx-auto max-w-[1180px]">
-      <PageHeader
-        eyebrow="Templates / Dry render"
-        title="Template studio"
-        description="Shape relative paths and text sidecars against a sample. Every preview is validated and no-write."
-      />
+      <PageHeader title="Template studio" />
       <TemplatePreview
         pathTemplate={pathTemplate()}
         contentTemplate={contentTemplate()}

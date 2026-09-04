@@ -221,8 +221,6 @@ function FoldersPage() {
   return (
     <div class="mx-auto max-w-[1180px]">
       <PageHeader
-        variant="detail"
-        eyebrow="Automation / Folder rules"
         title="Folders"
         aside={
           <Button
@@ -408,7 +406,6 @@ function FoldersPage() {
         aria-labelledby="folder-rules-title"
       >
         <SectionHeader
-          eyebrow="Active automation"
           title="Folder rules"
           titleId="folder-rules-title"
           meta={<CountBadge>{rules.data?.rules.length ?? 0} rules</CountBadge>}

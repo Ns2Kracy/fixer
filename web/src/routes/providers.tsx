@@ -52,17 +52,12 @@ function ProvidersPage() {
 
   return (
     <div class="mx-auto max-w-[1180px]">
-      <PageHeader
-        eyebrow="Providers / Connectivity"
-        title="Provider readiness"
-        description="Verify one source at a time. Results expose actionable categories, never credentials or endpoint details."
-      />
+      <PageHeader title="Provider readiness" />
 
       <section class="mt-12" aria-labelledby="provider-ledger-title">
         <SectionHeader
           class="pb-6"
-          eyebrow="Registered sources"
-          title="Connectivity ledger"
+          title="Connectivity"
           titleId="provider-ledger-title"
           meta={
             <CountBadge>
@@ -83,10 +78,7 @@ function ProvidersPage() {
           <RequestError error={probe.error} />
         </Show>
         <Show when={catalog.isSuccess && catalog.data?.providers.length === 0}>
-          <EmptyState
-            title="No providers registered"
-            description="The server did not advertise any metadata sources."
-          />
+          <EmptyState title="No providers registered" />
         </Show>
         <Show when={catalog.isSuccess && settings.isSuccess}>
           <div class="border-t-2 border-ink">

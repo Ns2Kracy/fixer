@@ -51,11 +51,7 @@ function SearchPage() {
 
   return (
     <div class="mx-auto max-w-[1180px]">
-      <PageHeader
-        eyebrow="Search / All media"
-        title="Search every collection"
-        description="Find local candidates across every supported media domain before opening a scrape job."
-      />
+      <PageHeader title="Search every collection" />
 
       <form
         class="my-8 grid grid-cols-[minmax(150px,0.35fr)_minmax(280px,1.25fr)_auto] items-end gap-4 border-y border-line border-t-2 border-t-ink py-8 max-[700px]:grid-cols-1"
@@ -117,7 +113,6 @@ function SearchPage() {
         aria-live="polite"
       >
         <SectionHeader
-          eyebrow="Root-relative index"
           title="Matches"
           titleId="search-results-title"
           meta={
@@ -130,16 +125,10 @@ function SearchPage() {
           <RequestError error={search.error} />
         </Show>
         <Show when={!hasSearched()}>
-          <EmptyState
-            title="Start with a known fragment"
-            description="Search inspects configured roots only. It never accepts a host filesystem path."
-          />
+          <EmptyState title="Start with a known fragment" />
         </Show>
         <Show when={search.isSuccess && search.data?.results.length === 0}>
-          <EmptyState
-            title="No local matches"
-            description="Try a shorter title fragment or another media kind."
-          />
+          <EmptyState title="No local matches" />
         </Show>
         <div class="mt-8 border-t-2 border-ink">
           <For each={search.data?.results ?? []}>

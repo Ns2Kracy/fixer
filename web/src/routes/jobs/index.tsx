@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { Link, createFileRoute } from "@tanstack/solid-router";
 import { For, Show, createSignal } from "solid-js";
 
+import { DirectoryPicker } from "../../components/directory-picker";
 import { JobStatus } from "../../components/job-status";
 import { RequestError } from "../../components/request-error";
 import { Button } from "../../components/ui/button";
@@ -16,6 +17,8 @@ import {
   isJobState,
   isMediaKind,
   type CreateJobRequest,
+  type DirectoryRef,
+  type IngestionPlacement,
   type JobState,
   type MediaKind,
 } from "../../lib/api";
@@ -31,6 +34,18 @@ const mediaKinds: Array<{ value: MediaKind; label: string }> = [
   { value: "music", label: "Music" },
   { value: "television", label: "Television" },
 ];
+
+const placements: Array<{ value: IngestionPlacement; label: string }> = [
+  { value: "move", label: "Move" },
+  { value: "copy", label: "Copy" },
+  { value: "hardlink", label: "Hard link" },
+  { value: "symlink", label: "Symbolic link" },
+  { value: "reflink", label: "Reflink" },
+];
+
+function isPlacement(value: string): value is IngestionPlacement {
+  return placements.some((placement) => placement.value === value);
+}
 
 const states: Array<{ value: JobState | ""; label: string }> = [
   { value: "", label: "All states" },
@@ -50,9 +65,16 @@ const states: Array<{ value: JobState | ""; label: string }> = [
 function JobsPage() {
   const queryClient = useQueryClient();
   const [stateFilter, setStateFilter] = createSignal<JobState | "">("");
-  const [mediaKind, setMediaKind] = createSignal<MediaKind>("movie");
-  const [mediaPath, setMediaPath] = createSignal("");
+  const [mediaKind, setMediaKind] = createSignal<MediaKind | "">("");
+  const [source, setSource] = createSignal<DirectoryRef | null>(null);
+  const [destination, setDestination] = createSignal<DirectoryRef | null>(null);
+  const [placement, setPlacement] = createSignal<IngestionPlacement | "">("");
   const [apply, setApply] = createSignal(false);
+  const canCreate = () =>
+    mediaKind() !== "" &&
+    source() !== null &&
+    destination() !== null &&
+    placement() !== "";
 
   const jobs = useQuery(() => ({
     queryKey: ["jobs", stateFilter()],
@@ -68,7 +90,10 @@ function JobsPage() {
   const createJob = useMutation(() => ({
     mutationFn: (request: CreateJobRequest) => api.createJob(request),
     onSuccess: () => {
-      setMediaPath("");
+      setMediaKind("");
+      setSource(null);
+      setDestination(null);
+      setPlacement("");
       setApply(false);
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
@@ -76,11 +101,23 @@ function JobsPage() {
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
-    const inputPath = mediaPath().trim();
-    if (!inputPath) return;
+    const kind = mediaKind();
+    const selectedSource = source();
+    const selectedDestination = destination();
+    const method = placement();
+    if (
+      kind === "" ||
+      selectedSource === null ||
+      selectedDestination === null ||
+      method === ""
+    ) {
+      return;
+    }
     createJob.mutate({
-      media_kind: mediaKind(),
-      input_path: inputPath,
+      media_kind: kind,
+      source: selectedSource,
+      destination: selectedDestination,
+      placement: method,
       apply: apply(),
     });
   }
@@ -88,10 +125,7 @@ function JobsPage() {
   return (
     <div class="mx-auto max-w-[1180px]">
       <PageHeader
-        variant="detail"
-        eyebrow="Jobs / Local queue"
-        title="Scrape jobs"
-        description="Scan media, compare metadata evidence, and stage output without silent writes."
+        title="Jobs"
         aside={
           <FormField label="State filter">
             <select
@@ -113,62 +147,69 @@ function JobsPage() {
         class="my-12 grid grid-cols-[minmax(180px,0.45fr)_minmax(0,1.55fr)] gap-[clamp(2rem,5vw,5rem)] border-y border-line border-t-2 border-t-ink py-8 max-[900px]:grid-cols-1 max-[900px]:gap-6"
         aria-labelledby="create-job-title"
       >
-        <div>
-          <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
-            New scan
-          </p>
-          <h2 class="m-0 font-serif text-3xl font-medium" id="create-job-title">
-            Create a bounded job
-          </h2>
-        </div>
+        <h2 class="m-0 font-serif text-3xl font-medium" id="create-job-title">
+          New job
+        </h2>
         <form
-          class="grid grid-cols-[minmax(140px,0.45fr)_minmax(260px,1.4fr)] gap-4 max-[640px]:grid-cols-1"
+          class="grid grid-cols-2 gap-5 max-[640px]:grid-cols-1"
           onSubmit={submit}
         >
           <FormField label="Media kind">
             <select
+              required
               value={mediaKind()}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                if (isMediaKind(value)) setMediaKind(value);
+                if (value === "" || isMediaKind(value)) setMediaKind(value);
               }}
             >
+              <option value="">Choose a media kind</option>
               <For each={mediaKinds}>
                 {(kind) => <option value={kind.value}>{kind.label}</option>}
               </For>
             </select>
           </FormField>
-          <FormField
-            class="col-start-2 row-start-1 max-[640px]:col-start-1 max-[640px]:row-auto"
-            label="Media path"
-          >
-            <input
-              type="text"
-              value={mediaPath()}
-              placeholder="/media/Title.mkv"
+          <FormField label="Organization method">
+            <select
               required
-              onInput={(event) => setMediaPath(event.currentTarget.value)}
-            />
+              value={placement()}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                if (value === "" || isPlacement(value)) setPlacement(value);
+              }}
+            >
+              <option value="">Choose a method</option>
+              <For each={placements}>
+                {(item) => <option value={item.value}>{item.label}</option>}
+              </For>
+            </select>
           </FormField>
-          <label class="col-span-full flex items-start gap-3 pt-2 text-sm text-muted max-[640px]:col-span-1">
+          <DirectoryPicker
+            label="Source folder"
+            buttonLabel="Choose source"
+            value={source()}
+            onSelect={setSource}
+          />
+          <DirectoryPicker
+            label="Destination folder"
+            buttonLabel="Choose destination"
+            value={destination()}
+            onSelect={setDestination}
+          />
+          <label class="col-span-full flex items-center gap-3 pt-2 text-sm text-muted max-[640px]:col-span-1">
             <input
-              class="mt-[0.15rem] size-[1.05rem] shrink-0 accent-moss"
+              class="size-[1.05rem] shrink-0 accent-moss"
               type="checkbox"
               aria-label="Allow approved writes"
               checked={apply()}
               onChange={(event) => setApply(event.currentTarget.checked)}
             />
-            <span>
-              <strong class="block text-ink">Allow approved writes</strong>
-              <small class="mt-1 block text-muted">
-                A plan still requires review.
-              </small>
-            </span>
+            <strong class="text-ink">Allow approved writes</strong>
           </label>
           <Button
             class="col-start-2 justify-self-end max-[640px]:col-start-1 max-[640px]:w-full"
             type="submit"
-            disabled={createJob.isPending || !mediaPath().trim()}
+            disabled={createJob.isPending || !canCreate()}
           >
             {createJob.isPending ? "Creating…" : "Create job"}
           </Button>
@@ -185,7 +226,6 @@ function JobsPage() {
         aria-labelledby="job-list-title"
       >
         <SectionHeader
-          eyebrow="Queue"
           title="Recent jobs"
           titleId="job-list-title"
           meta={<CountBadge>{jobs.data?.jobs.length ?? 0} shown</CountBadge>}
@@ -197,10 +237,7 @@ function JobsPage() {
           <RequestError error={jobs.error} />
         </Show>
         <Show when={jobs.isSuccess && jobs.data?.jobs.length === 0}>
-          <EmptyState
-            title="No matching jobs"
-            description="Change the filter or create a new scan."
-          />
+          <EmptyState title="No matching jobs" />
         </Show>
         <div class="mt-8 border-t-2 border-ink">
           <For each={jobs.data?.jobs ?? []}>

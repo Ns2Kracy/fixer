@@ -283,13 +283,23 @@ export interface SessionResponse {
   expires_at_ms: number;
 }
 
-export interface CreateJobRequest {
+export interface CreateDirectoryJobRequest {
+  media_kind: MediaKind;
+  source: DirectoryRef;
+  destination: DirectoryRef;
+  placement: IngestionPlacement;
+  apply: boolean;
+}
+
+export interface CreatePathJobRequest {
   media_kind: MediaKind;
   input_path: string;
   apply: boolean;
 }
 
-export interface JobInputDto extends CreateJobRequest {
+export type CreateJobRequest = CreateDirectoryJobRequest | CreatePathJobRequest;
+
+export interface JobInputDto extends CreatePathJobRequest {
   schema_version: SchemaVersion;
 }
 

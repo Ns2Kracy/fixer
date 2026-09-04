@@ -117,6 +117,48 @@ async fn response_json(response: axum::response::Response) -> Value {
 }
 
 #[tokio::test]
+async fn one_off_jobs_resolve_directory_references_and_require_safe_pairs() {
+    let app = TestApp::new().await;
+    let request = json!({
+        "media_kind": "movie",
+        "source": {"root_id": app.root_id, "path": "incoming"},
+        "destination": {"root_id": app.root_id, "path": "library"},
+        "placement": "hardlink",
+        "apply": true
+    });
+
+    let created = app.request("POST", "/api/v1/jobs", Some(request)).await;
+    assert_eq!(created.status(), StatusCode::ACCEPTED);
+    let created = response_json(created).await;
+    assert_eq!(created["job"]["input"]["media_kind"], "movie");
+    assert_eq!(created["job"]["input"]["apply"], true);
+    assert_eq!(
+        created["job"]["input"]["organization"]["placement"],
+        "hardlink"
+    );
+    assert_eq!(
+        created["job"]["input"]["organization"]["auto_execute"],
+        false
+    );
+    assert!(created["job"]["input"]["organization"]["origin_rule_id"].is_null());
+
+    let nested = json!({
+        "media_kind": "movie",
+        "source": {"root_id": app.root_id, "path": "incoming"},
+        "destination": {"root_id": app.root_id, "path": "incoming/nested"},
+        "placement": "copy",
+        "apply": false
+    });
+    let rejected = app.request("POST", "/api/v1/jobs", Some(nested)).await;
+    assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let rejected = response_json(rejected).await;
+    assert_eq!(
+        rejected["error"]["details"]["directories"],
+        "must identify distinct, non-overlapping directories in configured roots"
+    );
+}
+
+#[tokio::test]
 async fn authenticated_rule_crud_and_scan_use_opaque_directory_references() {
     let app = TestApp::new().await;
     let mut notifications = app.notifications.subscribe();

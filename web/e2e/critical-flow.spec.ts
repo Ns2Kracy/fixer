@@ -47,7 +47,7 @@ test("user reviews a local candidate and approves its bounded write", async ({
 
   await page.goto("/login");
   await expect(
-    page.getByRole("complementary", { name: "Workspace navigation" }),
+    page.getByRole("complementary", { name: "Primary navigation" }),
   ).toHaveCount(0);
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password", { exact: true }).fill(password);
@@ -71,9 +71,7 @@ test("user reviews a local candidate and approves its bounded write", async ({
   await expect(page).toHaveURL(/\/$/u);
 
   await page.getByRole("link", { name: "Jobs" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Scrape jobs" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible();
   await page.getByLabel("Media kind").selectOption("movie");
   await page.getByLabel("Media path").fill(mediaPath);
   await page.getByLabel("Allow approved writes").check();

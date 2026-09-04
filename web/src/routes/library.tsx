@@ -64,11 +64,7 @@ function LibraryPage() {
 
   return (
     <div class="mx-auto max-w-[1180px]">
-      <PageHeader
-        eyebrow="Library / Safe browser"
-        title="Browse configured roots"
-        description="Navigate only the folders the server issued. Absolute paths and parent traversal never enter this interface."
-      />
+      <PageHeader title="Browse configured roots" />
 
       <section class="mt-12" aria-labelledby="library-browser-title">
         <div class="grid grid-cols-[minmax(180px,0.35fr)_minmax(0,1.65fr)] items-end gap-8 border-y border-line border-t-2 border-t-ink py-6 max-[700px]:grid-cols-1">
@@ -125,7 +121,6 @@ function LibraryPage() {
 
         <SectionHeader
           class="mt-12"
-          eyebrow={<>Opaque root / {rootId() || "none"}</>}
           title={path() || "Root contents"}
           titleId="library-browser-title"
           meta={
@@ -147,16 +142,10 @@ function LibraryPage() {
           <RequestError error={listing.error} />
         </Show>
         <Show when={roots.isSuccess && roots.data?.roots.length === 0}>
-          <EmptyState
-            title="No roots configured"
-            description="Add media roots to the server configuration before browsing."
-          />
+          <EmptyState title="No roots configured" />
         </Show>
         <Show when={listing.isSuccess && listing.data?.entries.length === 0}>
-          <EmptyState
-            title="This folder is empty"
-            description="No browsable files or directories were returned."
-          />
+          <EmptyState title="This folder is empty" />
         </Show>
 
         <div class="mt-8 border-t-2 border-ink">

@@ -135,6 +135,29 @@ describe("jobs workflow", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url === "/api/v1/library/roots") {
+          return json({
+            schema_version: 1,
+            roots: [{ id: "root-media", label: "Media" }],
+          });
+        }
+        if (url.startsWith("/api/v1/library?")) {
+          const path =
+            new URL(url, "https://fixer.test").searchParams.get("path") ?? "";
+          return json({
+            schema_version: 1,
+            root_id: "root-media",
+            path,
+            entries:
+              path === ""
+                ? [
+                    { name: "Incoming", path: "Incoming", kind: "directory" },
+                    { name: "Library", path: "Library", kind: "directory" },
+                  ]
+                : [],
+            truncated: false,
+          });
+        }
         if (init?.method === "POST") {
           return json(
             { schema_version: 1, job: { ...job, id: 8, state: "queued" } },
@@ -166,9 +189,7 @@ describe("jobs workflow", () => {
     const user = userEvent.setup();
     renderApp("/jobs");
 
-    expect(
-      await screen.findByRole("heading", { name: "Scrape jobs" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Jobs" })).toBeVisible();
     expect(await screen.findByText("/media/B.mkv")).toBeVisible();
 
     await user.selectOptions(
@@ -182,13 +203,33 @@ describe("jobs workflow", () => {
       );
     });
 
+    expect(screen.queryByLabelText(/media path/iu)).not.toBeInTheDocument();
+    const createButton = screen.getByRole("button", { name: "Create job" });
+    expect(createButton).toBeDisabled();
     await user.selectOptions(screen.getByLabelText("Media kind"), "movie");
-    await user.type(
-      screen.getByLabelText("Media path"),
-      "/media/New Movie.mkv",
+
+    await user.click(screen.getByRole("button", { name: "Choose source" }));
+    await user.click(await screen.findByRole("button", { name: "Media" }));
+    await user.click(screen.getByRole("button", { name: "Incoming" }));
+    await user.click(
+      screen.getByRole("button", { name: "Select this folder" }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Choose destination" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Media" }));
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    await user.click(
+      screen.getByRole("button", { name: "Select this folder" }),
+    );
+    expect(createButton).toBeDisabled();
+    await user.selectOptions(
+      screen.getByLabelText("Organization method"),
+      "hardlink",
     );
     await user.click(screen.getByLabelText("Allow approved writes"));
-    await user.click(screen.getByRole("button", { name: "Create job" }));
+    await user.click(createButton);
 
     await waitFor(() => {
       const create = fetchMock.mock.calls.find(
@@ -197,10 +238,13 @@ describe("jobs workflow", () => {
       expect(create?.[0]).toBe("/api/v1/jobs");
       expect(JSON.parse(String(create?.[1]?.body))).toEqual({
         media_kind: "movie",
-        input_path: "/media/New Movie.mkv",
+        source: { root_id: "root-media", path: "Incoming" },
+        destination: { root_id: "root-media", path: "Library" },
+        placement: "hardlink",
         apply: true,
       });
     });
+    expect(document.body).not.toHaveTextContent(/workspace/iu);
   });
 
   it("compares candidates, preserves partial warnings, and acknowledges sourced conflicts", async () => {

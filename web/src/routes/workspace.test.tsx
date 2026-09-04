@@ -57,7 +57,7 @@ const settings = {
 
 beforeEach(() => vi.unstubAllGlobals());
 
-describe("scraper workspace routes", () => {
+describe("scraper routes", () => {
   it("searches every supported media kind and renders root-relative matches", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -289,8 +289,9 @@ describe("scraper workspace routes", () => {
     renderApp("/settings");
 
     expect(
-      await screen.findByRole("heading", { name: "Workspace settings" }),
+      await screen.findByRole("heading", { name: "Settings" }),
     ).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/workspace/iu);
     const tmdbToken = await screen.findByLabelText("TMDB API token");
     expect(screen.queryByText("Placement")).not.toBeInTheDocument();
     expect(tmdbToken).toHaveValue("");

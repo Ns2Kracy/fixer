@@ -90,30 +90,19 @@ function LoginPage() {
 
   return (
     <div class="mx-auto min-h-screen max-w-[1180px] px-[clamp(1rem,4vw,4rem)] py-[clamp(2rem,7vw,6rem)]">
-      <PageHeader
-        eyebrow="Administrator access"
-        title="Unlock workspace"
-        description="Create the single administrator on first use, then sign in to manage metadata jobs and approve filesystem changes."
-      />
+      <PageHeader title="Fixer access" />
 
       <section
         class="mt-12 grid grid-cols-[minmax(220px,0.7fr)_minmax(300px,1.3fr)] gap-[clamp(2rem,7vw,7rem)] border-t-2 border-ink py-10 max-[700px]:grid-cols-1"
         aria-labelledby="login-panel-title"
       >
         <div>
-          <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
-            Single administrator
-          </p>
           <h2
             class="m-0 font-serif text-2xl font-medium"
             id="login-panel-title"
           >
-            Secure this Fixer instance
+            Administrator account
           </h2>
-          <p class="mt-3 mb-0 text-sm text-muted">
-            Passwords are Argon2id-hashed. Browser sessions use an HTTP-only
-            cookie, while CSRF state stays in this tab.
-          </p>
         </div>
 
         <div class="min-w-0">

@@ -73,10 +73,8 @@ function ReviewPage() {
         ← Job #{params().jobId}
       </Link>
       <PageHeader
-        variant="detail"
-        eyebrow={<>Job / #{params().jobId} / Evidence</>}
+        eyebrow={<>Job / #{params().jobId}</>}
         title="Review metadata"
-        description="Choose a candidate from scored evidence, then acknowledge every sourced conflict."
       />
       <Show when={review.isPending}>
         <LoadingState>Loading candidate evidence…</LoadingState>

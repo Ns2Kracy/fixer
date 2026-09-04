@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, num::NonZeroI64};
 use axum::{
     Json, Router,
     extract::{
-        Path, Query, State,
+        FromRef, Path, Query, State,
         rejection::{JsonRejection, PathRejection, QueryRejection},
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::error::ApiError,
+    fs_policy::FsPolicy,
+    ingestion::model::RulePlacement,
     jobs::{
         JobRuntime, RuntimeError,
         artifacts::{CandidateArtifact, ConflictArtifact, OperationArtifact, WarningArtifact},
@@ -24,11 +26,24 @@ use crate::{
         },
     },
     store::{JobId, JobRecord, StoreError},
+    workspace::{DirectoryRef, WorkspaceState},
 };
 
 const SCHEMA_VERSION: u8 = 1;
 
-pub fn router(runtime: JobRuntime) -> Router {
+#[derive(Clone)]
+struct JobApiState {
+    runtime: JobRuntime,
+    workspace: Option<WorkspaceState>,
+}
+
+impl FromRef<JobApiState> for JobRuntime {
+    fn from_ref(state: &JobApiState) -> Self {
+        state.runtime.clone()
+    }
+}
+
+pub fn router(runtime: JobRuntime, workspace: Option<WorkspaceState>) -> Router {
     Router::new()
         .route("/jobs", get(list).post(create).fallback(get_or_post_only))
         .route("/jobs/{id}", get(get_job).fallback(get_only))
@@ -41,12 +56,29 @@ pub fn router(runtime: JobRuntime) -> Router {
         .route("/jobs/{id}/plan", get(plan_details).fallback(get_only))
         .route("/jobs/{id}/execute", post(execute).fallback(post_only))
         .route("/jobs/{id}/events", get(events).fallback(get_only))
-        .with_state(runtime)
+        .with_state(JobApiState { runtime, workspace })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CreateJobRequest {
+    Directory(CreateDirectoryJobRequest),
+    Path(CreatePathJobRequest),
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CreateJobRequest {
+struct CreateDirectoryJobRequest {
+    media_kind: JobMediaKind,
+    source: DirectoryRef,
+    destination: DirectoryRef,
+    placement: RulePlacement,
+    apply: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreatePathJobRequest {
     media_kind: JobMediaKind,
     input_path: String,
     apply: bool,
@@ -136,10 +168,25 @@ struct JobDto {
 }
 
 async fn create(
-    State(runtime): State<JobRuntime>,
+    State(state): State<JobApiState>,
     request: Result<Json<CreateJobRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
     let Json(request) = request.map_err(map_json_rejection)?;
+    let input = match request {
+        CreateJobRequest::Directory(request) => {
+            directory_job_input(state.workspace.as_ref(), &request)?
+        }
+        CreateJobRequest::Path(request) => path_job_input(request)?,
+    };
+    let job = state
+        .runtime
+        .create(input)
+        .await
+        .map_err(map_runtime_error)?;
+    Ok((StatusCode::ACCEPTED, Json(envelope(&job))))
+}
+
+fn path_job_input(request: CreatePathJobRequest) -> Result<JobInputDto, ApiError> {
     if request.input_path.trim().is_empty() {
         return Err(invalid_input("input_path", "must not be empty"));
     }
@@ -150,8 +197,44 @@ async fn create(
         organization.auto_execute = false;
         input = input.with_organization(organization);
     }
-    let job = runtime.create(input).await.map_err(map_runtime_error)?;
-    Ok((StatusCode::ACCEPTED, Json(envelope(&job))))
+    Ok(input)
+}
+
+fn directory_job_input(
+    workspace: Option<&WorkspaceState>,
+    request: &CreateDirectoryJobRequest,
+) -> Result<JobInputDto, ApiError> {
+    let workspace = workspace.ok_or_else(invalid_directories)?;
+    let source = workspace
+        .resolve_directory(&request.source)
+        .map_err(|_| invalid_directories())?;
+    let destination = workspace
+        .resolve_directory(&request.destination)
+        .map_err(|_| invalid_directories())?;
+    let policy = FsPolicy::new([&source.canonical_path, &destination.canonical_path])
+        .map_err(|_| invalid_directories())?;
+    let (source_path, destination_path) = policy
+        .validate_directory_pair(&source.canonical_path, &destination.canonical_path)
+        .map_err(|_| invalid_directories())?;
+    Ok(JobInputDto::new(
+        request.media_kind,
+        source_path.to_string_lossy().into_owned(),
+        request.apply,
+    )
+    .with_organization(JobOrganizationDto {
+        destination_path: destination_path.to_string_lossy().into_owned(),
+        placement: request.placement,
+        path_template: None,
+        origin_rule_id: None,
+        auto_execute: false,
+    }))
+}
+
+fn invalid_directories() -> ApiError {
+    invalid_input(
+        "directories",
+        "must identify distinct, non-overlapping directories in configured roots",
+    )
 }
 
 async fn list(

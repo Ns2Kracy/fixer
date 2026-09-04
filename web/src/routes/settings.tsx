@@ -135,14 +135,10 @@ function SettingsPage() {
 
   return (
     <div class="mx-auto max-w-[1180px]">
-      <PageHeader
-        eyebrow="Settings / Scraper policy"
-        title="Workspace settings"
-        description="Tune evidence, transport, output, and provider policy. Secret values are accepted once and never read back."
-      />
+      <PageHeader title="Settings" />
 
       <Show when={settings.isPending}>
-        <LoadingState>Loading workspace policy…</LoadingState>
+        <LoadingState>Loading settings…</LoadingState>
       </Show>
       <Show when={settings.isError}>
         <RequestError error={settings.error} />
@@ -153,26 +149,19 @@ function SettingsPage() {
             <fieldset
               class="m-0 min-w-0 border-0 p-0"
               disabled={update.isPending}
-              aria-label="Workspace settings fields"
+              aria-label="Settings fields"
             >
               <section
                 class="grid grid-cols-[minmax(210px,0.45fr)_minmax(0,1.55fr)] gap-[clamp(2rem,5vw,5rem)] border-t-2 border-ink py-10 pb-16 max-[1000px]:grid-cols-1"
                 aria-labelledby="behavior-settings-title"
               >
                 <div>
-                  <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
-                    01 / Resolution
-                  </p>
                   <h2
                     class="m-0 font-serif text-2xl font-medium"
                     id="behavior-settings-title"
                   >
                     Behavior policy
                   </h2>
-                  <p class="mt-3 mb-0 text-sm text-muted">
-                    Control locale priority, confidence gates, and offline
-                    operation.
-                  </p>
                 </div>
                 <div class="grid grid-cols-2 gap-5 max-[700px]:grid-cols-1">
                   <LocalePolicyEditor
@@ -269,19 +258,12 @@ function SettingsPage() {
                 aria-labelledby="output-settings-title"
               >
                 <div>
-                  <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
-                    02 / Output
-                  </p>
                   <h2
                     class="m-0 font-serif text-2xl font-medium"
                     id="output-settings-title"
                   >
                     Plan defaults
                   </h2>
-                  <p class="mt-3 mb-0 text-sm text-muted">
-                    Choose the output package and how metadata conflicts are
-                    handled.
-                  </p>
                 </div>
                 <div class="grid grid-cols-2 gap-5 max-[800px]:grid-cols-1">
                   <FormField label="Output preset">
@@ -319,19 +301,12 @@ function SettingsPage() {
                 aria-labelledby="provider-settings-title"
               >
                 <div>
-                  <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
-                    03 / Providers
-                  </p>
                   <h2
                     class="m-0 font-serif text-2xl font-medium"
                     id="provider-settings-title"
                   >
                     Source registry
                   </h2>
-                  <p class="mt-3 mb-0 text-sm text-muted">
-                    Enable sources and override only their documented base
-                    endpoints.
-                  </p>
                 </div>
                 <div class="grid gap-5">
                   <fieldset class="m-0 grid grid-cols-3 gap-3 border-0 p-0 max-[700px]:grid-cols-2">
@@ -386,19 +361,12 @@ function SettingsPage() {
                 aria-labelledby="secret-settings-title"
               >
                 <div>
-                  <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
-                    04 / Credentials
-                  </p>
                   <h2
                     class="m-0 font-serif text-2xl font-medium"
                     id="secret-settings-title"
                   >
                     Write-only secrets
                   </h2>
-                  <p class="mt-3 mb-0 text-sm text-muted">
-                    Blank fields preserve configured values. Clear explicitly
-                    when revoking access.
-                  </p>
                 </div>
                 <div class="grid grid-cols-2 gap-5 max-[700px]:grid-cols-1">
                   <SecretField

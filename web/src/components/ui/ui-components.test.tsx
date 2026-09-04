@@ -34,7 +34,7 @@ describe("shared UI components", () => {
       <>
         <PageHeader
           eyebrow="Settings / Scraper policy"
-          title="Workspace settings"
+          title="Settings"
           description="Control provider and output policy."
           aside={<span>Saved</span>}
         />
@@ -48,7 +48,7 @@ describe("shared UI components", () => {
     ));
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
+      screen.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
     expect(
       screen.getByText("Control provider and output policy."),
@@ -86,7 +86,7 @@ describe("shared UI components", () => {
   it("announces loading and empty states", () => {
     render(() => (
       <>
-        <LoadingState>Loading workspace policy…</LoadingState>
+        <LoadingState>Loading settings…</LoadingState>
         <EmptyState
           title="No jobs yet"
           description="New scans and review sessions will appear here."
@@ -95,7 +95,7 @@ describe("shared UI components", () => {
       </>
     ));
 
-    expect(screen.getByText("Loading workspace policy…")).toHaveAttribute(
+    expect(screen.getByText("Loading settings…")).toHaveAttribute(
       "role",
       "status",
     );

@@ -9,7 +9,7 @@ import { Button } from "./ui/button";
 import { ThemeSelect } from "./ui/theme-select";
 
 const navigation = [
-  { to: "/", label: "Workspace", marker: "01" },
+  { to: "/", label: "Overview", marker: "01" },
   { to: "/folders", label: "Folders", marker: "02" },
   { to: "/jobs", label: "Jobs", marker: "03" },
   { to: "/search", label: "Search", marker: "04" },
@@ -46,7 +46,7 @@ export function AppShell(): JSX.Element {
     },
   }));
 
-  const focusWorkspace: JSX.EventHandlerUnion<HTMLAnchorElement, MouseEvent> = (
+  const focusContent: JSX.EventHandlerUnion<HTMLAnchorElement, MouseEvent> = (
     event,
   ) => {
     event.preventDefault();
@@ -57,16 +57,16 @@ export function AppShell(): JSX.Element {
     <div class="min-h-screen bg-paper text-ink">
       <a
         class="fixed top-4 left-4 z-20 -translate-y-[200%] bg-ink px-4 py-3 text-paper transition-transform focus:translate-y-0"
-        href="#workspace"
-        onClick={focusWorkspace}
+        href="#content"
+        onClick={focusContent}
       >
-        Skip to workspace
+        Skip to content
       </a>
       <header class="flex h-[86px] items-center justify-between border-b border-line px-[clamp(1rem,4vw,4rem)] max-[480px]:h-[72px] max-[480px]:px-4">
         <Link
           class="flex items-center gap-3 no-underline"
           to="/"
-          aria-label="Fixer workspace home"
+          aria-label="Fixer home"
         >
           <span
             class="grid size-[38px] place-items-center rounded-full bg-moss font-serif text-xl font-bold text-paper"
@@ -90,7 +90,7 @@ export function AppShell(): JSX.Element {
               class="mr-2 inline-block size-[7px] rounded-full bg-success"
               aria-hidden="true"
             />
-            Local workspace
+            Local service
           </div>
           <ThemeSelect
             value={themePreference()}
@@ -114,7 +114,7 @@ export function AppShell(): JSX.Element {
       <div class="grid min-h-[calc(100vh-86px)] grid-cols-[230px_minmax(0,1fr)] max-[800px]:min-h-[calc(100vh-86px)] max-[800px]:grid-cols-1 max-[480px]:min-h-[calc(100vh-72px)]">
         <aside
           class="flex flex-col border-r border-line px-6 pt-12 pb-8 max-[800px]:border-r-0 max-[800px]:border-b max-[800px]:p-4"
-          aria-label="Workspace navigation"
+          aria-label="Primary navigation"
         >
           <p class="mb-4 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted max-[800px]:hidden">
             Navigate
@@ -126,6 +126,7 @@ export function AppShell(): JSX.Element {
                   <Link
                     to={item.to}
                     activeOptions={{ exact: item.to === "/" }}
+                    preload="intent"
                     activeProps={{
                       "aria-current": "page",
                       class:
@@ -161,7 +162,7 @@ export function AppShell(): JSX.Element {
           </div>
         </aside>
         <main
-          id="workspace"
+          id="content"
           ref={(element) => {
             main = element;
           }}

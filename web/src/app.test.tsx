@@ -45,8 +45,8 @@ function renderApp(initialEntry = "/") {
   return render(() => <App queryClient={queryClient} router={router} />);
 }
 
-describe("Fixer workspace", () => {
-  it("redirects unauthenticated workspace visits before loading protected data", async () => {
+describe("Fixer app", () => {
+  it("redirects unauthenticated visits before loading protected data", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === "/api/v1/auth/status") {
         return json({
@@ -63,7 +63,7 @@ describe("Fixer workspace", () => {
     renderApp();
 
     expect(
-      await screen.findByRole("heading", { name: "Unlock workspace" }),
+      await screen.findByRole("heading", { name: "Fixer access" }),
     ).toBeVisible();
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/v1/health",
@@ -71,7 +71,7 @@ describe("Fixer workspace", () => {
     );
   });
 
-  it("mounts the workspace dashboard", async () => {
+  it("mounts the Overview dashboard", async () => {
     vi.stubGlobal(
       "fetch",
       authenticatedFetch((url) => {
@@ -86,7 +86,7 @@ describe("Fixer workspace", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Metadata work, without guesswork.",
+        name: "Overview",
       }),
     ).toBeVisible();
     expect(await screen.findByText("Server connected")).toBeVisible();
@@ -94,8 +94,17 @@ describe("Fixer workspace", () => {
       screen.queryByRole("link", { name: "Sign in" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Review workspace" }),
-    ).toHaveAttribute("href", "#activity-title");
+      screen.getByRole("link", { name: "Manage folders" }),
+    ).toHaveAttribute("href", "/folders");
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute(
+      "href",
+      "/",
+    );
+    expect(screen.getByRole("link", { name: "Folders" })).toHaveAttribute(
+      "href",
+      "/folders",
+    );
+    expect(document.body).not.toHaveTextContent(/workspace/iu);
   });
 
   it("recovers from an unknown route through client-side navigation", async () => {
@@ -114,15 +123,15 @@ describe("Fixer workspace", () => {
     expect(
       await screen.findByRole("heading", { name: "Page not found" }),
     ).toBeVisible();
-    const workspaceLink = screen.getByRole("link", {
-      name: "Return to workspace",
+    const overviewLink = screen.getByRole("link", {
+      name: "Return to Overview",
     });
-    workspaceLink.focus();
+    overviewLink.focus();
     await user.keyboard("{Enter}");
 
     expect(
       await screen.findByRole("heading", {
-        name: "Metadata work, without guesswork.",
+        name: "Overview",
       }),
     ).toBeVisible();
   });
@@ -169,7 +178,7 @@ describe("Fixer workspace", () => {
     renderApp();
 
     await screen.findByRole("heading", {
-      name: "Metadata work, without guesswork.",
+      name: "Overview",
     });
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
@@ -183,7 +192,7 @@ describe("Fixer workspace", () => {
       );
     });
     expect(
-      await screen.findByRole("heading", { name: "Unlock workspace" }),
+      await screen.findByRole("heading", { name: "Fixer access" }),
     ).toBeVisible();
     expect(sessionStorage.getItem("fixer.csrf-token")).toBeNull();
   });
@@ -202,12 +211,10 @@ describe("Fixer workspace", () => {
     renderApp();
 
     await screen.findByRole("heading", {
-      name: "Metadata work, without guesswork.",
+      name: "Overview",
     });
     await user.tab();
-    expect(
-      screen.getByRole("link", { name: "Skip to workspace" }),
-    ).toHaveFocus();
+    expect(screen.getByRole("link", { name: "Skip to content" })).toHaveFocus();
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());

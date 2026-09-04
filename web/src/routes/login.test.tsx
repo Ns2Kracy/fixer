@@ -66,11 +66,11 @@ describe("administrator authentication", () => {
     );
     expect(screen.getByLabelText("Confirm password")).toBeVisible();
     expect(
-      screen.queryByRole("complementary", { name: "Workspace navigation" }),
+      screen.queryByRole("complementary", { name: "Primary navigation" }),
     ).not.toBeInTheDocument();
   });
 
-  it("signs in from the Sign in tab and enters the workspace", async () => {
+  it("signs in from the Sign in tab and opens Overview", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, _init?: RequestInit) => {
         const url = String(input);
@@ -119,7 +119,7 @@ describe("administrator authentication", () => {
     );
     expect(
       await screen.findByRole("heading", {
-        name: "Metadata work, without guesswork.",
+        name: "Overview",
       }),
     ).toBeVisible();
   });
@@ -153,7 +153,7 @@ describe("administrator authentication", () => {
     );
   });
 
-  it("registers the first administrator and enters the workspace", async () => {
+  it("registers the first administrator and opens Overview", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/v1/auth/status") return authStatus(true);
@@ -206,7 +206,7 @@ describe("administrator authentication", () => {
     );
     expect(
       await screen.findByRole("heading", {
-        name: "Metadata work, without guesswork.",
+        name: "Overview",
       }),
     ).toBeVisible();
   });

@@ -29,9 +29,9 @@ export function DirectoryPicker(props: DirectoryPickerProps): JSX.Element {
   const [root, setRoot] = createSignal<RootSummary | null>(null);
   const [path, setPath] = createSignal("");
   const [entries, setEntries] = createSignal<LibraryEntry[]>([]);
+  const [trigger, setTrigger] = createSignal<HTMLButtonElement>();
+  const [dialog, setDialog] = createSignal<HTMLElement>();
   const titleId = createUniqueId();
-  let trigger: HTMLButtonElement | undefined;
-  let dialog: HTMLElement | undefined;
   let requestVersion = 0;
 
   const directories = createMemo(() =>
@@ -52,14 +52,14 @@ export function DirectoryPicker(props: DirectoryPickerProps): JSX.Element {
     setRoot(null);
     setPath("");
     setEntries([]);
-    queueMicrotask(() => dialog?.focus());
+    queueMicrotask(() => dialog()?.focus());
     await loadRoots();
   }
 
   function closePicker() {
     requestVersion += 1;
     setOpen(false);
-    queueMicrotask(() => trigger?.focus());
+    queueMicrotask(() => trigger()?.focus());
   }
 
   async function loadRoots() {
@@ -140,7 +140,7 @@ export function DirectoryPicker(props: DirectoryPickerProps): JSX.Element {
       </span>
       <div class="flex flex-wrap items-center gap-3">
         <Button
-          ref={trigger}
+          ref={setTrigger}
           type="button"
           variant="secondary"
           aria-haspopup="dialog"
@@ -166,11 +166,13 @@ export function DirectoryPicker(props: DirectoryPickerProps): JSX.Element {
           <section
             role="dialog"
             aria-modal="true"
-            ref={dialog}
+            ref={(element) => {
+              setDialog(element);
+              element.addEventListener("keydown", handleKeyDown);
+            }}
             tabindex={-1}
             aria-labelledby={titleId}
-            class="grid max-h-[min(720px,90vh)] w-full max-w-2xl grid-rows-[auto_auto_minmax(0,1fr)_auto] border-2 border-ink bg-paper shadow-[12px_12px_0_var(--color-coral)]"
-            onKeyDown={handleKeyDown}
+            class="grid max-h-[min(720px,90vh)] w-full max-w-2xl grid-rows-[auto_auto_minmax(0,1fr)_auto] border-2 border-ink bg-paper text-ink shadow-[12px_12px_0_var(--color-coral)]"
           >
             <header class="flex items-center justify-between border-b border-line px-5 py-4">
               <h2 id={titleId} class="m-0 font-serif text-2xl font-medium">
