@@ -39,7 +39,6 @@ const settings = {
   auto_accept_confidence: 0.9,
   review_confidence: 0.6,
   output_preset: "full",
-  placement: "in_place",
   conflict_policy: "review",
   enabled_providers: ["local", "tmdb", "bangumi"],
   provider_endpoints: {
@@ -293,6 +292,7 @@ describe("scraper workspace routes", () => {
       await screen.findByRole("heading", { name: "Workspace settings" }),
     ).toBeVisible();
     const tmdbToken = await screen.findByLabelText("TMDB API token");
+    expect(screen.queryByText("Placement")).not.toBeInTheDocument();
     expect(tmdbToken).toHaveValue("");
     expect(tmdbToken).toHaveAccessibleDescription("Configured");
     expect(
@@ -321,6 +321,7 @@ describe("scraper workspace routes", () => {
         tmdb_api_token: null,
         anilist_access_token: null,
       });
+      expect(body).not.toHaveProperty("placement");
       expect(body).not.toHaveProperty("secrets");
     });
     expect(await screen.findByText("Settings saved")).toBeVisible();

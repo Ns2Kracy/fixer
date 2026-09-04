@@ -39,7 +39,6 @@ fn settings(endpoint: &str) -> Value {
         "auto_accept_confidence": 0.9,
         "review_confidence": 0.6,
         "output_preset": "metadata",
-        "placement": "reflink",
         "conflict_policy": "review",
         "enabled_providers": ["local", "tmdb", "bangumi"],
         "provider_endpoints": {
@@ -77,7 +76,7 @@ async fn settings_are_validated_and_secrets_are_write_only() {
         json!(["zh-Hans", "ja", "en", "und"])
     );
     assert_eq!(updated["settings"]["output_preset"], "metadata");
-    assert_eq!(updated["settings"]["placement"], "reflink");
+    assert!(updated["settings"].get("placement").is_none());
     assert_eq!(
         updated["settings"]["secrets"],
         json!({

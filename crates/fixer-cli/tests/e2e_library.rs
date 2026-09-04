@@ -60,7 +60,7 @@ fn offline_movie_nfo_produces_a_dry_run_plan_without_writes() {
         .arg("--offline")
         .arg("plan")
         .arg(&input)
-        .args(["--kind", "movie", "--json"])
+        .args(["--kind", "movie", "--placement", "in-place", "--json"])
         .output()
         .unwrap();
 
@@ -110,7 +110,7 @@ fn ambiguous_anime_candidates_are_visible_and_cannot_trigger_a_broad_write() {
         .arg("--offline")
         .arg("scrape")
         .arg(&library)
-        .args(["--kind", "anime", "--dry-run"])
+        .args(["--kind", "anime", "--placement", "in-place", "--dry-run"])
         .output()
         .unwrap();
     assert_eq!(scrape.status.code(), Some(2));

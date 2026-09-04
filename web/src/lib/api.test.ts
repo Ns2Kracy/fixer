@@ -264,7 +264,6 @@ describe("ApiClient", () => {
       auto_accept_confidence: 0.9,
       review_confidence: 0.6,
       output_preset: "full" as const,
-      placement: "in_place" as const,
       conflict_policy: "review" as const,
       enabled_providers: ["local", "tmdb"],
       provider_endpoints: {
@@ -282,6 +281,7 @@ describe("ApiClient", () => {
     };
 
     await client.updateSettings(settings);
+    expect(settings).not.toHaveProperty("placement");
     await client.testProvider("tmdb");
     await client.previewTemplate({
       path_template: "{{title|sanitize}}/metadata.json",

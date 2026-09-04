@@ -64,7 +64,6 @@ timeout_seconds = 30
 auto_accept_confidence = 0.9
 review_confidence = 0.6
 output_preset = "full"
-placement = "in_place"
 conflict_policy = "review"
 enabled_providers = ["local", "tmdb", "bangumi", "musicbrainz", "openlibrary"]
 
@@ -124,7 +123,6 @@ comma-separated values.
 | `auto_accept_confidence` | `FIXER_AUTO_ACCEPT_CONFIDENCE` | `0.9` |
 | `review_confidence` | `FIXER_REVIEW_CONFIDENCE` | `0.6` |
 | `output_preset` | `FIXER_OUTPUT_PRESET` | `full` |
-| `placement` | `FIXER_PLACEMENT` | `in_place` |
 | `conflict_policy` | `FIXER_CONFLICT_POLICY` | `review` |
 | `enabled_providers` | `FIXER_ENABLED_PROVIDERS` | default provider set |
 | `providers.tmdb.base_url` | `FIXER_PROVIDERS__TMDB__BASE_URL` | TMDB production API |
@@ -171,14 +169,13 @@ Boolean environment values accept `1`, `true`, `yes`, `on`, `0`, `false`,
 | `auto_accept_confidence` | Finite `0.0..=1.0`, at least `review_confidence`. |
 | `review_confidence` | Finite `0.0..=1.0`. |
 | `output_preset` | `full` or `metadata`. |
-| `placement` | `in_place`, `symlink`, `hardlink`, `copy`, or `reflink`. |
 | `conflict_policy` | `prefer_first`, `review`, or `error`. |
 | `enabled_providers` | Non-empty provider allowlist; duplicates are removed. |
 
 The confidence thresholds are validated and reported but are not yet applied to
 candidate selection. `metadata` drops writer-planned local-asset placement while
-retaining metadata writes. Command-level `--placement` still overrides the
-configured placement for one invocation.
+retaining metadata writes. Media placement is selected explicitly for each `plan`
+or `scrape` invocation rather than through shared configuration.
 
 Conflict behavior is:
 
@@ -308,7 +305,7 @@ Configuration load failures return CLI exit code `2`. Common causes include:
 - malformed BCP 47 locale tags;
 - zero timeout or worker count;
 - confidence thresholds outside `0.0..=1.0`;
-- invalid placement, conflict, output, or logging values;
+- invalid conflict, output, or logging values;
 - malformed or unset secret references;
 - malformed provider endpoints, origins, CIDRs, or proxy URLs;
 - incomplete trusted-proxy configuration.

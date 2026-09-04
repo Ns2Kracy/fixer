@@ -89,12 +89,10 @@ pub async fn plan(args: PlanArgs, config: &Config) -> AppResult<RunStatus> {
 }
 
 async fn run_with_mode(
-    mut args: ScrapeArgs,
+    args: ScrapeArgs,
     config: &Config,
     mode: OutputMode,
 ) -> AppResult<RunStatus> {
-    args.placement
-        .get_or_insert_with(|| config.placement.into());
     if !args.path.exists() {
         return Err(AppError::invalid_input(format!(
             "input path does not exist: {}",
@@ -398,13 +396,23 @@ fn finish_plan(
             PathBuf::from,
         );
         if output_root.join(&target) != args.path {
-            let placement = plan_media_placement(
-                &args.path,
-                output_root,
-                target,
-                placement_mode(args.placement()),
-            )
-            .map_err(AppError::new)?;
+            let placement = if args.placement() == PlacementArg::Move {
+                let source = args.path.canonicalize().map_err(AppError::new)?;
+                let mut placement = fixer_core::OutputPlan::new(output_root);
+                placement.push(
+                    fixer_core::OutputOperation::move_file(source, target)
+                        .map_err(AppError::new)?,
+                );
+                placement
+            } else {
+                plan_media_placement(
+                    &args.path,
+                    output_root,
+                    target,
+                    placement_mode(args.placement()),
+                )
+                .map_err(AppError::new)?
+            };
             for operation in placement.operations() {
                 plan.push(operation.clone());
             }
@@ -727,9 +735,10 @@ fn reconcile_manifest(
     .map_err(AppError::new)
 }
 
-const fn placement_mode(placement: PlacementArg) -> PlacementMode {
+fn placement_mode(placement: PlacementArg) -> PlacementMode {
     match placement {
         PlacementArg::InPlace => PlacementMode::InPlace,
+        PlacementArg::Move => unreachable!("move placement is planned directly"),
         PlacementArg::Symlink => PlacementMode::RelativeSymlink,
         PlacementArg::Hardlink => PlacementMode::Hardlink,
         PlacementArg::Copy => PlacementMode::Copy,

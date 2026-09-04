@@ -142,7 +142,8 @@ The summary reports counts and structured warnings; it does not expose domain mo
 `plan` runs local identification, provider resolution, merging, and the selected writer. It returns before the output executor, so it cannot write even if targets do not exist.
 
 ```bash
-fixer --offline plan ./library/Arrival.2016.mkv --kind movie --json
+fixer --offline plan ./library/Arrival.2016.mkv \
+  --kind movie --placement in-place --json
 fixer --offline plan ./shows/Example.Show.S01E01.mkv \
   --kind television --placement hardlink --json
 ```
@@ -176,10 +177,12 @@ Operation names are `create_directory`, `write_bytes`, `copy`, `move`, `symlink`
 
 ```bash
 # Preview. This is also the default when neither flag is supplied.
-fixer --offline scrape ./library/Arrival.2016.mkv --kind movie --dry-run
+fixer --offline scrape ./library/Arrival.2016.mkv \
+  --kind movie --placement in-place --dry-run
 
 # Execute with no-overwrite behavior.
-fixer --offline scrape ./library/Arrival.2016.mkv --kind movie --apply
+fixer --offline scrape ./library/Arrival.2016.mkv \
+  --kind movie --placement move --apply
 ```
 
 `--dry-run` and `--apply` are mutually exclusive. Without `--apply`, the executor performs a dry run. Existing targets fail under the default no-overwrite policy.
@@ -191,12 +194,12 @@ Book scraping writes sidecars next to the selected EPUB. `--update-epub` require
 `plan` and `scrape` accept:
 
 ```text
---placement in-place|symlink|hardlink|copy|reflink
+--placement in-place|move|symlink|hardlink|copy|reflink
 ```
 
-The CLI flag overrides configured placement. Without the flag, `placement` or `FIXER_PLACEMENT` applies. The default is `in_place`.
+The `--placement` flag is required for every `plan` and `scrape` invocation. Placement is operation-scoped and never falls back to shared configuration.
 
-Non-in-place movie and television placement requires a media file path. `symlink` creates a relative symlink. Reflink remains required when selected; the executor does not silently fall back to copy.
+Non-in-place movie and television placement requires a media file path. `move` removes the source only after the destination is safely published, and `symlink` creates a relative symlink. Reflink remains required when selected; the executor does not silently fall back to copy.
 
 ## Output and conflict policies
 

@@ -14,8 +14,7 @@ use std::{
 use fixer_core::{Header, HttpClient, HttpError, HttpMethod, HttpRequest};
 use fixer_http::{HttpConfig, ReqwestHttpClient};
 use fixer_runtime::{
-    ConfigHandle, ConfigWriteError, ConflictPolicy, FixerConfig, OutputPreset, PlacementPolicy,
-    SecretString,
+    ConfigHandle, ConfigWriteError, ConflictPolicy, FixerConfig, OutputPreset, SecretString,
 };
 use language_tags::LanguageTag;
 use serde::{Deserialize, Serialize};
@@ -57,7 +56,6 @@ pub(super) struct WorkspaceSettingsInput {
     pub(super) auto_accept_confidence: f32,
     pub(super) review_confidence: f32,
     pub(super) output_preset: OutputPreset,
-    pub(super) placement: PlacementPolicy,
     pub(super) conflict_policy: ConflictPolicy,
     pub(super) enabled_providers: Vec<String>,
     pub(super) provider_endpoints: ProviderEndpoints,
@@ -78,7 +76,6 @@ pub(super) struct WorkspaceSettingsSnapshot {
     pub(super) auto_accept_confidence: f32,
     pub(super) review_confidence: f32,
     pub(super) output_preset: OutputPreset,
-    pub(super) placement: PlacementPolicy,
     pub(super) conflict_policy: ConflictPolicy,
     pub(super) enabled_providers: Vec<String>,
     pub(super) provider_endpoints: ProviderEndpoints,
@@ -105,7 +102,6 @@ impl WorkspaceSettingsSnapshot {
             auto_accept_confidence: config.auto_accept_confidence,
             review_confidence: config.review_confidence,
             output_preset: config.output_preset,
-            placement: config.placement,
             conflict_policy: config.conflict_policy,
             enabled_providers: config.enabled_providers.clone(),
             provider_endpoints: ProviderEndpoints {
@@ -580,7 +576,6 @@ fn apply_settings_input(config: &mut FixerConfig, input: WorkspaceSettingsInput)
     config.auto_accept_confidence = input.auto_accept_confidence;
     config.review_confidence = input.review_confidence;
     config.output_preset = input.output_preset;
-    config.placement = input.placement;
     config.conflict_policy = input.conflict_policy;
     config.enabled_providers = deduplicate(input.enabled_providers);
     config.providers.tmdb.base_url = input.provider_endpoints.tmdb;

@@ -33,19 +33,48 @@ fn help_lists_the_first_cli_surface() {
 }
 
 #[test]
-fn move_is_not_a_valid_placement() {
-    let output = run(fixer().args(["scrape", ".", "--kind", "movie", "--placement", "move"]));
+fn move_is_a_valid_explicit_placement() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("missing.mkv");
+    let output = run(fixer().arg("--offline").arg("scrape").arg(&missing).args([
+        "--kind",
+        "movie",
+        "--placement",
+        "move",
+    ]));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+
     assert_eq!(output.status.code(), Some(2));
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("invalid value")
-    );
+    assert!(stderr.contains("input path does not exist"), "{stderr}");
+    assert!(!stderr.contains("invalid value"), "{stderr}");
+}
+
+#[test]
+fn plan_and_scrape_require_explicit_placement() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("missing.mkv");
+
+    for command in ["plan", "scrape"] {
+        let output = run(fixer().arg(command).arg(&missing).args(["--kind", "movie"]));
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(stderr.contains("--placement <PLACEMENT>"), "{stderr}");
+        assert!(stderr.contains("required"), "{stderr}");
+    }
 }
 
 #[test]
 fn dry_run_and_apply_are_mutually_exclusive() {
-    let output = run(fixer().args(["scrape", ".", "--kind", "movie", "--dry-run", "--apply"]));
+    let output = run(fixer().args([
+        "scrape",
+        ".",
+        "--kind",
+        "movie",
+        "--placement",
+        "in-place",
+        "--dry-run",
+        "--apply",
+    ]));
     assert_eq!(output.status.code(), Some(2));
 }
 
@@ -223,10 +252,13 @@ fn scrape_warnings_return_partial_success_exit_code() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join("source.json"), fixture()).unwrap();
     fs::write(root.path().join("broken.nfo"), "<movie><title>broken").unwrap();
-    let output = run(fixer()
-        .arg("scrape")
-        .arg(root.path())
-        .args(["--kind", "movie", "--dry-run"]));
+    let output = run(fixer().arg("scrape").arg(root.path()).args([
+        "--kind",
+        "movie",
+        "--placement",
+        "in-place",
+        "--dry-run",
+    ]));
     assert_eq!(
         output.status.code(),
         Some(3),
@@ -326,7 +358,13 @@ fn television_search_resolve_and_scrape_work_offline() {
         .arg("--offline")
         .arg("scrape")
         .arg(root.path())
-        .args(["--kind", "television", "--dry-run"]));
+        .args([
+            "--kind",
+            "television",
+            "--placement",
+            "in-place",
+            "--dry-run",
+        ]));
     assert_eq!(
         scrape.status.code(),
         Some(3),
@@ -343,7 +381,7 @@ fn television_search_resolve_and_scrape_work_offline() {
         .arg("--offline")
         .arg("scrape")
         .arg(&episode_path)
-        .args(["--kind", "television", "--apply"]));
+        .args(["--kind", "television", "--placement", "in-place", "--apply"]));
     assert_eq!(
         apply.status.code(),
         Some(3),
@@ -421,7 +459,13 @@ fn television_scrape_rejects_roots_with_multiple_series() {
         .arg("--offline")
         .arg("scrape")
         .arg(root.path())
-        .args(["--kind", "television", "--dry-run"]));
+        .args([
+            "--kind",
+            "television",
+            "--placement",
+            "in-place",
+            "--dry-run",
+        ]));
 
     assert_eq!(output.status.code(), Some(2));
     assert!(
@@ -436,10 +480,13 @@ fn apply_defaults_to_no_overwrite() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join("source.json"), fixture()).unwrap();
     fs::write(root.path().join("movie.json"), "existing").unwrap();
-    let output = run(fixer()
-        .arg("scrape")
-        .arg(root.path())
-        .args(["--kind", "movie", "--apply"]));
+    let output = run(fixer().arg("scrape").arg(root.path()).args([
+        "--kind",
+        "movie",
+        "--placement",
+        "in-place",
+        "--apply",
+    ]));
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         fs::read_to_string(root.path().join("movie.json")).unwrap(),

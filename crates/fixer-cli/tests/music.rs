@@ -121,7 +121,7 @@ fn music_scrape_plans_and_applies_metadata_without_mutating_audio() {
         .arg("--offline")
         .arg("scrape")
         .arg(&album)
-        .args(["--kind", "music", "--dry-run"])
+        .args(["--kind", "music", "--placement", "in-place", "--dry-run"])
         .output()
         .unwrap();
     assert_eq!(
@@ -141,7 +141,7 @@ fn music_scrape_plans_and_applies_metadata_without_mutating_audio() {
         .arg("--offline")
         .arg("scrape")
         .arg(&album)
-        .args(["--kind", "music", "--apply"])
+        .args(["--kind", "music", "--placement", "in-place", "--apply"])
         .output()
         .unwrap();
     assert_eq!(

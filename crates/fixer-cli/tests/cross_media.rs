@@ -28,7 +28,6 @@ fn config_validates_and_reports_the_cross_media_policy_schema() {
           "auto_accept_confidence": 0.9,
           "review_confidence": 0.6,
           "output_preset": "full",
-          "placement": "copy",
           "conflict_policy": "review",
           "enabled_providers": ["local", "openlibrary"],
           "secret_references": {
@@ -50,7 +49,6 @@ fn config_validates_and_reports_the_cross_media_policy_schema() {
         "auto_accept_confidence: 0.9",
         "review_confidence: 0.6",
         "output_preset: full",
-        "placement: copy",
         "conflict_policy: review",
         "enabled_providers: local,openlibrary",
         "tmdb_secret: configured",
@@ -58,6 +56,7 @@ fn config_validates_and_reports_the_cross_media_policy_schema() {
     ] {
         assert!(stdout.contains(line), "missing `{line}` in {stdout}");
     }
+    assert!(!stdout.contains("placement:"));
     assert!(!stdout.contains("tmdb-secret-value"));
     assert!(!stdout.contains("anilist-secret-value"));
     assert!(!format!("{output:?}").contains("secret-value"));
@@ -366,44 +365,20 @@ fn semantic_invalid_input_returns_usage_exit_code() {
 }
 
 #[test]
-fn configured_placement_is_used_when_the_cli_flag_is_absent() {
+fn obsolete_configured_placement_does_not_satisfy_required_cli_flag() {
     let root = tempfile::tempdir().unwrap();
-    let library = root.path().join("library");
-    fs::create_dir(&library).unwrap();
-    let media = library.join("Example.Movie.2020.mkv");
-    fs::write(&media, b"movie").unwrap();
     let config = root.path().join("fixer.json");
-    fs::write(
-        &config,
-        r#"{"enabled_providers":["local"],"placement":"copy"}"#,
-    )
-    .unwrap();
+    fs::write(&config, r#"{"placement":"copy"}"#).unwrap();
 
     let output = fixer()
         .args(["--config", config.to_str().unwrap(), "--offline", "plan"])
-        .arg(&media)
+        .arg(root.path())
         .args(["--kind", "movie", "--json"])
         .output()
         .unwrap();
-    assert_eq!(
-        output.status.code(),
-        Some(3),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(
-        value["output_root"]
-            .as_str()
-            .unwrap()
-            .ends_with("Example Movie (2020)")
-    );
-    assert!(
-        value["operations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|operation| operation["operation"] == "copy")
-    );
-    assert!(!library.join("Example Movie (2020)").exists());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr.contains("--placement <PLACEMENT>"), "{stderr}");
+    assert!(stderr.contains("required"), "{stderr}");
 }

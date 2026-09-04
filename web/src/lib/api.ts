@@ -83,18 +83,6 @@ export function isOutputPreset(value: string): value is OutputPreset {
   return isStringValue(value, OUTPUT_PRESETS);
 }
 
-const PLACEMENT_POLICIES = [
-  "in_place",
-  "symlink",
-  "hardlink",
-  "copy",
-  "reflink",
-] as const;
-export type PlacementPolicy = (typeof PLACEMENT_POLICIES)[number];
-export function isPlacementPolicy(value: string): value is PlacementPolicy {
-  return isStringValue(value, PLACEMENT_POLICIES);
-}
-
 const CONFLICT_POLICIES = ["prefer_first", "review", "error"] as const;
 export type ConflictPolicy = (typeof CONFLICT_POLICIES)[number];
 export function isConflictPolicy(value: string): value is ConflictPolicy {
@@ -118,7 +106,6 @@ export interface WorkspaceSettingsBase {
   auto_accept_confidence: number;
   review_confidence: number;
   output_preset: OutputPreset;
-  placement: PlacementPolicy;
   conflict_policy: ConflictPolicy;
   enabled_providers: ProviderId[];
   provider_endpoints: ProviderEndpoints;

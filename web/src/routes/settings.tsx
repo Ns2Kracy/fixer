@@ -12,7 +12,6 @@ import {
   api,
   isConflictPolicy,
   isOutputPreset,
-  isPlacementPolicy,
   type ProviderEndpoints,
   type ProviderId,
   type UpdateWorkspaceSettingsRequest,
@@ -280,11 +279,11 @@ function SettingsPage() {
                     Plan defaults
                   </h2>
                   <p class="mt-3 mb-0 text-sm text-muted">
-                    Choose what is planned and how media placement conflicts are
+                    Choose the output package and how metadata conflicts are
                     handled.
                   </p>
                 </div>
-                <div class="grid grid-cols-3 gap-5 max-[800px]:grid-cols-1">
+                <div class="grid grid-cols-2 gap-5 max-[800px]:grid-cols-1">
                   <FormField label="Output preset">
                     <select
                       value={form().output_preset}
@@ -296,21 +295,6 @@ function SettingsPage() {
                     >
                       <option value="full">Full media package</option>
                       <option value="metadata">Metadata only</option>
-                    </select>
-                  </FormField>
-                  <FormField label="Placement">
-                    <select
-                      value={form().placement}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        if (isPlacementPolicy(value)) patch("placement", value);
-                      }}
-                    >
-                      <option value="in_place">In place</option>
-                      <option value="symlink">Symlink</option>
-                      <option value="hardlink">Hardlink</option>
-                      <option value="copy">Copy</option>
-                      <option value="reflink">Reflink</option>
                     </select>
                   </FormField>
                   <FormField label="Conflict policy">
@@ -563,7 +547,6 @@ function editableSettings(
     auto_accept_confidence: settings.auto_accept_confidence,
     review_confidence: settings.review_confidence,
     output_preset: settings.output_preset,
-    placement: settings.placement,
     conflict_policy: settings.conflict_policy,
     enabled_providers: [...settings.enabled_providers],
     provider_endpoints: { ...settings.provider_endpoints },

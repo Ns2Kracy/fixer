@@ -50,6 +50,7 @@ pub enum PlacementPolicy {
     #[default]
     #[serde(alias = "in-place")]
     InPlace,
+    Move,
     Symlink,
     Hardlink,
     Copy,
@@ -59,6 +60,7 @@ impl fmt::Display for PlacementPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::InPlace => "in_place",
+            Self::Move => "move",
             Self::Symlink => "symlink",
             Self::Hardlink => "hardlink",
             Self::Copy => "copy",
@@ -314,7 +316,6 @@ pub struct FixerConfig {
     pub auto_accept_confidence: f32,
     pub review_confidence: f32,
     pub output_preset: OutputPreset,
-    pub placement: PlacementPolicy,
     pub conflict_policy: ConflictPolicy,
     pub enabled_providers: Vec<String>,
     pub providers: ProvidersConfig,
@@ -332,7 +333,6 @@ impl Default for FixerConfig {
             auto_accept_confidence: 0.9,
             review_confidence: 0.6,
             output_preset: OutputPreset::Full,
-            placement: PlacementPolicy::InPlace,
             conflict_policy: ConflictPolicy::Review,
             enabled_providers: DEFAULT_PROVIDERS.iter().map(|v| (*v).to_owned()).collect(),
             providers: ProvidersConfig::default(),
@@ -795,6 +795,7 @@ impl Source for CompatibleFile {
 }
 
 fn normalize_legacy_file(values: &mut Map<String, Value>) -> Result<(), config::ConfigError> {
+    values.remove("placement");
     move_legacy_value(
         values,
         &["api_key", "tmdb_api_token"],
@@ -1036,7 +1037,6 @@ fn filtered_environment(
         "FIXER_AUTO_ACCEPT_CONFIDENCE",
         "FIXER_REVIEW_CONFIDENCE",
         "FIXER_OUTPUT_PRESET",
-        "FIXER_PLACEMENT",
         "FIXER_CONFLICT_POLICY",
         "FIXER_ENABLED_PROVIDERS",
         "FIXER_PROVIDERS__TMDB__BASE_URL",

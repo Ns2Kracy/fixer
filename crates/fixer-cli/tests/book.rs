@@ -163,7 +163,7 @@ fn book_scrape_plans_and_applies_sidecars_without_altering_epub() {
         .arg("--offline")
         .arg("scrape")
         .arg(&epub)
-        .args(["--kind", "book", "--dry-run"])
+        .args(["--kind", "book", "--placement", "in-place", "--dry-run"])
         .output()
         .unwrap();
     assert_eq!(
@@ -184,7 +184,7 @@ fn book_scrape_plans_and_applies_sidecars_without_altering_epub() {
         .arg("--offline")
         .arg("scrape")
         .arg(&epub)
-        .args(["--kind", "book", "--apply"])
+        .args(["--kind", "book", "--placement", "in-place", "--apply"])
         .output()
         .unwrap();
     assert_eq!(
@@ -213,7 +213,14 @@ fn epub_update_opt_in_writes_confirmation_intent_but_never_targets_archive() {
         .arg("--offline")
         .arg("scrape")
         .arg(&epub)
-        .args(["--kind", "book", "--update-epub", "--apply"])
+        .args([
+            "--kind",
+            "book",
+            "--placement",
+            "in-place",
+            "--update-epub",
+            "--apply",
+        ])
         .output()
         .unwrap();
 

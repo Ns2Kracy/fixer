@@ -158,7 +158,7 @@ pub struct PlanArgs {
     #[arg(long, value_enum)]
     pub kind: MediaKindArg,
     #[arg(long, value_enum)]
-    pub placement: Option<PlacementArg>,
+    pub placement: PlacementArg,
     #[arg(long)]
     pub json: bool,
 }
@@ -173,7 +173,7 @@ pub struct ScrapeArgs {
     #[arg(long, conflicts_with = "dry_run")]
     pub apply: bool,
     #[arg(long, value_enum)]
-    pub placement: Option<PlacementArg>,
+    pub placement: PlacementArg,
     #[arg(long)]
     pub update_epub: bool,
 }
@@ -219,28 +219,16 @@ impl From<OrderingArg> for fixer_core::OrderingScheme {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum PlacementArg {
     InPlace,
+    Move,
     Symlink,
     Hardlink,
     Copy,
     Reflink,
 }
 
-impl From<crate::config::PlacementPolicy> for PlacementArg {
-    fn from(value: crate::config::PlacementPolicy) -> Self {
-        match value {
-            crate::config::PlacementPolicy::InPlace => Self::InPlace,
-            crate::config::PlacementPolicy::Symlink => Self::Symlink,
-            crate::config::PlacementPolicy::Hardlink => Self::Hardlink,
-            crate::config::PlacementPolicy::Copy => Self::Copy,
-            crate::config::PlacementPolicy::Reflink => Self::Reflink,
-        }
-    }
-}
-
 impl ScrapeArgs {
     pub const fn placement(&self) -> PlacementArg {
         self.placement
-            .expect("placement is resolved before media dispatch")
     }
 }
 

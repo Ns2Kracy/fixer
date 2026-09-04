@@ -30,7 +30,7 @@ fn anime_scrape_previews_cour_hierarchy_in_place() {
         .arg("--offline")
         .arg("scrape")
         .arg(root.path().join("Frieren"))
-        .args(["--kind", "anime", "--dry-run"])
+        .args(["--kind", "anime", "--placement", "in-place", "--dry-run"])
         .output()
         .unwrap();
 

@@ -157,7 +157,7 @@ fn plan_dispatches_all_media_with_stable_json_and_never_writes() {
             .arg("--offline")
             .arg("plan")
             .arg(&input)
-            .args(["--kind", kind, "--json"])
+            .args(["--kind", kind, "--placement", "in-place", "--json"])
             .output()
             .unwrap();
 

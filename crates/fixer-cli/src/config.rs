@@ -4,7 +4,7 @@ use fixer_runtime::{ConfigLoader, ConfigOverrides, FixerConfig, LoadedConfig};
 
 use crate::{AppError, AppResult};
 
-pub use fixer_runtime::{ConflictPolicy, OutputPreset, PlacementPolicy};
+pub use fixer_runtime::{ConflictPolicy, OutputPreset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigSource {
@@ -118,7 +118,7 @@ impl Config {
         let locales = self.shared.preferred_locales.join(",");
         let providers = self.shared.enabled_providers.join(",");
         format!(
-            "configuration valid\noffline: {} ({})\nproxy: {} ({})\nlocal_root: {} ({})\napi_key: {} ({})\npreferred_locales: {}\ntimeout_seconds: {}\nauto_accept_confidence: {}\nreview_confidence: {}\noutput_preset: {}\nplacement: {}\nconflict_policy: {}\nenabled_providers: {}\ntmdb_secret: {}\nanilist_secret: {}\nopenlibrary_api: {}\nopenlibrary_cover: {}\nanilist: {} ({})\n",
+            "configuration valid\noffline: {} ({})\nproxy: {} ({})\nlocal_root: {} ({})\napi_key: {} ({})\npreferred_locales: {}\ntimeout_seconds: {}\nauto_accept_confidence: {}\nreview_confidence: {}\noutput_preset: {}\nconflict_policy: {}\nenabled_providers: {}\ntmdb_secret: {}\nanilist_secret: {}\nopenlibrary_api: {}\nopenlibrary_cover: {}\nanilist: {} ({})\n",
             self.shared.offline,
             self.sources.offline,
             configured(self.shared.proxy.as_ref()),
@@ -132,7 +132,6 @@ impl Config {
             self.shared.auto_accept_confidence,
             self.shared.review_confidence,
             self.shared.output_preset,
-            self.shared.placement,
             self.shared.conflict_policy,
             providers,
             configured_bool(self.shared.providers.tmdb.api_token_env.is_some()),

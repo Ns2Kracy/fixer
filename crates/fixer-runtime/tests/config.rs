@@ -6,9 +6,7 @@ use std::{
     thread,
 };
 
-use fixer_runtime::{
-    ConfigLoader, ConflictPolicy, FixerConfig, LoggingFormat, OutputPreset, PlacementPolicy,
-};
+use fixer_runtime::{ConfigLoader, ConflictPolicy, FixerConfig, LoggingFormat, OutputPreset};
 
 fn env(values: &[(&str, &str)]) -> BTreeMap<String, String> {
     values
@@ -31,7 +29,6 @@ timeout_seconds = 17
 auto_accept_confidence = 0.8
 review_confidence = 0.5
 output_preset = "metadata"
-placement = "copy"
 conflict_policy = "prefer_first"
 enabled_providers = ["local", "anilist"]
 
@@ -69,7 +66,6 @@ format = "json"
     assert_eq!(config.preferred_locales, ["zh-Hans", "ja"]);
     assert_eq!(config.timeout_seconds, 17);
     assert_eq!(config.output_preset, OutputPreset::Metadata);
-    assert_eq!(config.placement, PlacementPolicy::Copy);
     assert_eq!(config.conflict_policy, ConflictPolicy::PreferFirst);
     assert_eq!(config.enabled_provider_names(), ["local", "anilist"]);
     assert_eq!(config.server.bind.to_string(), "127.0.0.1:4312");
@@ -83,6 +79,25 @@ format = "json"
     );
     assert_eq!(config.server.web_root, root.path().join("public"));
     assert_eq!(config.logging.format, LoggingFormat::Json);
+}
+
+#[test]
+fn obsolete_global_placement_config_is_ignored_and_not_serialized() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("fixer.toml"), "placement = 'copy'\n").unwrap();
+
+    let loaded = ConfigLoader::new(root.path())
+        .with_environment(env(&[("FIXER_PLACEMENT", "reflink")]))
+        .load()
+        .unwrap();
+
+    assert!(!loaded.has_file_field("placement"));
+    let serialized = toml::to_string(loaded.config()).unwrap();
+    assert!(
+        !serialized
+            .lines()
+            .any(|line| line.starts_with("placement ="))
+    );
 }
 
 #[test]
