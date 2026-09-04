@@ -19,9 +19,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use app::{app, job_app, secure_job_app, secure_workspace_app, workspace_app};
+pub use app::{
+    app, job_app, secure_job_app, secure_workspace_app, secure_workspace_app_with_notifications,
+    workspace_app,
+};
 pub use auth::{AuthConfigError, AuthState, ClientIp};
 pub use fs_policy::{FsPolicy, FsPolicyError};
+pub use ingestion::{IngestionNotification, IngestionNotifications, IngestionRuntime};
 pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
 pub use network_policy::{TrustedProxyError, TrustedProxyPolicy};
 pub use observability::{TracingInitError, init_tracing};
@@ -357,8 +361,14 @@ async fn serve_inner(
         ),
         None => runtime.start_local_workers(config.worker_count()),
     };
+    let ingestion_notifications = IngestionNotifications::default();
     let application = observed_web_app(
-        app::secure_workspace_routes(runtime, auth_state, workspace_state),
+        app::secure_workspace_routes(
+            runtime,
+            auth_state,
+            workspace_state,
+            ingestion_notifications,
+        ),
         web_root,
     );
     let serve_result = axum::serve(

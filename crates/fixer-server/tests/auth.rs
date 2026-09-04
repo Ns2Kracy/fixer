@@ -506,6 +506,74 @@ async fn workspace_routes_require_authentication_and_csrf() {
 }
 
 #[tokio::test]
+async fn ingestion_rule_routes_require_authentication_and_csrf() {
+    let (root, _store, router) = secure_app(false).await;
+    std::fs::create_dir(root.path().join("incoming")).unwrap();
+    std::fs::create_dir(root.path().join("library")).unwrap();
+
+    let unauthorized = router
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/ingestion-rules")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let (cookie, csrf) = login(&router).await;
+    let roots = router
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/library/roots")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(roots.status(), StatusCode::OK);
+    let roots = json_body(roots).await;
+    let root_id = roots["roots"][0]["id"].as_str().unwrap();
+    let request = json!({
+        "name": "Authenticated ingestion",
+        "source": {"root_id": root_id, "path": "incoming"},
+        "destination": {"root_id": root_id, "path": "library"},
+        "media_kind_mode": "auto",
+        "placement": "copy",
+        "enabled": true
+    })
+    .to_string();
+
+    let missing_csrf = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/ingestion-rules")
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing_csrf.status(), StatusCode::FORBIDDEN);
+
+    let accepted = router
+        .oneshot(
+            Request::post("/api/v1/ingestion-rules")
+                .header(header::COOKIE, cookie)
+                .header("x-csrf-token", csrf)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
 async fn cookie_state_changes_require_csrf_but_bearer_tokens_do_not() {
     let (root, store, router) = secure_app(false).await;
     let media = root.path().join("movie.mkv");

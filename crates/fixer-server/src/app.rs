@@ -1,6 +1,9 @@
 use axum::Router;
 
-use crate::{WorkspaceState, auth::AuthState, jobs::JobRuntime, observability};
+use crate::{
+    IngestionNotifications, IngestionRuntime, WorkspaceState, auth::AuthState, jobs::JobRuntime,
+    observability,
+};
 
 /// Builds the stateless HTTP router without opening a listener.
 pub fn app() -> Router {
@@ -41,10 +44,26 @@ pub fn secure_workspace_app(
     auth_state: AuthState,
     workspace_state: WorkspaceState,
 ) -> Router {
+    secure_workspace_app_with_notifications(
+        runtime,
+        auth_state,
+        workspace_state,
+        IngestionNotifications::default(),
+    )
+}
+
+/// Builds the authenticated production router with an observable ingestion notification handle.
+pub fn secure_workspace_app_with_notifications(
+    runtime: JobRuntime,
+    auth_state: AuthState,
+    workspace_state: WorkspaceState,
+    notifications: IngestionNotifications,
+) -> Router {
     observability::observe(secure_workspace_routes(
         runtime,
         auth_state,
         workspace_state,
+        notifications,
     ))
 }
 
@@ -52,11 +71,19 @@ pub fn secure_workspace_routes(
     runtime: JobRuntime,
     auth_state: AuthState,
     workspace_state: WorkspaceState,
+    notifications: IngestionNotifications,
 ) -> Router {
+    let ingestion_runtime = IngestionRuntime::new(
+        auth_state.store().clone(),
+        runtime.clone(),
+        workspace_state.clone(),
+        notifications,
+    );
     api_app(crate::api::v1::secure_workspace_router(
         runtime,
         auth_state.clone(),
         workspace_state,
+        ingestion_runtime,
     ))
     .layer(axum::middleware::from_fn_with_state(
         auth_state.clone(),
