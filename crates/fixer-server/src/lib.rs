@@ -25,7 +25,10 @@ pub use app::{
 };
 pub use auth::{AuthConfigError, AuthState, ClientIp};
 pub use fs_policy::{FsPolicy, FsPolicyError};
-pub use ingestion::{IngestionNotification, IngestionNotifications, IngestionRuntime};
+pub use ingestion::{
+    IngestionNotification, IngestionNotifications, IngestionRuntime,
+    watcher::{IngestionSupervisor, IngestionSupervisorConfig},
+};
 pub use jobs::{JobFlowError, JobRuntime, SdkJobFlow, SearchSummary, WorkerPool};
 pub use network_policy::{TrustedProxyError, TrustedProxyPolicy};
 pub use observability::{TracingInitError, init_tracing};
@@ -338,7 +341,7 @@ async fn serve_inner(
         Some(RuntimeConfiguration::Static(_)) | None => WorkspaceState::new(fs_policy.roots())?,
     };
     let runtime = JobRuntime::new(store.clone(), DEFAULT_EVENT_CAPACITY).with_fs_policy(fs_policy);
-    let auth_state = AuthState::new(store)
+    let auth_state = AuthState::new(store.clone())
         .with_secure_cookie(config.https_termination)
         .with_allowed_origins(config.allowed_origins.iter().map(String::as_str))
         .map_err(ServerConfigError::from)?
@@ -362,6 +365,12 @@ async fn serve_inner(
         None => runtime.start_local_workers(config.worker_count()),
     };
     let ingestion_notifications = IngestionNotifications::default();
+    let ingestion_supervisor = IngestionSupervisor::start(IngestionRuntime::new(
+        store,
+        runtime.clone(),
+        workspace_state.clone(),
+        ingestion_notifications.clone(),
+    ));
     let application = observed_web_app(
         app::secure_workspace_routes(
             runtime,
@@ -377,6 +386,7 @@ async fn serve_inner(
     )
     .with_graceful_shutdown(shutdown_signal())
     .await;
+    ingestion_supervisor.shutdown().await;
     workers.shutdown().await;
     serve_result?;
     Ok(())

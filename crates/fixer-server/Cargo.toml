@@ -26,6 +26,7 @@ base64.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
 ipnet.workspace = true
+notify.workspace = true
 language-tags.workspace = true
 fs2.workspace = true
 same-file.workspace = true

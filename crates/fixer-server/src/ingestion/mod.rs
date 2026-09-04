@@ -1,5 +1,6 @@
 pub mod discovery;
 pub mod model;
+pub mod watcher;
 
 use tokio::sync::broadcast;
 
@@ -55,7 +56,7 @@ impl Default for IngestionNotifications {
 #[derive(Clone)]
 pub struct IngestionRuntime {
     store: SqliteJobStore,
-    _jobs: JobRuntime,
+    jobs: JobRuntime,
     workspace: WorkspaceState,
     notifications: IngestionNotifications,
 }
@@ -69,7 +70,7 @@ impl IngestionRuntime {
     ) -> Self {
         Self {
             store,
-            _jobs: jobs,
+            jobs,
             workspace,
             notifications,
         }

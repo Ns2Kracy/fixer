@@ -320,6 +320,22 @@ impl SqliteJobStore {
             .transpose()
     }
 
+    pub async fn set_ingestion_rule_error(
+        &self,
+        id: IngestionRuleId,
+        error: Option<&str>,
+    ) -> Result<bool, StoreError> {
+        let result = sqlx::query(
+            "UPDATE ingestion_rules SET last_error = ?, updated_at_ms = ? WHERE id = ?",
+        )
+        .bind(error)
+        .bind(timestamp_ms()?)
+        .bind(id.get())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub async fn delete_ingestion_rule(&self, id: IngestionRuleId) -> Result<bool, StoreError> {
         let result = sqlx::query("DELETE FROM ingestion_rules WHERE id = ?")
             .bind(id.get())
