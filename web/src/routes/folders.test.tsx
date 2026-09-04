@@ -18,6 +18,7 @@ const watchingRule: IngestionRuleDto = {
   path_template_override: null,
   enabled: true,
   status: "needs_review",
+  review_count: 1,
   last_error: null,
   created_at_ms: 1,
   updated_at_ms: 2,
@@ -33,6 +34,7 @@ const pausedRule: IngestionRuleDto = {
   placement: "hardlink",
   enabled: false,
   status: "paused",
+  review_count: 0,
 };
 
 function json(body: unknown, status = 200) {
@@ -47,6 +49,7 @@ function installApi(
   options: { failUpdate?: boolean; failList?: boolean } = {},
 ) {
   let rules = [...initialRules];
+  let reviewResolved = false;
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -103,12 +106,35 @@ function installApi(
         ...request,
         id: 9,
         status: "watching",
+        review_count: 0,
         last_error: null,
         created_at_ms: 3,
         updated_at_ms: 3,
       } as IngestionRuleDto;
       rules = [...rules, rule];
       return json({ schema_version: 1, rule }, 201);
+    }
+    if (url === "/api/v1/ingestion-rules/7/reviews" && method === "GET") {
+      return json({
+        schema_version: 1,
+        rule_id: 7,
+        reviews: reviewResolved
+          ? []
+          : [
+              {
+                source_id: 41,
+                relative_path: "Shared release",
+                media_kinds: ["movie", "television"],
+              },
+            ],
+      });
+    }
+    if (url === "/api/v1/ingestion-sources/41/resolve" && method === "POST") {
+      reviewResolved = true;
+      rules = rules.map((rule) =>
+        rule.id === 7 ? { ...rule, status: "processing" } : rule,
+      );
+      return json({ schema_version: 1, source_id: 41, job_id: 73 }, 202);
     }
     const ruleMatch = url.match(/^\/api\/v1\/ingestion-rules\/(\d+)$/u);
     if (ruleMatch !== null && method === "PUT") {
@@ -183,10 +209,21 @@ describe("Folders route", () => {
     );
     expect(firstRule).toHaveTextContent("Downloads → Movies");
     expect(screen.getByText("Needs review")).toBeVisible();
-    expect(screen.getByRole("link", { name: /Review jobs/u })).toHaveAttribute(
-      "href",
-      "/jobs",
+    await user.click(
+      screen.getByRole("button", { name: "Review media type (1)" }),
     );
+    expect(await screen.findByText("Shared release")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Use Television" }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === "/api/v1/ingestion-sources/41/resolve" &&
+          init?.method === "POST",
+      );
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+        media_kind: "television",
+      });
+    });
 
     await user.click(screen.getAllByRole("button", { name: "Edit" })[0]!);
     expect(
@@ -256,13 +293,14 @@ describe("Folders route", () => {
     );
     expect(save).toBeEnabled();
 
-    await user.click(
-      screen.getByRole("checkbox", { name: "Use custom path template" }),
-    );
+    const pathLayout = screen.getByLabelText("Path layout");
+    expect(pathLayout).toHaveValue("recommended");
+    await user.selectOptions(pathLayout, "id-title");
+    expect(screen.getByText("{{ id }}/{{ title | sanitize }}")).toBeVisible();
+    await user.selectOptions(pathLayout, "custom");
     expect(save).toBeDisabled();
     await user.click(screen.getByLabelText("Path template override"));
     await user.paste("Custom/{{ title | sanitize }}");
-    await user.click(screen.getByRole("button", { name: "Preview path" }));
     expect(await screen.findByLabelText("Template preview")).toHaveTextContent(
       "Custom/Example Title",
     );

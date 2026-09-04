@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, path::PathBuf};
 
 use axum::{
     Router,
@@ -7,7 +7,8 @@ use axum::{
 };
 use fixer_server::{
     AuthState, IngestionNotification, IngestionNotifications, JobRuntime, SqliteJobStore,
-    WorkspaceState, secure_workspace_app_with_notifications,
+    WorkspaceState, ingestion::model::SourceFingerprint, jobs::model::JobMediaKind,
+    secure_workspace_app_with_notifications,
 };
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -20,6 +21,7 @@ struct TestApp {
     root_id: String,
     token: String,
     notifications: IngestionNotifications,
+    store: SqliteJobStore,
     router: Router,
 }
 
@@ -39,7 +41,7 @@ impl TestApp {
         let issued = store.issue_api_token("ingestion-tests").await.unwrap();
         let token = issued.token().to_owned();
         let runtime = JobRuntime::new(store.clone(), NonZeroUsize::new(8).unwrap());
-        let auth = AuthState::new(store);
+        let auth = AuthState::new(store.clone());
         let workspace = WorkspaceState::new([&media_root]).unwrap();
         let notifications = IngestionNotifications::new();
         let router = secure_workspace_app_with_notifications(
@@ -67,6 +69,7 @@ impl TestApp {
             root_id,
             token,
             notifications,
+            store,
             router,
         }
     }
@@ -77,16 +80,12 @@ impl TestApp {
         uri: &str,
         body: Option<Value>,
     ) -> axum::response::Response {
-        let mut builder = Request::builder()
+        let builder = Request::builder()
             .method(method)
             .uri(uri)
-            .header(header::AUTHORIZATION, format!("Bearer {}", self.token));
-        let body = if let Some(body) = body {
-            builder = builder.header(header::CONTENT_TYPE, "application/json");
-            Body::from(body.to_string())
-        } else {
-            Body::empty()
-        };
+            .header(header::AUTHORIZATION, format!("Bearer {}", self.token))
+            .header(header::CONTENT_TYPE, "application/json");
+        let body = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
         send(&self.router, builder.body(body).unwrap()).await
     }
 
@@ -130,6 +129,7 @@ async fn one_off_jobs_resolve_directory_references_and_require_safe_pairs() {
     let created = app.request("POST", "/api/v1/jobs", Some(request)).await;
     assert_eq!(created.status(), StatusCode::ACCEPTED);
     let created = response_json(created).await;
+    app.assert_safe(&created);
     assert_eq!(created["job"]["input"]["media_kind"], "movie");
     assert_eq!(created["job"]["input"]["apply"], true);
     assert_eq!(
@@ -233,6 +233,90 @@ async fn authenticated_rule_crud_and_scan_use_opaque_directory_references() {
     let listed = app.request("GET", "/api/v1/ingestion-rules", None).await;
     let listed = response_json(listed).await;
     assert_eq!(listed["rules"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn ambiguous_sources_can_be_reviewed_and_queued_with_a_selected_kind() {
+    let app = TestApp::new().await;
+    let ambiguous = PathBuf::from(&app.root_path).join("incoming/ambiguous");
+    std::fs::create_dir(&ambiguous).unwrap();
+    std::fs::write(ambiguous.join("shared.mkv"), b"media").unwrap();
+    let created = app
+        .request("POST", "/api/v1/ingestion-rules", Some(app.rule_request()))
+        .await;
+    let created = response_json(created).await;
+    let rule_id = created["rule"]["id"].as_i64().unwrap();
+    let rule = app
+        .store
+        .list_ingestion_rules(100)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|rule| rule.id().get() == rule_id)
+        .unwrap();
+    let source = app
+        .store
+        .reserve_source(
+            rule.id(),
+            SourceFingerprint::new("ambiguous", 5, 1).unwrap(),
+        )
+        .await
+        .unwrap();
+    app.store
+        .update_source_review(
+            source.source().id(),
+            &[JobMediaKind::Movie, JobMediaKind::Television],
+        )
+        .await
+        .unwrap();
+
+    let rules = app.request("GET", "/api/v1/ingestion-rules", None).await;
+    assert_eq!(response_json(rules).await["rules"][0]["review_count"], 1);
+
+    let reviews = app
+        .request(
+            "GET",
+            &format!("/api/v1/ingestion-rules/{rule_id}/reviews"),
+            None,
+        )
+        .await;
+    assert_eq!(reviews.status(), StatusCode::OK);
+    let reviews = response_json(reviews).await;
+    app.assert_safe(&reviews);
+    assert_eq!(reviews["reviews"][0]["relative_path"], "ambiguous");
+    assert_eq!(
+        reviews["reviews"][0]["media_kinds"],
+        json!(["movie", "television"])
+    );
+
+    let resolved = app
+        .request(
+            "POST",
+            &format!(
+                "/api/v1/ingestion-sources/{}/resolve",
+                source.source().id().get()
+            ),
+            Some(json!({"media_kind": "television"})),
+        )
+        .await;
+    assert_eq!(resolved.status(), StatusCode::ACCEPTED);
+    let resolved = response_json(resolved).await;
+    assert!(resolved["job_id"].as_i64().unwrap() > 0);
+    let reviews = app
+        .request(
+            "GET",
+            &format!("/api/v1/ingestion-rules/{rule_id}/reviews"),
+            None,
+        )
+        .await;
+    assert!(
+        response_json(reviews).await["reviews"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let rules = app.request("GET", "/api/v1/ingestion-rules", None).await;
+    assert_eq!(response_json(rules).await["rules"][0]["review_count"], 0);
 }
 
 #[tokio::test]

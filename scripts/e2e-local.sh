@@ -40,13 +40,13 @@ SERVER_LOG="$TEMP_DIR/server.log"
 MEDIA_ROOT="$TEMP_DIR/library"
 MOVIE_DIR="$MEDIA_ROOT/movie/In the Mood for Love (2000)"
 MEDIA_PATH="$MOVIE_DIR"
-OUTPUT_PATH="$MOVIE_DIR/movie.json"
+DESTINATION_PATH="$MEDIA_ROOT/organized"
 DATABASE_PATH="$TEMP_DIR/fixer.sqlite"
 FIXTURE_DIR="$ROOT_DIR/tests/fixtures/library/movie/In the Mood for Love (2000)"
 CARGO_MESSAGES="$TEMP_DIR/cargo-build.json"
 CONFIG_PATH="$TEMP_DIR/fixer.toml"
 
-mkdir -p "$MEDIA_ROOT/movie"
+mkdir -p "$MEDIA_ROOT/movie" "$DESTINATION_PATH"
 cp -R "$FIXTURE_DIR" "$MEDIA_ROOT/movie/"
 
 if [ -z "${FIXER_E2E_BROWSER_CHANNEL:-}" ]; then
@@ -158,7 +158,7 @@ FIXER_E2E_BASE_URL="$BASE_URL" \
   FIXER_E2E_USERNAME="$USERNAME" \
   FIXER_E2E_PASSWORD="$PASSWORD" \
   FIXER_E2E_MEDIA_PATH="$MEDIA_PATH" \
-  FIXER_E2E_OUTPUT_PATH="$OUTPUT_PATH" \
+  FIXER_E2E_DESTINATION_PATH="$DESTINATION_PATH" \
   pnpm --dir "$ROOT_DIR/web" test:e2e &
 TEST_PID=$!
 if wait "$TEST_PID"; then

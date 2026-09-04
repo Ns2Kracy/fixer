@@ -119,11 +119,24 @@ Use absolute canonical media roots. On macOS, `/var/...` can canonicalize to `/p
 
 External server embedders must use absolute canonical copy/hardlink/reflink sources because current `FsPolicy` and SDK executor relative-source bases differ.
 
+## Folder rule is idle, reviewing, or in error
+
+Check the rule row in **Folders** before changing files:
+
+- **Paused** means the rule is disabled; verify its directories and placement, then select **Resume**.
+- **Processing** means a stable source fingerprint is reserved or its linked job is active.
+- **Needs review** means media-kind detection was ambiguous or the linked job stopped at a safety gate. For kind ambiguity, edit the rule to a fixed media type and select **Scan now**; for tied/low-confidence candidates, conflicts, an invalid plan, or a destination collision, inspect **Jobs** before writing.
+- **Error** means the rule path/watcher is unavailable or a linked job failed/interrupted. Restore the configured root or fix the failed operation before selecting **Scan now**.
+
+For a rule that sees no new work, verify that the source and destination still exist beneath `server.media_roots`, do not overlap, and are searchable/writable by the server account. Confirm the rule is enabled and the item has supported local metadata or recognizable media names. Fixer ignores its temporary names, waits for aggregate size and modification time to remain stable, and periodically reconciles missed watcher events; **Scan now** requests that reconciliation immediately.
+
+The source ledger is persistent. Restarting or rescanning does not create another job for an unchanged relative path, size, and modification time. If content really changed, wait for copying to finish before rescanning; the new fingerprint may intentionally create new work. Do not delete SQLite rows to force retries.
+
 ## Hardlink, symlink, or reflink fails
 
-- **Hardlink:** source and target commonly need the same filesystem, and the filesystem must support hardlinks. Default no-overwrite publication also uses a hardlink for completed temporary files.
-- **Symlink:** verify OS privileges, mount/server support, and the relative path from target parent to source. Moving one side can break the link.
-- **Reflink:** the CLI requires real reflink support. It does not silently copy. SDK callers may opt into `FallbackToCopy` and should check for `CopiedFallback` storage cost.
+- **Hardlink:** a folder rule can select it only explicitly. Every source file and its destination must be on the same filesystem, and that filesystem must support hardlinks. Default no-overwrite publication also uses a hardlink for completed temporary files.
+- **Symlink:** verify OS privileges, mount/server support, and the relative path from each target parent to its source. Moving one side can break the link.
+- **Reflink:** folder rules and the CLI require real reflink support. It does not silently copy. SDK callers may opt into `FallbackToCopy` and should check for `CopiedFallback` storage cost.
 
 Hardlinked media shares bytes through every path. Do not run tag/container mutation until all links are reviewed. See [placement semantics](output.md#placement-semantics).
 

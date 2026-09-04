@@ -195,7 +195,7 @@ fn plan_emits_a_stable_operation_summary_without_mutating_targets() {
         .arg("--offline")
         .arg("plan")
         .arg(root.path())
-        .args(["--kind", "movie", "--json"])
+        .args(["--kind", "movie", "--placement", "in-place", "--json"])
         .output()
         .unwrap();
 
@@ -227,7 +227,7 @@ fn plan_cannot_accept_execution_flags() {
     let output = fixer()
         .arg("plan")
         .arg(root.path())
-        .args(["--kind", "movie", "--apply"])
+        .args(["--kind", "movie", "--placement", "copy", "--apply"])
         .output()
         .unwrap();
 
@@ -277,7 +277,7 @@ fn review_conflict_policy_returns_review_exit_and_blocks_apply() {
     let output = fixer()
         .args(["--config", config.to_str().unwrap(), "--offline", "scrape"])
         .arg(&library)
-        .args(["--kind", "movie", "--apply"])
+        .args(["--kind", "movie", "--placement", "in-place", "--apply"])
         .output()
         .unwrap();
 
@@ -311,7 +311,7 @@ fn conflict_policy_can_prefer_first_or_fail() {
             "plan",
         ])
         .arg(&preferred_library)
-        .args(["--kind", "movie", "--json"])
+        .args(["--kind", "movie", "--placement", "in-place", "--json"])
         .output()
         .unwrap();
     assert_eq!(
@@ -330,7 +330,7 @@ fn conflict_policy_can_prefer_first_or_fail() {
             "plan",
         ])
         .arg(&error_library)
-        .args(["--kind", "movie"])
+        .args(["--kind", "movie", "--placement", "in-place"])
         .output()
         .unwrap();
     assert_eq!(failed.status.code(), Some(1));
@@ -357,7 +357,7 @@ fn semantic_invalid_input_returns_usage_exit_code() {
     let invalid_kind_option = fixer()
         .arg("scrape")
         .arg(root.path())
-        .args(["--kind", "movie", "--update-epub"])
+        .args(["--kind", "movie", "--placement", "copy", "--update-epub"])
         .output()
         .unwrap();
     assert_eq!(invalid_kind_option.status.code(), Some(2));

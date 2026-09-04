@@ -31,7 +31,9 @@ base_url = "https://openlibrary.org"
 cover_base_url = "https://covers.openlibrary.org/b/"
 
 [server]
-# Production serving requires at least one existing media_roots entry.
+# Administrative filesystem boundary: every source and destination selected in
+# Folders must stay beneath one of these existing directories. Keep roots narrow.
+# Folder rules and their required placement method are stored in SQLite, not here.
 # The container overrides these paths and stores this file under /data.
 bind = "127.0.0.1:3000"
 database = "fixer.sqlite3"

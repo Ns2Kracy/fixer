@@ -2,12 +2,18 @@ pub mod discovery;
 pub mod model;
 pub mod watcher;
 
+use std::path::Path;
+
 use tokio::sync::broadcast;
 
 use crate::{
     FsPolicy, FsPolicyError, JobRuntime, SqliteJobStore, WorkspaceState, WorkspaceStateError,
-    ingestion::model::{IngestionRule, IngestionRuleId, IngestionRuleInput, RuleDirectory},
-    store::StoreError,
+    ingestion::model::{
+        IngestionRule, IngestionRuleId, IngestionRuleInput, IngestionSourceId,
+        IngestionSourceReview, RuleDirectory, RuleStatus,
+    },
+    jobs::model::{JobInputDto, JobMediaKind, JobOrganizationDto},
+    store::{JobRecord, StoreError},
     workspace::DirectoryRef,
 };
 
@@ -83,6 +89,22 @@ impl IngestionRuntime {
             .map_err(IngestionRuntimeError::Store)
     }
 
+    pub async fn rule_status(
+        &self,
+        rule: &IngestionRule,
+    ) -> Result<RuleStatus, IngestionRuntimeError> {
+        if rule.last_error().is_some() {
+            return Ok(RuleStatus::Error);
+        }
+        if !rule.enabled() {
+            return Ok(RuleStatus::Paused);
+        }
+        self.store
+            .ingestion_rule_activity_status(rule.id())
+            .await
+            .map_err(IngestionRuntimeError::Store)
+    }
+
     pub async fn create_rule(
         &self,
         input: IngestionRuleInput,
@@ -122,6 +144,92 @@ impl IngestionRuntime {
             self.notifications.reload();
         }
         Ok(deleted)
+    }
+
+    pub async fn review_count(&self, id: IngestionRuleId) -> Result<u64, IngestionRuntimeError> {
+        self.store
+            .source_review_count(id)
+            .await
+            .map_err(IngestionRuntimeError::Store)
+    }
+
+    pub async fn list_reviews(
+        &self,
+        id: IngestionRuleId,
+    ) -> Result<Option<Vec<IngestionSourceReview>>, IngestionRuntimeError> {
+        if self
+            .store
+            .get_ingestion_rule(id)
+            .await
+            .map_err(IngestionRuntimeError::Store)?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        self.store
+            .list_source_reviews(id)
+            .await
+            .map(Some)
+            .map_err(IngestionRuntimeError::Store)
+    }
+
+    pub async fn resolve_review(
+        &self,
+        source_id: IngestionSourceId,
+        media_kind: JobMediaKind,
+    ) -> Result<Option<JobRecord>, IngestionRuntimeError> {
+        let Some(review) = self
+            .store
+            .get_source_review(source_id)
+            .await
+            .map_err(IngestionRuntimeError::Store)?
+        else {
+            return Ok(None);
+        };
+        if !review.media_kinds().contains(&media_kind) {
+            return Err(IngestionRuntimeError::InvalidReviewMediaKind);
+        }
+        let rule = self
+            .store
+            .get_ingestion_rule(review.rule_id())
+            .await
+            .map_err(IngestionRuntimeError::Store)?
+            .ok_or(IngestionRuntimeError::ReviewRuleMissing)?;
+        let source = self
+            .workspace
+            .resolve_directory(&DirectoryRef {
+                root_id: rule.source().root_id().to_owned(),
+                path: rule.source().relative_path().to_owned(),
+            })
+            .map_err(IngestionRuntimeError::Workspace)?;
+        let source_path = if review.relative_source_path() == "." {
+            source.canonical_path
+        } else {
+            source
+                .canonical_path
+                .join(Path::new(review.relative_source_path()))
+        };
+        let destination = self
+            .workspace
+            .resolve_directory(&DirectoryRef {
+                root_id: rule.destination().root_id().to_owned(),
+                path: rule.destination().relative_path().to_owned(),
+            })
+            .map_err(IngestionRuntimeError::Workspace)?;
+        let organization = JobOrganizationDto {
+            destination_path: destination.canonical_path.to_string_lossy().into_owned(),
+            placement: rule.placement(),
+            path_template: rule.path_template_override().map(str::to_owned),
+            origin_rule_id: Some(rule.id().get()),
+            auto_execute: true,
+        };
+        let input = JobInputDto::new(media_kind, source_path.to_string_lossy().into_owned(), true)
+            .with_organization(organization);
+        self.jobs
+            .create_for_source(source_id, input)
+            .await
+            .map(Some)
+            .map_err(|_| IngestionRuntimeError::Jobs)
     }
 
     pub async fn request_rescan(&self, id: IngestionRuleId) -> Result<bool, IngestionRuntimeError> {
@@ -173,4 +281,10 @@ pub enum IngestionRuntimeError {
     FilesystemPolicy(#[source] FsPolicyError),
     #[error("ingestion rule fields are invalid")]
     Model(#[source] model::IngestionModelError),
+    #[error("selected media kind is not one of the review options")]
+    InvalidReviewMediaKind,
+    #[error("the rule associated with this review no longer exists")]
+    ReviewRuleMissing,
+    #[error("could not create the reviewed ingestion job")]
+    Jobs,
 }

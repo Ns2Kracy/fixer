@@ -162,16 +162,10 @@ async fn organization_snapshot_plans_source_to_destination() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     let plan = response_json(response).await;
-    assert_eq!(
-        plan["output_root"],
-        destination.path().to_string_lossy().as_ref()
-    );
+    assert_eq!(plan["output_root"], "Unavailable item");
     assert_eq!(plan["operations"].as_array().unwrap().len(), 2);
     assert_eq!(plan["operations"][0]["kind"], "copy");
-    assert_eq!(
-        plan["operations"][0]["source"],
-        media.canonicalize().unwrap().to_string_lossy().as_ref()
-    );
+    assert_eq!(plan["operations"][0]["source"], "Unavailable item");
     assert_eq!(
         plan["operations"][0]["target"],
         "Curated/Fixture Movie/Fixture Movie.mkv"
@@ -356,6 +350,22 @@ async fn failed_execution_is_terminal_truthful_and_replayable() {
     assert_eq!(failed["job"]["state"], "failed");
     assert_eq!(failed["job"]["execution"]["completed_operations"], 0);
     assert_eq!(failed["job"]["execution"]["failed_operations"], 1);
+    assert_eq!(
+        failed["job"]["execution"]["failure"]["code"],
+        "target_exists"
+    );
+    assert_eq!(failed["job"]["execution"]["failure"]["operation_index"], 0);
+    assert!(
+        failed["job"]["execution"]["failure"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("already exists")
+    );
+    assert!(
+        !failed
+            .to_string()
+            .contains(directory.path().to_string_lossy().as_ref())
+    );
     assert_eq!(failed["job"]["progress"]["completed_items"], 0);
     assert_eq!(failed["job"]["progress"]["total_items"], 1);
     assert_eq!(
@@ -365,7 +375,12 @@ async fn failed_execution_is_terminal_truthful_and_replayable() {
 
     let replay = send(&router, execute_job(1, "failure-key")).await;
     assert_eq!(replay.status(), StatusCode::OK);
-    assert_eq!(response_json(replay).await["job"]["state"], "failed");
+    let replay = response_json(replay).await;
+    assert_eq!(replay["job"]["state"], "failed");
+    assert_eq!(
+        replay["job"]["execution"]["failure"]["code"],
+        "target_exists"
+    );
     let cancel = send(
         &router,
         Request::post("/api/v1/jobs/1/cancel")
@@ -1253,10 +1268,7 @@ async fn review_and_plan_details_reconstruct_bounded_server_owned_artifacts() {
     let plan = response_json(response).await;
     assert_eq!(plan["schema_version"], 1);
     assert_eq!(plan["job_id"], 1);
-    assert_eq!(
-        plan["output_root"],
-        directory.path().to_string_lossy().as_ref()
-    );
+    assert_eq!(plan["output_root"], "Unavailable item");
     assert_eq!(plan["operations"].as_array().unwrap().len(), 1);
     assert_eq!(plan["operations"][0]["index"], 0);
     assert_eq!(plan["operations"][0]["kind"], "write");

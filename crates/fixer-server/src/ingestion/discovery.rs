@@ -5,14 +5,19 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use fixer_core::MetadataDocument;
+use fixer_core::{
+    LocalizedValue, MetadataDocument, Movie, MovieRelease, ReleaseDate, ReleaseId, WorkId,
+};
 use fixer_provider_local::{
-    scan as scan_movies, scan_anime, scan_books, scan_music, scan_television,
+    LocalError, identify_path, scan as scan_movies, scan_anime, scan_books, scan_music,
+    scan_television,
 };
 use thiserror::Error;
 
 use super::model::MediaKindMode;
 use crate::jobs::model::JobMediaKind;
+
+const MAX_DISCOVERED_ITEMS: usize = 10_000;
 
 /// The bounded result of inspecting one logical source entry.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +68,10 @@ pub enum DiscoveryError {
     MisalignedScannerOutput(JobMediaKind),
     #[error("scanner returned a root outside the configured source directory")]
     EscapedSourceRoot,
+    #[error(
+        "directory contains more than {limit} discoverable entries; split it into smaller source folders"
+    )]
+    LimitExceeded { limit: usize },
 }
 
 #[derive(Debug)]
@@ -81,16 +90,24 @@ pub fn discover(
         return Err(fixer_provider_local::LocalError::InvalidPath(source).into());
     }
 
-    let claims = match mode {
+    let mut claims = match mode {
         MediaKindMode::Fixed(kind) => scan_kind(&source, kind)?,
         MediaKindMode::Auto => {
             let mut claims = Vec::new();
             for kind in ordered_media_kinds() {
                 claims.extend(scan_kind(&source, kind)?);
+                ensure_within_limit(claims.len())?;
             }
             claims
         }
     };
+    ensure_within_limit(claims.len())?;
+    if matches!(
+        mode,
+        MediaKindMode::Fixed(JobMediaKind::Movie) | MediaKindMode::Auto
+    ) {
+        add_filename_movie_claims(&source, &mut claims)?;
+    }
 
     let mut grouped = BTreeMap::<PathBuf, Vec<MetadataDocument>>::new();
     for claim in claims {
@@ -98,6 +115,7 @@ pub fn discover(
         if !root.starts_with(&source) {
             return Err(DiscoveryError::EscapedSourceRoot);
         }
+        ensure_within_limit(grouped.len().saturating_add(1))?;
         let documents = grouped.entry(root).or_default();
         let kind = document_kind(&claim.document);
         if !documents
@@ -220,7 +238,11 @@ fn add_ignored_entries(
         return Ok(());
     }
 
-    let mut entries = fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(source)? {
+        ensure_within_limit(entries.len().saturating_add(1))?;
+        entries.push(entry?);
+    }
     entries.sort_by_key(fs::DirEntry::file_name);
     for entry in entries {
         let path = entry.path();
@@ -234,6 +256,7 @@ fn add_ignored_entries(
             .iter()
             .any(|root| root == &path || root.starts_with(&path) || path.starts_with(root));
         if !claimed {
+            ensure_within_limit(items.len().saturating_add(1))?;
             items.push(DiscoveredItem {
                 source_root: path,
                 outcome: DiscoveryOutcome::Ignored,
@@ -241,6 +264,95 @@ fn add_ignored_entries(
         }
     }
     Ok(())
+}
+
+fn add_filename_movie_claims(source: &Path, claims: &mut Vec<Claim>) -> Result<(), DiscoveryError> {
+    let covered_roots = claims
+        .iter()
+        .map(|claim| claim.root.clone())
+        .collect::<Vec<_>>();
+    let mut files = Vec::new();
+    collect_video_files(source, &mut files)?;
+    files.sort();
+    for path in files {
+        if covered_roots.iter().any(|root| path.starts_with(root)) {
+            continue;
+        }
+        ensure_within_limit(claims.len().saturating_add(1))?;
+        claims.push(Claim {
+            document: MetadataDocument::Movie(movie_from_filename(&path)?),
+            root: path,
+        });
+    }
+    Ok(())
+}
+
+fn collect_video_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), DiscoveryError> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_video_files(&path, files)?;
+        } else if is_video(&path) {
+            ensure_within_limit(files.len().saturating_add(1))?;
+            files.push(path.canonicalize()?);
+        }
+    }
+    Ok(())
+}
+
+fn movie_from_filename(path: &Path) -> Result<Movie, LocalError> {
+    let hint = identify_path(path)?;
+    let slug = hint
+        .title
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug = if slug.is_empty() { "movie" } else { &slug };
+    let mut titles = LocalizedValue::new();
+    titles.insert("und", hint.title)?;
+    let mut movie = Movie::new(WorkId::new(format!("local-{slug}"))?, titles);
+    if let Some(year) = hint.year {
+        movie.releases.push(MovieRelease::new(
+            ReleaseId::new(format!("local-{slug}-{year}"))?,
+            ReleaseDate::year(year)?,
+        ));
+    }
+    Ok(movie)
+}
+
+fn is_video(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("mkv" | "mp4" | "m4v" | "avi" | "mov")
+    )
+}
+
+const fn ensure_within_limit(count: usize) -> Result<(), DiscoveryError> {
+    if count > MAX_DISCOVERED_ITEMS {
+        Err(DiscoveryError::LimitExceeded {
+            limit: MAX_DISCOVERED_ITEMS,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, std::io::Error> {

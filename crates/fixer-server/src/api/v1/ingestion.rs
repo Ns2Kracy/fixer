@@ -18,10 +18,12 @@ use crate::{
     ingestion::{
         IngestionRuntimeError,
         model::{
-            IngestionModelError, IngestionRule, IngestionRuleId, IngestionRuleInput, MediaKindMode,
-            RuleDirectory, RulePlacement, RuleStatus,
+            IngestionModelError, IngestionRule, IngestionRuleId, IngestionRuleInput,
+            IngestionSourceId, MediaKindMode, RuleDirectory, RulePlacement, RuleStatus,
         },
     },
+    jobs::model::JobMediaKind,
+    store::StoreError,
     workspace::DirectoryRef,
 };
 
@@ -44,6 +46,14 @@ pub fn router(runtime: IngestionRuntime) -> Router {
         .route(
             "/ingestion-rules/{id}/scan",
             axum::routing::post(scan_rule).fallback(crate::api::error::method_not_allowed),
+        )
+        .route(
+            "/ingestion-rules/{id}/reviews",
+            get(list_reviews).fallback(crate::api::error::method_not_allowed),
+        )
+        .route(
+            "/ingestion-sources/{id}/resolve",
+            axum::routing::post(resolve_review).fallback(crate::api::error::method_not_allowed),
         )
         .with_state(runtime)
 }
@@ -79,6 +89,7 @@ struct RuleDto {
     path_template_override: Option<String>,
     enabled: bool,
     status: RuleStatus,
+    review_count: u64,
     last_error: Option<String>,
     created_at_ms: i64,
     updated_at_ms: i64,
@@ -96,6 +107,33 @@ struct RuleListEnvelope {
     rules: Vec<RuleDto>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveReviewRequest {
+    media_kind: JobMediaKind,
+}
+
+#[derive(Serialize)]
+struct SourceReviewDto {
+    source_id: i64,
+    relative_path: String,
+    media_kinds: Vec<JobMediaKind>,
+}
+
+#[derive(Serialize)]
+struct SourceReviewListEnvelope {
+    schema_version: u32,
+    rule_id: i64,
+    reviews: Vec<SourceReviewDto>,
+}
+
+#[derive(Serialize)]
+struct ResolveReviewEnvelope {
+    schema_version: u32,
+    source_id: i64,
+    job_id: i64,
+}
+
 #[derive(Serialize)]
 struct ScanEnvelope {
     schema_version: u32,
@@ -110,13 +148,22 @@ const fn enabled_by_default() -> bool {
 async fn list_rules(
     State(runtime): State<IngestionRuntime>,
 ) -> Result<Json<RuleListEnvelope>, ApiError> {
-    let rules = runtime
+    let stored = runtime
         .list_rules()
         .await
-        .map_err(map_runtime_error)?
-        .iter()
-        .map(rule_dto)
-        .collect();
+        .map_err(|error| map_runtime_error(&error))?;
+    let mut rules = Vec::with_capacity(stored.len());
+    for rule in stored {
+        let status = runtime
+            .rule_status(&rule)
+            .await
+            .map_err(|error| map_runtime_error(&error))?;
+        let review_count = runtime
+            .review_count(rule.id())
+            .await
+            .map_err(|error| map_runtime_error(&error))?;
+        rules.push(rule_dto(&rule, status, review_count));
+    }
     Ok(Json(RuleListEnvelope {
         schema_version: SCHEMA_VERSION,
         rules,
@@ -132,8 +179,19 @@ async fn create_rule(
     let rule = runtime
         .create_rule(input)
         .await
-        .map_err(map_runtime_error)?;
-    Ok((StatusCode::CREATED, Json(rule_envelope(&rule))))
+        .map_err(|error| map_runtime_error(&error))?;
+    let status = runtime
+        .rule_status(&rule)
+        .await
+        .map_err(|error| map_runtime_error(&error))?;
+    let review_count = runtime
+        .review_count(rule.id())
+        .await
+        .map_err(|error| map_runtime_error(&error))?;
+    Ok((
+        StatusCode::CREATED,
+        Json(rule_envelope(&rule, status, review_count)),
+    ))
 }
 
 async fn update_rule(
@@ -147,9 +205,17 @@ async fn update_rule(
     let rule = runtime
         .update_rule(id, input)
         .await
-        .map_err(map_runtime_error)?
+        .map_err(|error| map_runtime_error(&error))?
         .ok_or_else(|| not_found(id.get()))?;
-    Ok(Json(rule_envelope(&rule)))
+    let status = runtime
+        .rule_status(&rule)
+        .await
+        .map_err(|error| map_runtime_error(&error))?;
+    let review_count = runtime
+        .review_count(rule.id())
+        .await
+        .map_err(|error| map_runtime_error(&error))?;
+    Ok(Json(rule_envelope(&rule, status, review_count)))
 }
 
 async fn delete_rule(
@@ -157,10 +223,60 @@ async fn delete_rule(
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<StatusCode, ApiError> {
     let id = extract_id(path)?;
-    if !runtime.delete_rule(id).await.map_err(map_runtime_error)? {
+    if !runtime
+        .delete_rule(id)
+        .await
+        .map_err(|error| map_runtime_error(&error))?
+    {
         return Err(not_found(id.get()));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_reviews(
+    State(runtime): State<IngestionRuntime>,
+    path: Result<Path<i64>, PathRejection>,
+) -> Result<Json<SourceReviewListEnvelope>, ApiError> {
+    let id = extract_id(path)?;
+    let reviews = runtime
+        .list_reviews(id)
+        .await
+        .map_err(|error| map_runtime_error(&error))?
+        .ok_or_else(|| not_found(id.get()))?;
+    Ok(Json(SourceReviewListEnvelope {
+        schema_version: SCHEMA_VERSION,
+        rule_id: id.get(),
+        reviews: reviews
+            .into_iter()
+            .map(|review| SourceReviewDto {
+                source_id: review.source_id().get(),
+                relative_path: review.relative_source_path().to_owned(),
+                media_kinds: review.media_kinds().to_vec(),
+            })
+            .collect(),
+    }))
+}
+
+async fn resolve_review(
+    State(runtime): State<IngestionRuntime>,
+    path: Result<Path<i64>, PathRejection>,
+    request: Result<Json<ResolveReviewRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<ResolveReviewEnvelope>), ApiError> {
+    let source_id = extract_source_id(path)?;
+    let Json(request) = request.map_err(map_json_rejection)?;
+    let job = runtime
+        .resolve_review(source_id, request.media_kind)
+        .await
+        .map_err(|error| map_runtime_error(&error))?
+        .ok_or_else(|| source_not_found(source_id.get()))?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ResolveReviewEnvelope {
+            schema_version: SCHEMA_VERSION,
+            source_id: source_id.get(),
+            job_id: job.id().get(),
+        }),
+    ))
 }
 
 async fn scan_rule(
@@ -171,7 +287,7 @@ async fn scan_rule(
     if !runtime
         .request_rescan(id)
         .await
-        .map_err(map_runtime_error)?
+        .map_err(|error| map_runtime_error(&error))?
     {
         return Err(not_found(id.get()));
     }
@@ -194,7 +310,7 @@ fn rule_input(
     }
     let (source, destination) = runtime
         .validate_directories(&request.source, &request.destination)
-        .map_err(map_runtime_error)?;
+        .map_err(|error| map_runtime_error(&error))?;
     let mut input = IngestionRuleInput::new(
         request.name,
         source,
@@ -227,14 +343,21 @@ fn extract_id(path: Result<Path<i64>, PathRejection>) -> Result<IngestionRuleId,
     IngestionRuleId::from_database(value).map_err(|_| not_found(value))
 }
 
-fn rule_envelope(rule: &IngestionRule) -> RuleEnvelope {
+fn extract_source_id(
+    path: Result<Path<i64>, PathRejection>,
+) -> Result<IngestionSourceId, ApiError> {
+    let Path(value) = path.map_err(|_| invalid_input("source_id", "must be a positive integer"))?;
+    IngestionSourceId::from_database(value).map_err(|_| source_not_found(value))
+}
+
+fn rule_envelope(rule: &IngestionRule, status: RuleStatus, review_count: u64) -> RuleEnvelope {
     RuleEnvelope {
         schema_version: SCHEMA_VERSION,
-        rule: rule_dto(rule),
+        rule: rule_dto(rule, status, review_count),
     }
 }
 
-fn rule_dto(rule: &IngestionRule) -> RuleDto {
+fn rule_dto(rule: &IngestionRule, status: RuleStatus, review_count: u64) -> RuleDto {
     RuleDto {
         id: rule.id().get(),
         name: rule.name().to_owned(),
@@ -244,7 +367,8 @@ fn rule_dto(rule: &IngestionRule) -> RuleDto {
         placement: rule.placement(),
         path_template_override: rule.path_template_override().map(str::to_owned),
         enabled: rule.enabled(),
-        status: rule_status(rule),
+        status,
+        review_count,
         last_error: rule.last_error().map(str::to_owned),
         created_at_ms: rule.created_at_ms(),
         updated_at_ms: rule.updated_at_ms(),
@@ -258,16 +382,6 @@ fn directory_dto(directory: &RuleDirectory) -> RuleDirectoryDto {
     }
 }
 
-fn rule_status(rule: &IngestionRule) -> RuleStatus {
-    if rule.last_error().is_some() {
-        RuleStatus::Error
-    } else if rule.enabled() {
-        RuleStatus::Watching
-    } else {
-        RuleStatus::Paused
-    }
-}
-
 fn map_json_rejection(_error: JsonRejection) -> ApiError {
     invalid_input(
         "body",
@@ -275,7 +389,7 @@ fn map_json_rejection(_error: JsonRejection) -> ApiError {
     )
 }
 
-fn map_runtime_error(error: IngestionRuntimeError) -> ApiError {
+fn map_runtime_error(error: &IngestionRuntimeError) -> ApiError {
     match error {
         IngestionRuntimeError::Workspace(_) | IngestionRuntimeError::FilesystemPolicy(_) => {
             invalid_input(
@@ -283,7 +397,31 @@ fn map_runtime_error(error: IngestionRuntimeError) -> ApiError {
                 "must identify distinct, non-overlapping directories in configured roots",
             )
         }
-        IngestionRuntimeError::Model(error) => map_model_error(&error),
+        IngestionRuntimeError::Model(error) => map_model_error(error),
+        IngestionRuntimeError::InvalidReviewMediaKind => {
+            invalid_input("media_kind", "must be one of the offered review choices")
+        }
+        IngestionRuntimeError::ReviewRuleMissing => ApiError::new(
+            StatusCode::CONFLICT,
+            "review_rule_missing",
+            "The folder rule for this review no longer exists",
+            None,
+        ),
+        IngestionRuntimeError::Jobs => ApiError::new(
+            StatusCode::CONFLICT,
+            "review_job_error",
+            "The reviewed item could not be queued; rescan the folder and retry",
+            None,
+        ),
+        IngestionRuntimeError::Store(StoreError::IngestionRuleLimit { limit }) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ingestion_rule_limit",
+            "Folder rule limit reached",
+            Some(BTreeMap::from([(
+                "rules".to_owned(),
+                format!("delete an existing rule before adding another (limit: {limit})"),
+            )])),
+        ),
         IngestionRuntimeError::Store(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "ingestion_store_error",
@@ -320,6 +458,15 @@ fn invalid_input(field: &str, reason: &str) -> ApiError {
         "invalid_input",
         "Request fields are invalid",
         Some(BTreeMap::from([(field.to_owned(), reason.to_owned())])),
+    )
+}
+
+fn source_not_found(id: i64) -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        "ingestion_source_not_found",
+        "Folder review item was not found",
+        Some(BTreeMap::from([("source_id".to_owned(), id.to_string())])),
     )
 }
 

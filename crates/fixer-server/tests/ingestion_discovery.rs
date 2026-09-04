@@ -86,6 +86,22 @@ fn fixed_movie_directory_emits_one_job_per_movie() {
 }
 
 #[test]
+fn fixed_movie_mode_discovers_filename_only_video_files() {
+    let source = tempfile::tempdir().unwrap();
+    let movie = source.path().join("Arrival.2016.mkv");
+    fs::write(&movie, b"movie").unwrap();
+
+    let items = discover(source.path(), MediaKindMode::Fixed(JobMediaKind::Movie)).unwrap();
+    let ready = items
+        .iter()
+        .filter(|item| item.media_kind() == Some(JobMediaKind::Movie))
+        .collect::<Vec<_>>();
+
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].source_root(), movie.canonicalize().unwrap());
+}
+
+#[test]
 fn fixed_modes_emit_nested_series_releases_and_books() {
     let television = tempfile::tempdir().unwrap();
     for title in ["First Show", "Second Show"] {
@@ -131,11 +147,11 @@ fn fixed_modes_emit_nested_series_releases_and_books() {
 fn fixed_mode_does_not_emit_other_media_types() {
     let items = discover(fixture_root(), MediaKindMode::Fixed(JobMediaKind::Movie)).unwrap();
 
-    assert_eq!(ready_count(&items), 1);
+    assert!(ready_count(&items) >= 1);
     assert!(
         items
             .iter()
-            .filter_map(|item| item.media_kind())
+            .filter_map(fixer_server::ingestion::discovery::DiscoveredItem::media_kind)
             .all(|kind| kind == JobMediaKind::Movie)
     );
 }

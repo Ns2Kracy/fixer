@@ -236,13 +236,41 @@ impl PlanSummary {
     }
 }
 
-/// Versioned execution counts persisted without filesystem payloads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Bounded, path-safe detail for one failed output operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionFailureSummary {
+    schema_version: SchemaVersion,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    operation_index: Option<u64>,
+    code: String,
+    message: String,
+}
+
+impl ExecutionFailureSummary {
+    pub fn new(
+        operation_index: Option<u64>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: SchemaVersion,
+            operation_index,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+}
+
+/// Versioned execution counts and optional failure detail persisted without filesystem payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionSummary {
     schema_version: SchemaVersion,
     completed_operations: u64,
     failed_operations: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    failure: Option<ExecutionFailureSummary>,
 }
 
 impl ExecutionSummary {
@@ -251,10 +279,16 @@ impl ExecutionSummary {
             schema_version: SchemaVersion,
             completed_operations,
             failed_operations,
+            failure: None,
         }
     }
 
-    pub const fn completed_operations(self) -> u64 {
+    pub fn with_failure(mut self, failure: ExecutionFailureSummary) -> Self {
+        self.failure = Some(failure);
+        self
+    }
+
+    pub const fn completed_operations(&self) -> u64 {
         self.completed_operations
     }
 }

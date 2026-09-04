@@ -368,8 +368,8 @@ impl SourceFingerprint {
         self.modified_at_ms
     }
 
-    pub(crate) const fn size_for_database(&self) -> i64 {
-        self.size_bytes as i64
+    pub(crate) fn size_for_database(&self) -> i64 {
+        i64::try_from(self.size_bytes).expect("source size is validated during construction")
     }
 }
 
@@ -386,6 +386,46 @@ impl IngestionSourceId {
             .filter(|value| value.get() > 0)
             .map(Self)
             .ok_or(IngestionModelError::InvalidSourceId)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IngestionSourceReview {
+    source_id: IngestionSourceId,
+    rule_id: IngestionRuleId,
+    relative_source_path: String,
+    media_kinds: Vec<JobMediaKind>,
+}
+
+impl IngestionSourceReview {
+    pub(crate) const fn new(
+        source_id: IngestionSourceId,
+        rule_id: IngestionRuleId,
+        relative_source_path: String,
+        media_kinds: Vec<JobMediaKind>,
+    ) -> Self {
+        Self {
+            source_id,
+            rule_id,
+            relative_source_path,
+            media_kinds,
+        }
+    }
+
+    pub const fn source_id(&self) -> IngestionSourceId {
+        self.source_id
+    }
+
+    pub const fn rule_id(&self) -> IngestionRuleId {
+        self.rule_id
+    }
+
+    pub fn relative_source_path(&self) -> &str {
+        &self.relative_source_path
+    }
+
+    pub fn media_kinds(&self) -> &[JobMediaKind] {
+        &self.media_kinds
     }
 }
 
@@ -470,7 +510,7 @@ impl SourceReservation {
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum IngestionModelError {
     #[error("{field} must contain between 1 and {max} bytes")]
     InvalidRequiredText { field: &'static str, max: usize },

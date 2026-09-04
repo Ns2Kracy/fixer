@@ -31,6 +31,8 @@ const DEFAULT_DEBOUNCE: Duration = Duration::from_secs(2);
 const DEFAULT_RECONCILIATION: Duration = Duration::from_secs(60);
 const WATCHER_ERROR: &str = "Folder monitoring is unavailable; periodic retries will continue";
 const RECONCILIATION_ERROR: &str = "Folder scan failed; retrying automatically";
+const REMOVED_ROOT_ERROR: &str =
+    "Configured library root was removed; choose a new folder to re-enable this rule";
 
 /// Timings for filesystem stability checks and periodic missed-event recovery.
 #[derive(Debug, Clone, Copy)]
@@ -142,7 +144,11 @@ impl Engine {
                 Ok(resolved) => active.push(resolved),
                 Err(error) => {
                     tracing::warn!(rule_id = rule.id().get(), %error, "ingestion rule path is unavailable");
-                    self.record_error(rule.id(), RECONCILIATION_ERROR).await;
+                    if matches!(error, WorkspaceStateError::RootNotFound) {
+                        self.disable_rule(rule.id(), REMOVED_ROOT_ERROR).await;
+                    } else {
+                        self.record_error(rule.id(), RECONCILIATION_ERROR).await;
+                    }
                 }
             }
         }
@@ -204,16 +210,9 @@ impl Engine {
         }
     }
 
-    fn mark_event(&mut self, paths: &[PathBuf]) {
-        for rule in &self.active {
-            if paths.iter().any(|path| {
-                path.starts_with(&rule.source)
-                    && !path.starts_with(&rule.destination)
-                    && !is_temporary_path(path)
-            }) {
-                self.dirty.insert(rule.rule.id());
-            }
-        }
+    fn mark_event(&mut self) {
+        self.dirty
+            .extend(self.active.iter().map(|rule| rule.rule.id()));
     }
 
     fn mark_rule(&mut self, id: IngestionRuleId) {
@@ -262,6 +261,11 @@ impl Engine {
                 .collect::<Result<Vec<_>, SupervisorError>>()
         })
         .await??;
+
+        self.runtime
+            .store
+            .pause_ingestion_sources(rule.rule.id())
+            .await?;
 
         let now = Instant::now();
         let mut pending = false;
@@ -320,22 +324,23 @@ impl Engine {
         let source = reservation.source();
         match item.outcome() {
             DiscoveryOutcome::Ignored => {
-                if reservation.is_reserved() {
-                    self.runtime
-                        .store
-                        .update_source_status(source.id(), RuleStatus::Paused)
-                        .await?;
-                }
+                self.runtime
+                    .store
+                    .update_source_status(source.id(), RuleStatus::Paused)
+                    .await?;
             }
-            DiscoveryOutcome::NeedsReview { .. } => {
-                if reservation.is_reserved() {
-                    self.runtime
-                        .store
-                        .update_source_status(source.id(), RuleStatus::NeedsReview)
-                        .await?;
-                }
+            DiscoveryOutcome::NeedsReview { media_kinds } => {
+                self.runtime
+                    .store
+                    .update_source_review(source.id(), media_kinds)
+                    .await?;
             }
-            DiscoveryOutcome::Ready(_) if source.job_id().is_some() => {}
+            DiscoveryOutcome::Ready(_) if source.job_id().is_some() => {
+                self.runtime
+                    .store
+                    .update_source_status(source.id(), RuleStatus::Processing)
+                    .await?;
+            }
             DiscoveryOutcome::Ready(_) => {
                 let media_kind = item.media_kind().ok_or(SupervisorError::MissingMediaKind)?;
                 let organization = JobOrganizationDto {
@@ -351,13 +356,13 @@ impl Engine {
                     true,
                 )
                 .with_organization(organization);
-                match self.runtime.jobs.create(input).await {
-                    Ok(job) => {
-                        self.runtime
-                            .store
-                            .associate_source_job(source.id(), job.id())
-                            .await?;
-                    }
+                match self
+                    .runtime
+                    .jobs
+                    .create_for_source(source.id(), input)
+                    .await
+                {
+                    Ok(_) => {}
                     Err(error) => {
                         self.runtime
                             .store
@@ -369,6 +374,12 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    async fn disable_rule(&self, id: IngestionRuleId, message: &'static str) {
+        if let Err(error) = self.runtime.store.disable_ingestion_rule(id, message).await {
+            tracing::warn!(rule_id = id.get(), %error, "could not disable ingestion rule");
+        }
     }
 
     async fn record_error(&self, id: IngestionRuleId, message: &'static str) {
@@ -395,11 +406,20 @@ async fn run_supervisor(
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut notifications = runtime.notifications.subscribe();
-    let (event_sender, mut events) = mpsc::unbounded_channel();
+    // A single pending signal is enough: every change rescans all active source rules.
+    let (event_sender, mut events) = mpsc::channel(1);
     let callback_sender = event_sender.clone();
-    let mut watcher = match notify::recommended_watcher(move |event| {
-        let _ = callback_sender.send(event);
-    }) {
+    let mut watcher = match notify::recommended_watcher(
+        move |event: notify::Result<notify::Event>| match event {
+            Ok(event) if event.paths.iter().any(|path| !is_temporary_path(path)) => {
+                let _ = callback_sender.try_send(Ok(()));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = callback_sender.try_send(Err(error));
+            }
+        },
+    ) {
         Ok(watcher) => Some(watcher),
         Err(error) => {
             tracing::warn!(%error, "filesystem watcher initialization failed; using periodic reconciliation");
@@ -438,7 +458,7 @@ async fn run_supervisor(
             }
             event = events.recv() => {
                 match event {
-                    Some(Ok(event)) => engine.mark_event(&event.paths),
+                    Some(Ok(())) => engine.mark_event(),
                     Some(Err(error)) => {
                         tracing::warn!(%error, "filesystem watcher reported an error");
                         for rule in engine.active.clone() {
@@ -523,14 +543,17 @@ fn system_time_ms(time: SystemTime) -> Result<i64, SupervisorError> {
 }
 
 fn is_temporary_path(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            name.starts_with(".fixer-")
-                || name.ends_with(".tmp")
-                || name.ends_with(".part")
-                || name.ends_with('~')
-        })
+    let temporary_extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("tmp") || extension.eq_ignore_ascii_case("part")
+        });
+    temporary_extension
+        || path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(".fixer-") || name.ends_with('~'))
 }
 
 #[derive(Debug, Error)]

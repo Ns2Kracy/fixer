@@ -2,11 +2,11 @@
 
 Fixer is an in-development, local-first metadata scraper for movies, television, anime, music, and books.
 
-The Rust workspace separates runtime-independent domain contracts, typed SDK orchestration, compile-time providers and writers, and thin CLI/server adapters. Metadata resolution and filesystem changes remain inspectable before execution.
+The Rust crates separate runtime-independent domain contracts, typed SDK orchestration, compile-time providers and writers, and thin CLI/server adapters. Metadata resolution and filesystem changes remain inspectable before execution.
 
 ## Current status
 
-The core, SDK, local and network providers, local writers, cross-media CLI, persistent Axum server, and Solid workspace are available. Public provider availability and schemas can still change before a stable release; CLI JSON DTOs carry an explicit schema version.
+The core, SDK, local and network providers, local writers, cross-media CLI, persistent Axum server, and Solid Web application are available. Public provider availability and schemas can still change before a stable release; CLI JSON DTOs carry an explicit schema version.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ Run the development binary through Cargo:
 cargo run -p fixer-cli -- --help
 cargo run -p fixer-cli -- scan ./library --kind movie --json
 cargo run -p fixer-cli -- --local-root ./library --offline resolve movie "Arrival" --json
-cargo run -p fixer-cli -- --offline plan ./library/Arrival.mkv --kind movie --json
+cargo run -p fixer-cli -- --offline plan ./library/Arrival.mkv --kind movie --placement in-place --json
 ```
 
 `plan` never writes. `scrape` also previews by default; pass `--apply` to execute the newly generated plan. Default execution refuses existing file-like targets.
@@ -96,6 +96,12 @@ registered administrator—including one upgraded from the old startup-password
 release—redirects unauthenticated visitors to `/login`, where **Sign up**
 creates the single administrator account; later visits use **Sign in** with that
 username and password.
+
+## Automatic folder organization
+
+Set `server.media_roots` to the narrowest directories Fixer may access, then use **Folders** to choose a source and a separate destination. Each rule requires its own organization method (`move`, `copy`, `hardlink`, `symlink`, or `reflink`); placement is never a global setting.
+
+An enabled rule recursively scans existing content, monitors later filesystem changes, and periodically reconciles missed events. Stable, uniquely matched items above `auto_accept_confidence` are organized automatically. Ambiguous media kinds, tied or low-confidence matches, metadata conflicts, unsafe plans, and destination collisions stop at **Needs review** instead of writing. Unchanged source fingerprints remain deduplicated across restarts.
 
 `latest` is the stable channel and `edge` tracks `main`. Set `FIXER_IMAGE=ghcr.io/ns2kracy/fixer:0.1.0` to pin a release, or use `FIXER_IMAGE=ghcr.io/ns2kracy/fixer@sha256:<manifest-digest>` for an immutable deployment. See [Docker deployment](docs/server.md#docker-deployment) for image channels, permissions, persistence, source builds, upgrades, reverse proxies, and recovery.
 

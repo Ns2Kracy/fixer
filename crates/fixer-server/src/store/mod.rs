@@ -151,7 +151,7 @@ impl JobUpdate {
         self
     }
 
-    pub const fn with_execution(mut self, execution: ExecutionSummary) -> Self {
+    pub fn with_execution(mut self, execution: ExecutionSummary) -> Self {
         self.execution = Some(execution);
         self
     }
@@ -181,6 +181,8 @@ pub enum StoreError {
     IngestionSourceNotFound { id: i64 },
     #[error("ingestion source {id} is already associated with another job")]
     IngestionSourceJobConflict { id: i64 },
+    #[error("at most {limit} folder rules may be configured")]
+    IngestionRuleLimit { limit: i64 },
     #[error("job {id} state changed: expected {expected}, found {actual}")]
     StateConflict {
         id: i64,

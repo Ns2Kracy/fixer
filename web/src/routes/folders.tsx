@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
-import { Link, createFileRoute } from "@tanstack/solid-router";
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { createFileRoute } from "@tanstack/solid-router";
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 
 import { DirectoryPicker } from "../components/directory-picker";
 import { RequestError } from "../components/request-error";
@@ -26,6 +26,7 @@ export const Route = createFileRoute("/folders")({
 });
 
 type MediaModeValue = "auto" | MediaKind;
+type PathLayout = "recommended" | "title" | "id-title" | "custom";
 
 interface RuleDraft {
   id?: number;
@@ -34,7 +35,7 @@ interface RuleDraft {
   destination: DirectoryRef | null;
   mediaMode: MediaModeValue;
   placement: IngestionPlacement | "";
-  customTemplate: boolean;
+  pathLayout: PathLayout;
   pathTemplate: string;
   enabled: boolean;
 }
@@ -67,14 +68,49 @@ const statusLabels = {
   error: "Error",
 } as const;
 
-const presets: Record<MediaModeValue, string> = {
-  auto: "Preset chosen after media detection",
-  movie: "{{ title | sanitize }} ({{ year }})",
-  television: "{{ title | sanitize }}/Season {{ season }}",
-  anime: "{{ title | sanitize }}/Season {{ season }}",
-  music: "{{ artist | sanitize }}/{{ title | sanitize }}",
-  book: "{{ author | sanitize }}/{{ title | sanitize }}",
+const recommendedLayouts: Record<MediaModeValue, string> = {
+  auto: "Choose the matching built-in layout after detection",
+  movie: "Title (Year)/Title (Year).ext",
+  television: "Title/Season 01/S01E01.ext",
+  anime: "Title/Season 01/S01E01.ext",
+  music: "Artist/Album/disc-track.ext",
+  book: "Author/Title/Title.ext",
 };
+
+const presetTemplates: Record<
+  Exclude<PathLayout, "recommended" | "custom">,
+  string
+> = {
+  title: "{{ title | sanitize }}",
+  "id-title": "{{ id }}/{{ title | sanitize }}",
+};
+
+function layoutForOverride(template: string | null): PathLayout {
+  if (template === null) return "recommended";
+  if (template === presetTemplates.title) return "title";
+  if (template === presetTemplates["id-title"]) return "id-title";
+  return "custom";
+}
+
+function isPathLayout(value: string): value is PathLayout {
+  return ["recommended", "title", "id-title", "custom"].includes(value);
+}
+
+function templateForDraft(draft: RuleDraft): string | null {
+  if (draft.pathLayout === "recommended") return null;
+  if (draft.pathLayout === "custom") return draft.pathTemplate.trim();
+  return presetTemplates[draft.pathLayout];
+}
+
+function layoutDescription(draft: RuleDraft): string {
+  if (draft.pathLayout === "recommended") {
+    return recommendedLayouts[draft.mediaMode];
+  }
+  if (draft.pathLayout === "custom") {
+    return draft.pathTemplate || "Enter a custom template";
+  }
+  return presetTemplates[draft.pathLayout];
+}
 
 function emptyDraft(): RuleDraft {
   return {
@@ -83,7 +119,7 @@ function emptyDraft(): RuleDraft {
     destination: null,
     mediaMode: "auto",
     placement: "",
-    customTemplate: false,
+    pathLayout: "recommended",
     pathTemplate: "",
     enabled: true,
   };
@@ -98,8 +134,11 @@ function draftFromRule(rule: IngestionRuleDto): RuleDraft {
     mediaMode:
       rule.media_kind_mode === "auto" ? "auto" : rule.media_kind_mode.fixed,
     placement: rule.placement,
-    customTemplate: rule.path_template_override !== null,
-    pathTemplate: rule.path_template_override ?? "",
+    pathLayout: layoutForOverride(rule.path_template_override),
+    pathTemplate:
+      layoutForOverride(rule.path_template_override) === "custom"
+        ? (rule.path_template_override ?? "")
+        : "",
     enabled: rule.enabled,
   };
 }
@@ -110,7 +149,7 @@ function requestFromDraft(draft: RuleDraft): IngestionRuleRequest | null {
     !draft.source ||
     !draft.destination ||
     !draft.placement ||
-    (draft.customTemplate && !draft.pathTemplate.trim())
+    (draft.pathLayout === "custom" && !draft.pathTemplate.trim())
   ) {
     return null;
   }
@@ -121,9 +160,7 @@ function requestFromDraft(draft: RuleDraft): IngestionRuleRequest | null {
     media_kind_mode:
       draft.mediaMode === "auto" ? "auto" : { fixed: draft.mediaMode },
     placement: draft.placement,
-    path_template_override: draft.customTemplate
-      ? draft.pathTemplate.trim()
-      : null,
+    path_template_override: templateForDraft(draft),
     enabled: draft.enabled,
   };
 }
@@ -146,7 +183,14 @@ function requestFromRule(
 function FoldersPage() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = createSignal<RuleDraft | null>(null);
+  const [reviewRule, setReviewRule] = createSignal<IngestionRuleDto | null>(
+    null,
+  );
   const [previewPath, setPreviewPath] = createSignal<string>();
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => {
+    clearTimeout(previewTimer);
+  });
   const rules = useQuery(() => ({
     queryKey: ["ingestion-rules"],
     queryFn: () => api.listIngestionRules(),
@@ -181,6 +225,22 @@ function FoldersPage() {
     mutationFn: (id: number) => api.deleteIngestionRule(id),
     onSuccess: refresh,
   }));
+  const reviews = useQuery(() => ({
+    queryKey: ["ingestion-reviews", reviewRule()?.id],
+    queryFn: () => api.listIngestionReviews(reviewRule()!.id),
+    enabled: reviewRule() !== null,
+  }));
+  const resolveReview = useMutation(() => ({
+    mutationFn: (variables: { sourceId: number; mediaKind: MediaKind }) =>
+      api.resolveIngestionReview(variables.sourceId, variables.mediaKind),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["ingestion-reviews"] }),
+        refresh(),
+        queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+      ]);
+    },
+  }));
   const preview = useMutation(() => ({
     mutationFn: (pathTemplate: string) =>
       api.previewTemplate({
@@ -204,6 +264,17 @@ function FoldersPage() {
   function patch<K extends keyof RuleDraft>(key: K, value: RuleDraft[K]) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
     if (key === "pathTemplate" || key === "mediaMode") setPreviewPath();
+  }
+
+  function schedulePreview(pathTemplate: string) {
+    clearTimeout(previewTimer);
+    preview.reset();
+    setPreviewPath();
+    const template = pathTemplate.trim();
+    if (!template) return;
+    previewTimer = setTimeout(() => {
+      preview.mutate(template);
+    }, 250);
   }
 
   function submit(event: SubmitEvent) {
@@ -321,26 +392,31 @@ function FoldersPage() {
                     </For>
                   </select>
                 </FormField>
+                <FormField label="Path layout">
+                  <select
+                    value={form().pathLayout}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      if (isPathLayout(value)) patch("pathLayout", value);
+                    }}
+                  >
+                    <option value="recommended">
+                      Recommended for media type
+                    </option>
+                    <option value="title">Title folder</option>
+                    <option value="id-title">Stable ID / title</option>
+                    <option value="custom">Custom template</option>
+                  </select>
+                </FormField>
                 <div class="border-t border-line pt-4">
                   <span class="text-xs font-bold uppercase tracking-[0.12em] text-muted">
-                    Built-in template
+                    Selected layout
                   </span>
                   <code class="mt-2 block text-xs wrap-anywhere">
-                    {presets[form().mediaMode]}
+                    {layoutDescription(form())}
                   </code>
                 </div>
-                <label class="col-span-full flex items-center gap-3 border-t border-line pt-5 text-sm max-[720px]:col-span-1">
-                  <input
-                    class="size-4 accent-moss"
-                    type="checkbox"
-                    checked={form().customTemplate}
-                    onChange={(event) => {
-                      patch("customTemplate", event.currentTarget.checked);
-                    }}
-                  />
-                  Use custom path template
-                </label>
-                <Show when={form().customTemplate}>
+                <Show when={form().pathLayout === "custom"}>
                   <FormField
                     class="col-span-full max-[720px]:col-span-1"
                     label="Path template override"
@@ -350,23 +426,21 @@ function FoldersPage() {
                       required
                       value={form().pathTemplate}
                       onInput={(event) => {
-                        patch("pathTemplate", event.currentTarget.value);
+                        const value = event.currentTarget.value;
+                        patch("pathTemplate", value);
+                        schedulePreview(value);
                       }}
                     />
                   </FormField>
-                  <div class="col-span-full flex flex-wrap items-center gap-4 max-[720px]:col-span-1">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={
-                        !form().pathTemplate.trim() || preview.isPending
-                      }
-                      onClick={() => {
-                        preview.mutate(form().pathTemplate.trim());
-                      }}
-                    >
-                      {preview.isPending ? "Previewing…" : "Preview path"}
-                    </Button>
+                  <div
+                    class="col-span-full flex flex-wrap items-center gap-4 max-[720px]:col-span-1"
+                    aria-live="polite"
+                  >
+                    <Show when={preview.isPending}>
+                      <span class="text-sm text-muted">
+                        Validating template…
+                      </span>
+                    </Show>
                     <Show when={previewPath()}>
                       {(path) => (
                         <code aria-label="Template preview">{path()}</code>
@@ -397,6 +471,72 @@ function FoldersPage() {
                 </Button>
               </div>
             </form>
+          </section>
+        )}
+      </Show>
+
+      <Show when={reviewRule()}>
+        {(selected) => (
+          <section
+            class="mt-10 border-t-2 border-ink pt-7"
+            aria-labelledby="source-reviews-title"
+          >
+            <div class="flex items-start justify-between gap-6">
+              <SectionHeader
+                eyebrow={selected().name}
+                title="Choose a media type"
+                titleId="source-reviews-title"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setReviewRule(null)}
+              >
+                Close
+              </Button>
+            </div>
+            <Show when={reviews.isPending}>
+              <LoadingState>Loading review items…</LoadingState>
+            </Show>
+            <Show when={reviews.isError}>
+              <RequestError error={reviews.error} />
+            </Show>
+            <Show when={resolveReview.isError}>
+              <RequestError error={resolveReview.error} />
+            </Show>
+            <Show when={reviews.data?.reviews.length === 0}>
+              <EmptyState title="No media type reviews" />
+            </Show>
+            <div class="mt-5 border-t border-ink">
+              <For each={reviews.data?.reviews ?? []}>
+                {(review) => (
+                  <article class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-5 border-b border-line py-5 max-[640px]:grid-cols-1">
+                    <code class="wrap-anywhere">{review.relative_path}</code>
+                    <div class="flex flex-wrap gap-2">
+                      <For each={review.media_kinds}>
+                        {(mediaKind) => (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={resolveReview.isPending}
+                            onClick={() => {
+                              resolveReview.mutate({
+                                sourceId: review.source_id,
+                                mediaKind,
+                              });
+                            }}
+                          >
+                            Use{" "}
+                            {mediaKinds.find((item) => item.value === mediaKind)
+                              ?.label ?? mediaKind}
+                          </Button>
+                        )}
+                      </For>
+                    </div>
+                  </article>
+                )}
+              </For>
+            </div>
           </section>
         )}
       </Show>
@@ -463,12 +603,14 @@ function FoldersPage() {
                 </div>
 
                 <Show when={rule.status === "needs_review"} fallback={<span />}>
-                  <Link
-                    class="text-sm font-bold no-underline hover:text-moss"
-                    to="/jobs"
+                  <Button
+                    class="min-h-9 px-3 py-2 text-xs"
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setReviewRule(rule)}
                   >
-                    Review jobs <span aria-hidden="true">→</span>
-                  </Link>
+                    Review media type ({rule.review_count})
+                  </Button>
                 </Show>
 
                 <div class="flex flex-wrap justify-end gap-2 max-[860px]:justify-start">

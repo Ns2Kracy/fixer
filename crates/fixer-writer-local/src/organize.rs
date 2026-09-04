@@ -1,7 +1,9 @@
 //! Destination layout and placement planning shared by CLI and server jobs.
 
 use std::{
+    collections::BTreeSet,
     ffi::OsString,
+    fs,
     path::{Component, Path, PathBuf},
 };
 
@@ -46,7 +48,7 @@ pub struct OrganizationRequest<'a> {
 }
 
 impl<'a> OrganizationRequest<'a> {
-    pub fn new(
+    pub const fn new(
         source_path: &'a Path,
         destination_path: &'a Path,
         media: OrganizationMedia<'a>,
@@ -99,30 +101,140 @@ pub enum OrganizationError {
     InvalidManifest(serde_json::Error),
     #[error("could not serialize planned manifest: {0}")]
     SerializeManifest(serde_json::Error),
+    #[error("could not inspect organization source `{path}`: {source}")]
+    InspectSource {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Builds a single bounded plan whose targets are relative to `destination_path`.
 pub fn organize(request: OrganizationRequest<'_>) -> Result<OutputPlan, OrganizationError> {
-    let package = package_path(request.media, request.path_template)?;
-    let media_target = request.media_target.map_or_else(
-        || media_target(request.source_path, request.media, &package),
-        |target| Ok(package.join(target)),
-    )?;
-    let mut plan = OutputPlan::new(request.destination_path);
-    plan.push(placement_operation(
-        request.source_path,
-        request.destination_path,
-        media_target,
-        request.placement,
-    )?);
-    for operation in request.metadata_plan.operations() {
-        plan.push(rebase_operation(operation, &package)?);
+    let OrganizationRequest {
+        source_path,
+        destination_path,
+        media,
+        placement,
+        path_template,
+        media_target: target_override,
+        metadata_plan,
+    } = request;
+    let package = package_path(media, path_template)?;
+    let metadata_operations = metadata_plan
+        .operations()
+        .iter()
+        .map(|operation| rebase_operation(operation, &package))
+        .collect::<Result<Vec<_>, _>>()?;
+    let reserved_targets = metadata_operations
+        .iter()
+        .filter_map(OutputOperation::target)
+        .map(Path::to_path_buf)
+        .collect::<BTreeSet<_>>();
+    let mut plan = OutputPlan::new(destination_path);
+
+    if source_path.is_dir() {
+        let files = source_files(source_path)?;
+        let primary = sole_primary_file(&files, media);
+        for source in &files {
+            let relative = source
+                .strip_prefix(source_path)
+                .map_err(|_| OrganizationError::MissingFileName(source.clone()))?;
+            let target = if Some(source.as_path()) == primary {
+                target_override.map_or_else(
+                    || media_target(source, media, &package),
+                    |target| Ok(package.join(target)),
+                )?
+            } else {
+                package.join(relative)
+            };
+            if !reserved_targets.contains(&target) {
+                plan.push(placement_operation(
+                    source,
+                    destination_path,
+                    target,
+                    placement,
+                )?);
+            }
+        }
+    } else {
+        let target = target_override.map_or_else(
+            || media_target(source_path, media, &package),
+            |target| Ok(package.join(target)),
+        )?;
+        plan.push(placement_operation(
+            source_path,
+            destination_path,
+            target,
+            placement,
+        )?);
+    }
+    for operation in metadata_operations {
+        plan.push(operation);
     }
     Ok(plan)
 }
 
+fn source_files(root: &Path) -> Result<Vec<PathBuf>, OrganizationError> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|source| OrganizationError::InspectSource {
+                path: directory.clone(),
+                source,
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| OrganizationError::InspectSource {
+                path: directory.clone(),
+                source,
+            })?;
+        entries.sort_by_key(fs::DirEntry::file_name);
+        for entry in entries.into_iter().rev() {
+            let path = entry.path();
+            let metadata =
+                fs::symlink_metadata(&path).map_err(|source| OrganizationError::InspectSource {
+                    path: path.clone(),
+                    source,
+                })?;
+            if metadata.is_dir() {
+                pending.push(path);
+            } else if metadata.is_file() {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn sole_primary_file<'a>(files: &'a [PathBuf], media: OrganizationMedia<'_>) -> Option<&'a Path> {
+    let mut primary = files
+        .iter()
+        .filter(|path| is_primary_media_file(path, media));
+    let first = primary.next()?;
+    primary.next().is_none().then_some(first.as_path())
+}
+
+fn is_primary_media_file(path: &Path, media: OrganizationMedia<'_>) -> bool {
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let extension = extension.to_ascii_lowercase();
+    let supported = match media {
+        OrganizationMedia::Movie(_)
+        | OrganizationMedia::Television(_)
+        | OrganizationMedia::Anime(_) => {
+            &["avi", "m2ts", "m4v", "mkv", "mov", "mp4", "ts", "webm"][..]
+        }
+        OrganizationMedia::Music(_) => &["aac", "flac", "m4a", "mp3", "ogg", "opus", "wav"][..],
+        OrganizationMedia::Book(_) => &["azw3", "cbr", "cbz", "epub", "mobi", "pdf"][..],
+    };
+    supported.contains(&extension.as_str())
+}
+
 /// Removes writer-declared asset transfers while keeping manifests truthful.
-pub fn metadata_only(plan: OutputPlan) -> Result<OutputPlan, OrganizationError> {
+pub fn metadata_only(plan: &OutputPlan) -> Result<OutputPlan, OrganizationError> {
     let dropped_targets = plan
         .operations()
         .iter()
@@ -138,14 +250,15 @@ pub fn metadata_only(plan: OutputPlan) -> Result<OutputPlan, OrganizationError> 
     let mut filtered = OutputPlan::new(plan.output_root.clone());
     for operation in plan.operations() {
         match operation {
-            OutputOperation::CreateDirectory { .. } => filtered.push(operation.clone()),
             OutputOperation::WriteBytes { target, content }
                 if target.file_name().and_then(|name| name.to_str())
                     == Some("fixer-manifest.json") =>
             {
                 filtered.push(reconcile_manifest(target, content, &dropped_targets)?);
             }
-            OutputOperation::WriteBytes { .. } => filtered.push(operation.clone()),
+            OutputOperation::CreateDirectory { .. } | OutputOperation::WriteBytes { .. } => {
+                filtered.push(operation.clone());
+            }
             OutputOperation::Copy { .. }
             | OutputOperation::Move { .. }
             | OutputOperation::Symlink { .. }

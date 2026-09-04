@@ -118,6 +118,29 @@ function JobDetailPage() {
                 progress={current().progress}
               />
             </section>
+            <Show when={current().execution?.failure}>
+              {(failure) => (
+                <section
+                  class="mt-8 border-l-4 border-rust bg-rust/8 px-5 py-4"
+                  role="alert"
+                  aria-labelledby="execution-failure-title"
+                >
+                  <p
+                    id="execution-failure-title"
+                    class="m-0 font-bold text-rust"
+                  >
+                    Output operation failed
+                    <Show when={failure().operation_index !== undefined}>
+                      {` at step ${failure().operation_index! + 1}`}
+                    </Show>
+                  </p>
+                  <p class="mt-2 mb-0">{failure().message}</p>
+                  <code class="mt-3 inline-block text-xs text-muted">
+                    {failure().code}
+                  </code>
+                </section>
+              )}
+            </Show>
             <section
               class="mt-12 flex items-start gap-4 border-t border-line pt-8 max-[640px]:flex-col"
               aria-label="Job actions"

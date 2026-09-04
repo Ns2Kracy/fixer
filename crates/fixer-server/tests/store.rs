@@ -657,6 +657,68 @@ async fn ingestion_rule_crud_preserves_required_placement_modes_and_optional_fie
 }
 
 #[tokio::test]
+async fn ingestion_rule_creation_is_bounded_to_list_capacity() {
+    let (_root, store) = store().await;
+    for _ in 0..100 {
+        store
+            .create_ingestion_rule(ingestion_rule_input(
+                MediaKindMode::Auto,
+                RulePlacement::Copy,
+            ))
+            .await
+            .unwrap();
+    }
+
+    assert!(matches!(
+        store
+            .create_ingestion_rule(ingestion_rule_input(
+                MediaKindMode::Auto,
+                RulePlacement::Copy,
+            ))
+            .await,
+        Err(StoreError::IngestionRuleLimit { limit: 100 })
+    ));
+    assert_eq!(store.list_ingestion_rules(100).await.unwrap().len(), 100);
+}
+
+#[tokio::test]
+async fn ingestion_job_and_source_association_commit_atomically() {
+    let (_root, store) = store().await;
+    let rule = store
+        .create_ingestion_rule(ingestion_rule_input(
+            MediaKindMode::Fixed(JobMediaKind::Movie),
+            RulePlacement::Copy,
+        ))
+        .await
+        .unwrap();
+    let fingerprint = SourceFingerprint::new("Arrival.mkv", 5, 10).unwrap();
+    let source = store
+        .reserve_source(rule.id(), fingerprint.clone())
+        .await
+        .unwrap();
+    let job = store
+        .create_job_for_source(
+            source.source().id(),
+            JobInputDto::new(JobMediaKind::Movie, "/media/Arrival.mkv", true),
+        )
+        .await
+        .unwrap();
+    let associated = store.reserve_source(rule.id(), fingerprint).await.unwrap();
+    assert_eq!(associated.source().job_id(), Some(job.id()));
+
+    assert!(matches!(
+        store
+            .create_job_for_source(
+                source.source().id(),
+                JobInputDto::new(JobMediaKind::Movie, "/media/Arrival.mkv", true),
+            )
+            .await,
+        Err(StoreError::IngestionSourceJobConflict { .. })
+    ));
+    assert_eq!(store.list_jobs(10, None).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn ingestion_source_fingerprint_reservation_and_job_association_are_idempotent() {
     let (_root, store) = store().await;
     let rule = store

@@ -196,6 +196,7 @@ export interface IngestionRuleRequest {
 export interface IngestionRuleDto extends IngestionRuleRequest {
   id: number;
   status: IngestionRuleStatus;
+  review_count: number;
   last_error: string | null;
   created_at_ms: number;
   updated_at_ms: number;
@@ -215,6 +216,24 @@ export interface IngestionScanEnvelope {
   schema_version: SchemaVersion;
   rule_id: number;
   requested: boolean;
+}
+
+export interface IngestionSourceReview {
+  source_id: number;
+  relative_path: string;
+  media_kinds: MediaKind[];
+}
+
+export interface IngestionSourceReviewListEnvelope {
+  schema_version: SchemaVersion;
+  rule_id: number;
+  reviews: IngestionSourceReview[];
+}
+
+export interface IngestionSourceResolveEnvelope {
+  schema_version: SchemaVersion;
+  source_id: number;
+  job_id: number;
 }
 
 export interface SearchMatch {
@@ -338,10 +357,18 @@ export interface PlanSummary {
   fingerprint?: string;
 }
 
+export interface ExecutionFailureSummary {
+  schema_version: SchemaVersion;
+  operation_index?: number;
+  code: string;
+  message: string;
+}
+
 export interface ExecutionSummary {
   schema_version: SchemaVersion;
   completed_operations: number;
   failed_operations: number;
+  failure?: ExecutionFailureSummary;
 }
 
 export interface JobDto {
@@ -568,6 +595,20 @@ export class ApiClient {
 
   rescanIngestionRule(id: number): Promise<IngestionScanEnvelope> {
     return this.#request(`/ingestion-rules/${id}/scan`, { method: "POST" });
+  }
+
+  listIngestionReviews(id: number): Promise<IngestionSourceReviewListEnvelope> {
+    return this.#request(`/ingestion-rules/${id}/reviews`);
+  }
+
+  resolveIngestionReview(
+    sourceId: number,
+    mediaKind: MediaKind,
+  ): Promise<IngestionSourceResolveEnvelope> {
+    return this.#request(`/ingestion-sources/${sourceId}/resolve`, {
+      method: "POST",
+      body: { media_kind: mediaKind },
+    });
   }
 
   search(request: SearchRequest): Promise<SearchEnvelope> {

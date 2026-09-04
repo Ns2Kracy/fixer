@@ -21,8 +21,8 @@ use crate::{
     ingestion::model::{
         IngestionModelError, IngestionRule, IngestionRuleId, IngestionRuleInput,
         IngestionRuleParts, IngestionSource, IngestionSourceId, IngestionSourceParts,
-        MediaKindMode, RuleDirectory, RulePlacement, RuleStatus, SourceFingerprint,
-        SourceReservation,
+        IngestionSourceReview, MediaKindMode, RuleDirectory, RulePlacement, RuleStatus,
+        SourceFingerprint, SourceReservation,
     },
     jobs::model::{JobInputDto, JobState, ProgressSummary},
     store::{ExecutionReservation, JobId, JobRecord, JobRecordParts, JobUpdate, StoreError},
@@ -34,6 +34,7 @@ const RECORD_COLUMNS: &str = "id, input_json, state, progress_json, review_json,
 const INGESTION_RULE_COLUMNS: &str = "id, name, source_root_id, source_relative_path, destination_root_id, destination_relative_path, media_kind_mode, fixed_media_kind, placement, path_template_override, enabled, last_error, created_at_ms, updated_at_ms";
 const INGESTION_SOURCE_COLUMNS: &str = "id, rule_id, relative_source_path, size_bytes, modified_at_ms, status, job_id, created_at_ms, updated_at_ms";
 const MAX_INGESTION_RULE_LIST_LIMIT: usize = 100;
+const MAX_INGESTION_RULES: i64 = 100;
 
 #[derive(Clone)]
 pub struct SqliteJobStore {
@@ -234,6 +235,15 @@ impl SqliteJobStore {
     ) -> Result<IngestionRule, StoreError> {
         let now = timestamp_ms()?;
         let (mode, fixed_kind) = input.media_kind_mode().storage_parts();
+        let mut transaction = self.pool.begin().await?;
+        let rule_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM ingestion_rules")
+            .fetch_one(&mut *transaction)
+            .await?;
+        if rule_count >= MAX_INGESTION_RULES {
+            return Err(StoreError::IngestionRuleLimit {
+                limit: MAX_INGESTION_RULES,
+            });
+        }
         let result = sqlx::query(
             "INSERT INTO ingestion_rules (name, source_root_id, source_relative_path, destination_root_id, destination_relative_path, media_kind_mode, fixed_media_kind, placement, path_template_override, enabled, last_error, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
@@ -250,13 +260,18 @@ impl SqliteJobStore {
         .bind(input.last_error())
         .bind(now)
         .bind(now)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
         let id = IngestionRuleId::from_database(result.last_insert_rowid())
             .map_err(corrupt_ingestion_record)?;
-        self.get_ingestion_rule(id).await?.ok_or_else(|| {
-            StoreError::CorruptRecord("new ingestion rule could not be reloaded".to_owned())
-        })
+        let sql = format!("SELECT {INGESTION_RULE_COLUMNS} FROM ingestion_rules WHERE id = ?");
+        let row = sqlx::query(&sql)
+            .bind(id.get())
+            .fetch_one(&mut *transaction)
+            .await?;
+        let rule = decode_ingestion_rule(&row)?;
+        transaction.commit().await?;
+        Ok(rule)
     }
 
     pub async fn list_ingestion_rules(
@@ -291,6 +306,32 @@ impl SqliteJobStore {
             .transpose()
     }
 
+    pub(crate) async fn ingestion_rule_activity_status(
+        &self,
+        id: IngestionRuleId,
+    ) -> Result<RuleStatus, StoreError> {
+        let (has_error, needs_review, processing) = sqlx::query_as::<_, (i64, i64, i64)>(
+            "SELECT \
+             COALESCE(MAX(CASE WHEN jobs.state IN ('failed', 'interrupted', 'cancelled') THEN 1 ELSE 0 END), 0), \
+             COALESCE(MAX(CASE WHEN ingestion_sources.status = 'needs_review' OR jobs.state IN ('awaiting_review', 'awaiting_confirmation') THEN 1 ELSE 0 END), 0), \
+             COALESCE(MAX(CASE WHEN ingestion_sources.status = 'processing' AND (ingestion_sources.job_id IS NULL OR jobs.state IN ('queued', 'scanning', 'searching', 'resolving', 'planning', 'writing')) THEN 1 ELSE 0 END), 0) \
+             FROM ingestion_sources LEFT JOIN jobs ON jobs.id = ingestion_sources.job_id \
+             WHERE ingestion_sources.rule_id = ? AND ingestion_sources.status != 'paused'",
+        )
+        .bind(id.get())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(if has_error != 0 {
+            RuleStatus::Error
+        } else if needs_review != 0 {
+            RuleStatus::NeedsReview
+        } else if processing != 0 {
+            RuleStatus::Processing
+        } else {
+            RuleStatus::Watching
+        })
+    }
+
     pub async fn update_ingestion_rule(
         &self,
         id: IngestionRuleId,
@@ -318,6 +359,22 @@ impl SqliteJobStore {
             .await?
             .map(|row| decode_ingestion_rule(&row))
             .transpose()
+    }
+
+    pub async fn disable_ingestion_rule(
+        &self,
+        id: IngestionRuleId,
+        error: &str,
+    ) -> Result<bool, StoreError> {
+        let result = sqlx::query(
+            "UPDATE ingestion_rules SET enabled = 0, last_error = ?, updated_at_ms = ? WHERE id = ?",
+        )
+        .bind(error)
+        .bind(timestamp_ms()?)
+        .bind(id.get())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     pub async fn set_ingestion_rule_error(
@@ -426,6 +483,80 @@ impl SqliteJobStore {
         }
     }
 
+    pub async fn pause_ingestion_sources(
+        &self,
+        rule_id: IngestionRuleId,
+    ) -> Result<(), StoreError> {
+        sqlx::query(
+            "UPDATE ingestion_sources SET status = 'paused', review_kinds_json = NULL, updated_at_ms = ? WHERE rule_id = ? AND status != 'paused'",
+        )
+        .bind(timestamp_ms()?)
+        .bind(rule_id.get())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_source_review(
+        &self,
+        source_id: IngestionSourceId,
+        media_kinds: &[crate::jobs::model::JobMediaKind],
+    ) -> Result<IngestionSource, StoreError> {
+        let review_json = serde_json::to_string(media_kinds)?;
+        let sql = format!(
+            "UPDATE ingestion_sources SET status = 'needs_review', review_kinds_json = ?, updated_at_ms = ? WHERE id = ? RETURNING {INGESTION_SOURCE_COLUMNS}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(review_json)
+            .bind(timestamp_ms()?)
+            .bind(source_id.get())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(StoreError::IngestionSourceNotFound {
+                id: source_id.get(),
+            })?;
+        decode_ingestion_source(&row)
+    }
+
+    pub async fn source_review_count(&self, rule_id: IngestionRuleId) -> Result<u64, StoreError> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM ingestion_sources WHERE rule_id = ? AND status = 'needs_review' AND job_id IS NULL",
+        )
+        .bind(rule_id.get())
+        .fetch_one(&self.pool)
+        .await?;
+        u64::try_from(count).map_err(|_| {
+            StoreError::CorruptRecord("ingestion review count must not be negative".to_owned())
+        })
+    }
+
+    pub async fn list_source_reviews(
+        &self,
+        rule_id: IngestionRuleId,
+    ) -> Result<Vec<IngestionSourceReview>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, rule_id, relative_source_path, review_kinds_json FROM ingestion_sources WHERE rule_id = ? AND status = 'needs_review' AND job_id IS NULL ORDER BY id LIMIT 100",
+        )
+        .bind(rule_id.get())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(decode_source_review).collect()
+    }
+
+    pub async fn get_source_review(
+        &self,
+        source_id: IngestionSourceId,
+    ) -> Result<Option<IngestionSourceReview>, StoreError> {
+        sqlx::query(
+            "SELECT id, rule_id, relative_source_path, review_kinds_json FROM ingestion_sources WHERE id = ? AND status = 'needs_review' AND job_id IS NULL",
+        )
+        .bind(source_id.get())
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|row| decode_source_review(&row))
+        .transpose()
+    }
+
     pub async fn update_source_status(
         &self,
         source_id: IngestionSourceId,
@@ -444,6 +575,60 @@ impl SqliteJobStore {
                 id: source_id.get(),
             })?;
         decode_ingestion_source(&row)
+    }
+
+    pub async fn create_job_for_source(
+        &self,
+        source_id: IngestionSourceId,
+        input: JobInputDto,
+    ) -> Result<JobRecord, StoreError> {
+        let now = timestamp_ms()?;
+        let input_json = serde_json::to_string(&input)?;
+        let mut transaction = self.pool.begin().await?;
+        let result = sqlx::query(
+            "INSERT INTO jobs (input_json, state, created_at_ms, updated_at_ms) VALUES (?, 'queued', ?, ?)",
+        )
+        .bind(input_json)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+        let job_id = JobId::from_database(result.last_insert_rowid())?;
+        let associated = sqlx::query(
+            "UPDATE ingestion_sources SET job_id = ?, status = 'processing', review_kinds_json = NULL, updated_at_ms = ? WHERE id = ? AND job_id IS NULL",
+        )
+        .bind(job_id.get())
+        .bind(now)
+        .bind(source_id.get())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if associated != 1 {
+            let exists = sqlx::query_scalar::<_, i64>(
+                "SELECT EXISTS(SELECT 1 FROM ingestion_sources WHERE id = ?)",
+            )
+            .bind(source_id.get())
+            .fetch_one(&mut *transaction)
+            .await?;
+            transaction.rollback().await?;
+            return Err(if exists == 0 {
+                StoreError::IngestionSourceNotFound {
+                    id: source_id.get(),
+                }
+            } else {
+                StoreError::IngestionSourceJobConflict {
+                    id: source_id.get(),
+                }
+            });
+        }
+        let sql = format!("SELECT {RECORD_COLUMNS} FROM jobs WHERE id = ?");
+        let row = sqlx::query(&sql)
+            .bind(job_id.get())
+            .fetch_one(&mut *transaction)
+            .await?;
+        let job = decode_record(&row)?;
+        transaction.commit().await?;
+        Ok(job)
     }
 
     pub async fn create_job(&self, input: JobInputDto) -> Result<JobRecord, StoreError> {
@@ -800,6 +985,26 @@ fn decode_ingestion_source(row: &SqliteRow) -> Result<IngestionSource, StoreErro
 
 fn corrupt_ingestion_record(error: IngestionModelError) -> StoreError {
     StoreError::CorruptRecord(error.to_string())
+}
+
+fn decode_source_review(row: &SqliteRow) -> Result<IngestionSourceReview, StoreError> {
+    let source_id =
+        IngestionSourceId::from_database(row.try_get("id")?).map_err(corrupt_ingestion_record)?;
+    let rule_id = IngestionRuleId::from_database(row.try_get("rule_id")?)
+        .map_err(corrupt_ingestion_record)?;
+    let relative_source_path = row.try_get("relative_source_path")?;
+    let review_json = row
+        .try_get::<Option<String>, _>("review_kinds_json")?
+        .ok_or_else(|| {
+            StoreError::CorruptRecord("review source has no media kind options".to_owned())
+        })?;
+    let media_kinds = serde_json::from_str(&review_json)?;
+    Ok(IngestionSourceReview::new(
+        source_id,
+        rule_id,
+        relative_source_path,
+        media_kinds,
+    ))
 }
 
 fn decode_record(row: &SqliteRow) -> Result<JobRecord, StoreError> {

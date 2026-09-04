@@ -3,8 +3,8 @@ use std::fmt::Debug;
 use fixer_server::{
     ingestion::model::RulePlacement,
     jobs::model::{
-        ExecutionSummary, JobInputDto, JobMediaKind, JobOrganizationDto, JobState, PlanSummary,
-        ProgressSummary, ReviewDecisionDto, ReviewSummary,
+        ExecutionFailureSummary, ExecutionSummary, JobInputDto, JobMediaKind, JobOrganizationDto,
+        JobState, PlanSummary, ProgressSummary, ReviewDecisionDto, ReviewSummary,
     },
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -70,10 +70,31 @@ fn job_input_and_summaries_are_stable_server_owned_dtos() {
 
     let execution = ExecutionSummary::new(4, 1);
     assert_eq!(
-        serde_json::to_value(execution).unwrap(),
+        serde_json::to_value(&execution).unwrap(),
         json!({"schema_version": 1, "completed_operations": 4, "failed_operations": 1})
     );
     assert_round_trip(&execution);
+
+    let failed = ExecutionSummary::new(0, 1).with_failure(ExecutionFailureSummary::new(
+        Some(2),
+        "target_exists",
+        "An output target already exists",
+    ));
+    assert_eq!(
+        serde_json::to_value(&failed).unwrap(),
+        json!({
+            "schema_version": 1,
+            "completed_operations": 0,
+            "failed_operations": 1,
+            "failure": {
+                "schema_version": 1,
+                "operation_index": 2,
+                "code": "target_exists",
+                "message": "An output target already exists"
+            }
+        })
+    );
+    assert_round_trip(&failed);
 }
 
 #[test]

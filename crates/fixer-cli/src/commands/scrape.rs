@@ -365,7 +365,7 @@ async fn scrape_television(
     }
     let resolved = query.resolve().await.map_err(AppError::new)?;
     let output_root = if args.placement() == PlacementArg::InPlace {
-        series_root.to_path_buf()
+        series_root.clone()
     } else {
         series_root.parent().unwrap_or(series_root).to_path_buf()
     };
@@ -621,7 +621,7 @@ fn apply_output_preset(
     if preset == OutputPreset::Full {
         Ok(plan)
     } else {
-        metadata_only(plan).map_err(AppError::new)
+        metadata_only(&plan).map_err(AppError::new)
     }
 }
 

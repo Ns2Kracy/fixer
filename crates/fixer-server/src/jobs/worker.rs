@@ -89,10 +89,11 @@ pub fn auto_decision(
             reason: AutoReviewReason::NoCandidates,
         };
     };
-    let mut top = review
-        .candidates
-        .iter()
-        .filter(|candidate| normalize_confidence(candidate.confidence) == top_confidence);
+    let mut top = review.candidates.iter().filter(|candidate| {
+        normalize_confidence(candidate.confidence)
+            .total_cmp(&top_confidence)
+            .is_eq()
+    });
     let Some(candidate) = top.next() else {
         return AutoDecision::NeedsReview {
             reason: AutoReviewReason::NoCandidates,
@@ -710,7 +711,7 @@ fn organization_plan(
     let source = Path::new(input.input_path())
         .canonicalize()
         .map_err(planning_error)?;
-    let metadata_plan = metadata_only(metadata_plan).map_err(planning_error)?;
+    let metadata_plan = metadata_only(&metadata_plan).map_err(planning_error)?;
     let mut request = OrganizationRequest::new(
         &source,
         Path::new(&organization.destination_path),

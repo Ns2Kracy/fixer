@@ -150,6 +150,16 @@ impl PreparedOutputPlan {
         if let Err(error) = self.ensure_fresh() {
             return Err(ExecutionFailure { error, report });
         }
+        if !policy.dry_run
+            && let Err((index, target, error)) = self.preflight(policy)
+        {
+            report.operations.push(OperationReport {
+                index,
+                target,
+                status: OperationStatus::Failed,
+            });
+            return Err(ExecutionFailure { error, report });
+        }
         for (index, operation) in self.plan.operations().iter().enumerate() {
             let target = absolute_target(&self.root, operation);
             if policy.dry_run {
@@ -186,6 +196,43 @@ impl PreparedOutputPlan {
         }
         Ok(report)
     }
+    fn preflight(&self, policy: ExecutionPolicy) -> Result<(), (usize, PathBuf, ExecutionError)> {
+        for (index, operation) in self.plan.operations().iter().enumerate() {
+            let target = absolute_target(&self.root, operation);
+            let check = (|| {
+                ensure_safe_ancestors(&self.root, relative_target(operation))?;
+                match operation {
+                    OutputOperation::CreateDirectory { .. } => {
+                        if let Ok(metadata) = fs::symlink_metadata(&target)
+                            && !metadata.is_dir()
+                        {
+                            return Err(ExecutionError::TargetExists {
+                                path: target.clone(),
+                            });
+                        }
+                    }
+                    OutputOperation::WriteBytes { .. } => {
+                        ensure_target_available(&target, policy.overwrite)?;
+                    }
+                    OutputOperation::Copy { .. }
+                    | OutputOperation::Move { .. }
+                    | OutputOperation::Symlink { .. }
+                    | OutputOperation::Hardlink { .. }
+                    | OutputOperation::Reflink { .. } => {
+                        let source = required_source(operation, &self.root)?;
+                        ensure_source_file(&source)?;
+                        ensure_target_available(&target, policy.overwrite)?;
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = check {
+                return Err((index, target, error));
+            }
+        }
+        Ok(())
+    }
+
     fn ensure_fresh(&self) -> Result<(), ExecutionError> {
         for observed in &self.observed {
             let current = PathFingerprint::capture(&observed.path)

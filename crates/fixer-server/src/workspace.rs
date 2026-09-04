@@ -358,6 +358,24 @@ impl WorkspaceState {
             .collect()
     }
 
+    pub(super) fn display_path(&self, path: &Path) -> String {
+        self.inner
+            .roots
+            .iter()
+            .filter(|root| path.starts_with(&root.path))
+            .max_by_key(|root| root.path.components().count())
+            .and_then(|root| {
+                relative_display(&root.path, path).ok().map(|relative| {
+                    if relative.is_empty() {
+                        root.label.clone()
+                    } else {
+                        format!("{}/{relative}", root.label)
+                    }
+                })
+            })
+            .unwrap_or_else(|| "Unavailable item".to_owned())
+    }
+
     pub(super) fn resolve_directory(
         &self,
         reference: &DirectoryRef,

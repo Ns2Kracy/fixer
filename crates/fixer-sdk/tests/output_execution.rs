@@ -148,6 +148,32 @@ fn move_collision_does_not_overwrite_and_preserves_source() {
 }
 
 #[test]
+fn later_collision_is_detected_before_an_earlier_move() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("incoming.mkv");
+    let output = root.path().join("library");
+    fs::create_dir_all(&output).unwrap();
+    fs::write(&source, b"incoming").unwrap();
+    fs::write(output.join("movie.nfo"), b"existing").unwrap();
+    let mut plan = OutputPlan::new(&output);
+    plan.push(OutputOperation::move_file(&source, "movie.mkv").unwrap());
+    plan.push(
+        OutputOperation::write_bytes("movie.nfo", PlannedContent::new(b"replacement")).unwrap(),
+    );
+
+    let failure = plan.execute(ExecutionPolicy::default()).unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        ExecutionError::TargetExists { .. }
+    ));
+    assert_eq!(failure.report().operations()[0].index, 1);
+    assert_eq!(fs::read(&source).unwrap(), b"incoming");
+    assert!(!output.join("movie.mkv").exists());
+    assert_eq!(fs::read(output.join("movie.nfo")).unwrap(), b"existing");
+}
+
+#[test]
 fn move_deserialized_traversal_is_rejected_at_the_sdk_boundary() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source.mkv");
@@ -361,7 +387,7 @@ fn reflink_required_reports_support_precisely_or_succeeds() {
 }
 
 #[test]
-fn partial_failure_returns_report_and_cleans_temporary_artifacts() {
+fn preflight_failure_reports_operation_without_partial_output() {
     let root = tempfile::tempdir().unwrap();
     let missing = root.path().join("missing.mkv");
     let output = root.path().join("library");
@@ -369,10 +395,12 @@ fn partial_failure_returns_report_and_cleans_temporary_artifacts() {
     plan.push(OutputOperation::copy(&missing, "movie.mkv").unwrap());
     let prepared = plan.prepare().unwrap();
     let failure = prepared.execute(ExecutionPolicy::default()).unwrap_err();
+    assert_eq!(failure.report().operations()[0].index, 1);
     assert_eq!(
         failure.report().operations()[0].status,
-        OperationStatus::Completed
+        OperationStatus::Failed
     );
+    assert!(!output.join("movie.json").exists());
     assert!(walkdir(&output).iter().all(|path| {
         !path
             .file_name()

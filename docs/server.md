@@ -1,6 +1,6 @@
 # Server operations
 
-`fixer-server` serves the versioned Axum API and the built Solid workspace from
+`fixer-server` serves the versioned Axum API and the built Solid application from
 one process. It uses the same `fixer.toml`, `.env`, provider registry, and SDK
 runtime builder as the CLI. The production path runs the configured worker
 count, stores jobs and authentication records in SQLite, and limits filesystem
@@ -267,7 +267,25 @@ Do not pass externally constructed server plans with relative non-symlink copy/h
 
 Grant the server account only the OS permissions it needs. The allowlist cannot override operating-system permissions and does not protect other data when a configured root is too broad. Configure library directories, not `/`, a home directory, or a whole mounted host filesystem.
 
-The workspace library browser skips symlinks during traversal and bounds directory/search results. Job execution can read or write only paths accepted by `FsPolicy`.
+The directory browser skips symlinks during traversal and bounds directory/search results. Job execution can read or write only paths accepted by `FsPolicy`.
+
+## Folder ingestion rules
+
+`server.media_roots` is an operator-managed allowlist, not a browser setting. Configure the narrowest existing roots that contain both incoming and organized directories, restart after changing the allowlist, then select directories by name in **Folders**. API requests store only an opaque root ID and a relative path; source and destination must resolve to distinct, non-overlapping directories.
+
+Every rule stores its own media mode, destination template override, enabled state, and required placement method:
+
+- `move` removes each successfully placed source file;
+- `copy` creates independent destination files;
+- `hardlink` shares file data and requires source and destination on the same supporting filesystem;
+- `symlink` creates relative links and requires link support plus a representable relative path;
+- `reflink` requires copy-on-write clone support and does not silently become a normal copy.
+
+There is no global placement setting. Use **Pause** before changing mounts or permissions, **Scan now** to request immediate reconciliation, and **Resume** when the source is ready.
+
+At startup, each enabled rule recursively discovers logical media items. A recursive filesystem watcher handles later create, modify, and rename activity; periodic reconciliation recovers events missed during downtime, watcher overflow, or unreliable network mounts. An item must retain the same aggregate size and modification time across the debounce window before Fixer reserves its persisted fingerprint.
+
+Only rule-origin jobs can execute automatically. The top candidate must be unique, untruncated, at or above `auto_accept_confidence`, conflict-free, and produce a safe collision-free plan. Automatic media-kind ambiguity, tied or low-confidence candidates, metadata conflicts, unavailable links, stale sources, and existing destinations stop before writing. Rules summarize current activity as **Watching**, **Processing**, **Needs review**, **Paused**, or **Error**.
 
 ## Web and API routes
 
@@ -275,7 +293,7 @@ The production process serves:
 
 - `GET /api/v1/health`, `GET /api/v1/auth/status`, and `POST /api/v1/auth/login` without an existing session;
 - `POST /api/v1/auth/register` only while the database has no administrator account;
-- authenticated provider, workspace, template, job, review, plan, execution, retry, cancellation, and event routes under `/api/v1`;
+- authenticated provider, settings, directory-browser, folder-rule, job, review, plan, execution, retry, cancellation, and event routes under `/api/v1`;
 - hashed static assets under `/assets` with immutable caching;
 - `index.html` and client routes with revalidation so new builds are picked up.
 
@@ -286,6 +304,16 @@ Job responses use `schema_version: 1`. Key routes include:
 ```text
 GET  /api/v1/settings
 PUT  /api/v1/settings
+GET  /api/v1/library/roots
+GET  /api/v1/library?root_id=...&path=...
+GET  /api/v1/ingestion-rules
+POST /api/v1/ingestion-rules
+PUT  /api/v1/ingestion-rules/{id}
+DELETE /api/v1/ingestion-rules/{id}
+POST /api/v1/ingestion-rules/{id}/scan
+GET  /api/v1/ingestion-rules/{id}/reviews
+POST /api/v1/ingestion-sources/{id}/resolve
+POST /api/v1/templates/preview
 POST /api/v1/providers/{provider}/probe
 GET  /api/v1/jobs?limit=50&state=completed
 POST /api/v1/jobs
@@ -299,6 +327,8 @@ POST /api/v1/jobs/{id}/retry
 GET  /api/v1/jobs/{id}/events
 ```
 
+Rule list responses include the current `review_count`; the **Folders** action opens those ambiguous sources and queues the selected movie or television kind. Job, review, and plan responses display filesystem locations as a configured root label plus a relative path. Canonical root paths remain server-side. Persisted execution failures expose a safe code, zero-based operation index, and actionable message in job details and replays.
+
 Execution requires a job created with `apply: true`, a review decision accepting every conflict index, `approved: true`, and an `Idempotency-Key` containing 1 to 256 visible ASCII characters. Reusing the same key and request fingerprint returns the existing reservation; a conflicting request fails. This prevents an ambiguous retry from scheduling a second write.
 
 Lists accept 1 to 100 jobs. Review acceptance is capped at 4096 strictly increasing conflict indexes and must equal the complete zero-based conflict set. Candidate, warning, conflict, and operation collections expose truncation flags. Individual displayed text and path values are clipped to 2,048 characters without a per-field truncation flag, including `output_root`, source, and target. Do not approve a server plan whose relevant path could exceed that display bound; the API cannot prove its full suffix.
@@ -311,18 +341,19 @@ The default database is `fixer.sqlite3` relative to the selected configuration d
 
 SQLite stores:
 
-- jobs, progress, review decisions, plan counts/fingerprints, execution counts, and idempotency reservations;
+- jobs, progress, review decisions, plan counts/fingerprints, execution counts/failures, and idempotency reservations;
+- folder rules plus source size/mtime fingerprints, ambiguity choices, active/paused status, and associated job IDs;
 - the single administrator username and Argon2id password hash in `fixer_users`;
 - session token/CSRF digests and expiration times in `fixer_sessions`;
 - API token names, digests, and revocation state.
 
 The server acquires an exclusive process lease for the database identity. A second Fixer process cannot open the same database concurrently. Migrations run automatically at open.
 
-Workspace settings changed through the Web UI are validated and atomically persisted to the selected `fixer.toml`; they are not stored in SQLite. The settings route and workers share one handle, and every queued job snapshots it before SDK construction, so the next job sees a successful update without a restart. Provider values returned by environment continue to have higher precedence after restart. Direct Web-entered provider tokens are write-only through the API but plaintext in the private TOML file; environment references persist only their variable names.
+Application and provider settings changed through the Web UI are validated and atomically persisted to the selected `fixer.toml`; they are not stored in SQLite. The settings route and workers share one handle, and every queued job snapshots it before SDK construction, so the next job sees a successful update without a restart. Provider values returned by environment continue to have higher precedence after restart. Direct Web-entered provider tokens are write-only through the API but plaintext in the private TOML file; environment references persist only their variable names.
 
 ## Restart and interrupted jobs
 
-Opening the store changes persisted active states (`scanning`, `searching`, `resolving`, `planning`, or `writing`) to `interrupted`. Workers seed queued jobs from SQLite after restart. Operators can retry an interrupted job through the job API or Web UI.
+Opening the store changes persisted active states (`scanning`, `searching`, `resolving`, `planning`, or `writing`) to `interrupted`. Workers seed queued jobs from SQLite after restart. The ingestion supervisor reloads enabled rules, recursively reconciles their sources, and reuses persisted fingerprints so unchanged items do not create duplicate jobs. A changed size or modification time is a new observation and may create new work. Operators can retry an interrupted job through the job API or Web UI.
 
 A job with a persisted execution reservation cannot be retried automatically. This fail-closed rule avoids duplicating a filesystem mutation when the process stopped after reserving or starting execution. Inspect the output plan, execution summary, and filesystem before deciding how to recover.
 

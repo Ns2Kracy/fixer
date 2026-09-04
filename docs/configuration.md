@@ -172,10 +172,7 @@ Boolean environment values accept `1`, `true`, `yes`, `on`, `0`, `false`,
 | `conflict_policy` | `prefer_first`, `review`, or `error`. |
 | `enabled_providers` | Non-empty provider allowlist; duplicates are removed. |
 
-The confidence thresholds are validated and reported but are not yet applied to
-candidate selection. `metadata` drops writer-planned local-asset placement while
-retaining metadata writes. Media placement is selected explicitly for each `plan`
-or `scrape` invocation rather than through shared configuration.
+`auto_accept_confidence` gates automatic execution only for trusted folder-rule jobs; one-off jobs still require review. The top candidate must also be unique and conflict-free. `review_confidence` is currently validated and reported but is not yet used as a separate candidate cutoff. `metadata` drops writer-planned local-asset placement while retaining metadata writes. Media placement is selected explicitly for each `plan` or `scrape` invocation and for each folder rule rather than through shared configuration.
 
 Conflict behavior is:
 
@@ -184,6 +181,14 @@ Conflict behavior is:
 | `prefer_first` | Continue with deterministic provider precedence. |
 | `review` | Return exit code `4` after emitting the plan; do not execute. |
 | `error` | Return exit code `1` with a safe conflict count. |
+
+## Configured roots and persisted folder rules
+
+`server.media_roots` is required when serving the Web application. Every entry must exist and be a directory when the server starts. Relative roots resolve against the selected configuration file, but absolute canonical roots are easier to audit in services and containers. Use the narrowest common boundary needed for incoming and destination folders; do not configure `/`, a home directory, or a whole host mount.
+
+The browser cannot add or edit configured roots. **Folders** lists only directories beneath this allowlist and submits opaque root IDs plus relative paths. Folder rules are persisted in SQLite, including source, destination, media mode, template override, enabled state, and an explicitly selected placement method. No `placement` key exists in `fixer.toml`; changing a rule never changes another rule or a CLI invocation.
+
+Enabled rules are reloaded on startup. Existing items are discovered recursively, new events are watched, and periodic reconciliation catches missed events. The persisted source fingerprint ledger prevents unchanged items from creating duplicate jobs after restart.
 
 ## Providers and secrets
 
@@ -242,7 +247,7 @@ environment-reference names. A direct token entered in the Web UI is stored as
 plaintext in the private TOML file; an environment reference remains a reference
 and its resolved value is never written.
 
-The Web settings surface edits workspace/provider fields, not `[server]` or
+The Web settings surface edits application/provider fields, not `[server]` or
 `[logging]`. Environment values still have higher precedence on the next process
 start. Keep the configuration directory writable by the server account. A write
 or validation failure leaves the previous file and in-memory snapshot active.

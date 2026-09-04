@@ -12,6 +12,8 @@ use axum::{
 use fixer_server::{
     AuthState, IngestionNotifications, IngestionRuntime, IngestionSupervisor,
     IngestionSupervisorConfig, JobRuntime, SqliteJobStore, WorkspaceState,
+    ingestion::model::{RuleStatus, SourceFingerprint},
+    jobs::model::JobMediaKind,
     secure_workspace_app_with_notifications,
 };
 use http_body_util::BodyExt;
@@ -121,16 +123,12 @@ impl Harness {
         uri: &str,
         body: Option<Value>,
     ) -> axum::response::Response {
-        let mut builder = Request::builder()
+        let builder = Request::builder()
             .method(method)
             .uri(uri)
-            .header(header::AUTHORIZATION, format!("Bearer {}", self.token));
-        let body = if let Some(body) = body {
-            builder = builder.header(header::CONTENT_TYPE, "application/json");
-            Body::from(body.to_string())
-        } else {
-            Body::empty()
-        };
+            .header(header::AUTHORIZATION, format!("Bearer {}", self.token))
+            .header(header::CONTENT_TYPE, "application/json");
+        let body = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
         send(&self.router, builder.body(body).unwrap()).await
     }
 
@@ -212,6 +210,88 @@ async fn disabled_rules_never_enqueue_jobs() {
 
     sleep(Duration::from_millis(180)).await;
     assert!(app.store.list_jobs(100, None).await.unwrap().is_empty());
+
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn historical_review_rows_do_not_keep_rule_status_stale() {
+    let app = Harness::new().await;
+    let rule_id = app.create_rule(true).await;
+    let rule = app
+        .store
+        .list_ingestion_rules(100)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|rule| rule.id().get() == rule_id)
+        .unwrap();
+    let source = app
+        .store
+        .reserve_source(
+            rule.id(),
+            SourceFingerprint::new("ambiguous", 10, 20).unwrap(),
+        )
+        .await
+        .unwrap();
+    app.store
+        .update_source_review(
+            source.source().id(),
+            &[JobMediaKind::Movie, JobMediaKind::Television],
+        )
+        .await
+        .unwrap();
+    let runtime = IngestionRuntime::new(
+        app.store.clone(),
+        app.jobs.clone(),
+        app.workspace.clone(),
+        app.notifications.clone(),
+    );
+    assert_eq!(
+        runtime.rule_status(&rule).await.unwrap(),
+        RuleStatus::NeedsReview
+    );
+
+    app.store.pause_ingestion_sources(rule.id()).await.unwrap();
+
+    assert_eq!(
+        runtime.rule_status(&rule).await.unwrap(),
+        RuleStatus::Watching
+    );
+}
+
+#[tokio::test]
+async fn removed_configured_roots_disable_persisted_rules() {
+    let app = Harness::new().await;
+    app.create_rule(true).await;
+    let replacement = tempfile::tempdir().unwrap();
+    let supervisor = IngestionSupervisor::start_with_config(
+        IngestionRuntime::new(
+            app.store.clone(),
+            app.jobs.clone(),
+            WorkspaceState::new([replacement.path()]).unwrap(),
+            app.notifications.clone(),
+        ),
+        IngestionSupervisorConfig::new(Duration::from_millis(20), Duration::from_millis(50)),
+    );
+
+    timeout(Duration::from_secs(2), async {
+        loop {
+            let rules = app.store.list_ingestion_rules(100).await.unwrap();
+            if !rules[0].enabled() {
+                assert!(
+                    rules[0]
+                        .last_error()
+                        .unwrap()
+                        .contains("Configured library root was removed")
+                );
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
 
     supervisor.shutdown().await;
 }

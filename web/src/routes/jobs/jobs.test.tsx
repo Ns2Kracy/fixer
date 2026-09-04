@@ -29,7 +29,7 @@ const job = {
   input: {
     schema_version: 1,
     media_kind: "movie",
-    input_path: "/media/Fixture Movie.mkv",
+    input_path: "Media/Fixture Movie.mkv",
     apply: true,
   },
   state: "awaiting_confirmation",
@@ -83,7 +83,7 @@ describe("jobs workflow", () => {
     const view = renderApp("/jobs/7");
 
     expect(
-      await screen.findByRole("heading", { name: "/media/Fixture Movie.mkv" }),
+      await screen.findByRole("heading", { name: "Media/Fixture Movie.mkv" }),
     ).toBeVisible();
     expect(screen.getByRole("heading", { name: "Job progress" })).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent("Events: connecting");
@@ -91,6 +91,35 @@ describe("jobs workflow", () => {
 
     view.unmount();
     expect(SilentEventSource.instances[0]?.closed).toBe(true);
+  });
+
+  it("shows persisted output failure details", async () => {
+    const failed = {
+      ...job,
+      state: "failed",
+      execution: {
+        schema_version: 1,
+        completed_operations: 0,
+        failed_operations: 1,
+        failure: {
+          schema_version: 1,
+          operation_index: 2,
+          code: "target_exists",
+          message: "An output target already exists",
+        },
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ schema_version: 1, job: failed })),
+    );
+
+    renderApp("/jobs/7");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Output operation failed at step 3");
+    expect(alert).toHaveTextContent("An output target already exists");
+    expect(alert).toHaveTextContent("target_exists");
   });
 
   it.each([
@@ -116,7 +145,7 @@ describe("jobs workflow", () => {
 
       expect(
         await screen.findByRole("heading", {
-          name: "/media/Fixture Movie.mkv",
+          name: "Media/Fixture Movie.mkv",
         }),
       ).toBeVisible();
       expect(Boolean(screen.queryByRole("button", { name: "Retry job" }))).toBe(

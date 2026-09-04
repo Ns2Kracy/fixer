@@ -10,18 +10,21 @@ use std::{
 };
 
 use fixer_core::{OutputOperation, OutputPlan};
-use fixer_sdk::output::{ExecutionPolicy, OperationStatus, OutputPlanExt};
+use fixer_sdk::output::{
+    ExecutionError, ExecutionFailure, ExecutionPolicy, OperationStatus, OutputPlanExt,
+};
 use futures_util::FutureExt;
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify, oneshot, watch};
 
 use crate::{
     FsPolicy, FsPolicyError,
+    ingestion::model::IngestionSourceId,
     jobs::{
         events::{JobEventHub, JobEventStream, SubscribeError},
         model::{
-            AutoReviewReason, ExecutionSummary, JobInputDto, JobState, PlanSummary,
-            ProgressSummary, ReviewDecisionDto, ReviewSummary,
+            AutoReviewReason, ExecutionFailureSummary, ExecutionSummary, JobInputDto, JobState,
+            PlanSummary, ProgressSummary, ReviewDecisionDto, ReviewSummary,
         },
         worker::{RETRY_DELAYS, SharedWorkerFlow, WorkerFlow},
     },
@@ -33,11 +36,65 @@ pub use worker::{JobFlowError, SdkJobFlow, SearchSummary, WorkerPool};
 const EXECUTION_FINGERPRINT: &str = "approved-v1";
 const AUTO_EXECUTION_KEY: &str = "ingestion-auto-v1";
 
+struct PreparedReview {
+    candidate_count: u64,
+    conflict_count: u64,
+    automatic: worker::AutoDecision,
+}
+
 const fn is_terminal(state: JobState) -> bool {
     matches!(
         state,
         JobState::Completed | JobState::Failed | JobState::Cancelled | JobState::Interrupted
     )
+}
+
+fn execution_failure_summary(failure: &ExecutionFailure) -> ExecutionFailureSummary {
+    let operation_index = failure
+        .report()
+        .operations()
+        .iter()
+        .find(|operation| operation.status == OperationStatus::Failed)
+        .and_then(|operation| u64::try_from(operation.index).ok());
+    let (code, message) = match failure.error() {
+        ExecutionError::UnsafeTarget { .. } => (
+            "unsafe_target",
+            "An output target is outside the permitted destination",
+        ),
+        ExecutionError::TargetExists { .. } => (
+            "target_exists",
+            "An output target already exists; choose another destination or resolve the collision",
+        ),
+        ExecutionError::StalePlan { .. } => (
+            "stale_plan",
+            "Files changed after planning; rebuild the output plan before retrying",
+        ),
+        ExecutionError::SourceUnavailable { .. } => (
+            "source_unavailable",
+            "A source file is no longer available; restore it and retry",
+        ),
+        ExecutionError::RelativeSymlinkUnavailable { .. } => (
+            "relative_symlink_unavailable",
+            "A relative link cannot be created for this source and destination",
+        ),
+        ExecutionError::ReflinkUnsupported { .. } => (
+            "reflink_unsupported",
+            "This filesystem does not support copy-on-write clones for the selected files",
+        ),
+        ExecutionError::InvalidPlan(_) => (
+            "invalid_plan",
+            "The output plan is invalid; rebuild it before retrying",
+        ),
+        ExecutionError::Io { .. } => (
+            "filesystem_error",
+            "A filesystem operation failed; check permissions and available space",
+        ),
+        _ => (
+            "execution_failed",
+            "The output operation failed; rebuild the plan and retry",
+        ),
+    };
+    ExecutionFailureSummary::new(operation_index, code, message)
 }
 
 #[derive(Default)]
@@ -195,37 +252,57 @@ impl JobRuntime {
     }
 
     pub(crate) async fn create(&self, input: JobInputDto) -> Result<JobRecord, RuntimeError> {
-        let input = if let Some(policy) = &self.fs_policy {
-            let canonical = policy.validate_read(input.input_path())?;
-            let mut validated = JobInputDto::new(
-                input.media_kind(),
-                canonical.to_string_lossy().into_owned(),
-                input.apply(),
-            );
-            if let Some(organization) = input.organization() {
-                let mut organization = organization.clone();
-                let destination = policy
-                    .validate_read(&organization.destination_path)
-                    .map_err(RuntimeError::OrganizationFilesystemPolicy)?;
-                if !destination.is_dir() {
-                    return Err(RuntimeError::OrganizationFilesystemPolicy(
-                        FsPolicyError::PathNotDirectory {
-                            path: organization.destination_path.into(),
-                        },
-                    ));
-                }
-                organization.destination_path = destination.to_string_lossy().into_owned();
-                validated = validated.with_organization(organization);
-            }
-            validated
-        } else {
-            input
-        };
+        let input = self.validate_input(input)?;
         let _operation = self.operations.lock().await;
         let job = self.store.create_job(input).await?;
+        self.publish_created(&job)?;
+        Ok(job)
+    }
+
+    pub(crate) async fn create_for_source(
+        &self,
+        source_id: IngestionSourceId,
+        input: JobInputDto,
+    ) -> Result<JobRecord, RuntimeError> {
+        let input = self.validate_input(input)?;
+        let _operation = self.operations.lock().await;
+        let job = self.store.create_job_for_source(source_id, input).await?;
+        self.publish_created(&job)?;
+        Ok(job)
+    }
+
+    fn validate_input(&self, input: JobInputDto) -> Result<JobInputDto, RuntimeError> {
+        let Some(policy) = &self.fs_policy else {
+            return Ok(input);
+        };
+        let canonical = policy.validate_read(input.input_path())?;
+        let mut validated = JobInputDto::new(
+            input.media_kind(),
+            canonical.to_string_lossy().into_owned(),
+            input.apply(),
+        );
+        if let Some(organization) = input.organization() {
+            let mut organization = organization.clone();
+            let destination = policy
+                .validate_read(&organization.destination_path)
+                .map_err(RuntimeError::OrganizationFilesystemPolicy)?;
+            if !destination.is_dir() {
+                return Err(RuntimeError::OrganizationFilesystemPolicy(
+                    FsPolicyError::PathNotDirectory {
+                        path: organization.destination_path.into(),
+                    },
+                ));
+            }
+            organization.destination_path = destination.to_string_lossy().into_owned();
+            validated = validated.with_organization(organization);
+        }
+        Ok(validated)
+    }
+
+    fn publish_created(&self, job: &JobRecord) -> Result<(), RuntimeError> {
         self.events.publish_state(job.id(), job.state())?;
         self.wake_workers.notify_waiters();
-        Ok(job)
+        Ok(())
     }
 
     pub(crate) async fn get(&self, id: JobId) -> Result<JobRecord, RuntimeError> {
@@ -495,10 +572,18 @@ impl JobRuntime {
                     ExecutionSummary::new(
                         u64::try_from(completed).map_err(|_| RuntimeError::CountOverflow)?,
                         u64::try_from(failed).map_err(|_| RuntimeError::CountOverflow)?,
-                    ),
+                    )
+                    .with_failure(execution_failure_summary(&failure)),
                 )
             }
-            Err(_) => (JobState::Failed, ExecutionSummary::new(0, 0)),
+            Err(_) => (
+                JobState::Failed,
+                ExecutionSummary::new(0, 0).with_failure(ExecutionFailureSummary::new(
+                    None,
+                    "execution_task_failed",
+                    "The output task stopped before it could report an operation",
+                )),
+            ),
         };
         let stage = if next == JobState::Completed {
             "completed"
@@ -517,7 +602,7 @@ impl JobRuntime {
                         completed_operations,
                         Some(actual_operations),
                     ))
-                    .with_execution(summary),
+                    .with_execution(summary.clone()),
             )
             .await?;
         self.events.publish_completion(id, &summary)?;
@@ -529,7 +614,11 @@ impl JobRuntime {
         id: JobId,
         total_operations: u64,
     ) -> Result<JobRecord, RuntimeError> {
-        let summary = ExecutionSummary::new(0, 0);
+        let summary = ExecutionSummary::new(0, 0).with_failure(ExecutionFailureSummary::new(
+            None,
+            "execution_panicked",
+            "The output task stopped unexpectedly",
+        ));
         let job = self
             .transition_with_retry(
                 id,
@@ -537,7 +626,7 @@ impl JobRuntime {
                 JobState::Failed,
                 JobUpdate::default()
                     .with_progress(ProgressSummary::new("failed", 0, Some(total_operations)))
-                    .with_execution(summary),
+                    .with_execution(summary.clone()),
             )
             .await?;
         self.events.publish_completion(id, &summary)?;
@@ -666,49 +755,17 @@ impl JobRuntime {
             return;
         }
 
-        let candidate_count = search.candidate_count();
-        let Ok((candidates, candidates_truncated)) = search.candidate_artifacts() else {
-            self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
-                .await;
-            return;
-        };
-        let mut review = artifacts::ReviewArtifacts {
-            candidates,
-            candidates_truncated,
-            warnings: Vec::new(),
-            warnings_truncated: false,
-            conflicts: Vec::new(),
-            conflicts_truncated: false,
-        };
         let threshold = flow.auto_accept_confidence(id);
-        let selected_index = match worker::auto_decision(job.input(), &review, 0, threshold) {
-            worker::AutoDecision::Execute { candidate_index } => candidate_index,
-            worker::AutoDecision::NeedsReview { .. } => 0,
-        };
-        let Ok(resolved) = search.resolve_selected(selected_index).await else {
+        let Ok(prepared) = self.prepare_review(job.input(), search, threshold).await else {
             self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
                 .await;
             return;
         };
-        let Ok(conflict_count) = resolved.conflict_count() else {
-            self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
-                .await;
-            return;
-        };
-        let diagnostics = resolved.review_diagnostics();
-        review.warnings = diagnostics.warnings;
-        review.warnings_truncated = diagnostics.warnings_truncated;
-        review.conflicts = diagnostics.conflicts;
-        review.conflicts_truncated = diagnostics.conflicts_truncated;
-        let mut automatic = worker::auto_decision(job.input(), &review, conflict_count, threshold);
-        if matches!(automatic, worker::AutoDecision::Execute { .. }) {
-            automatic = match resolved.plan() {
-                Ok(plan) => self.auto_plan_decision(&plan, automatic),
-                Err(_) => worker::AutoDecision::NeedsReview {
-                    reason: AutoReviewReason::InvalidPlan,
-                },
-            };
-        }
+        let PreparedReview {
+            candidate_count,
+            conflict_count,
+            automatic,
+        } = prepared;
 
         if self.stop_requested(shutdown, id).await {
             return;
@@ -743,6 +800,49 @@ impl JobRuntime {
                 let _ = self.execute(id, AUTO_EXECUTION_KEY).await;
             }
         }
+    }
+
+    async fn prepare_review(
+        &self,
+        input: &JobInputDto,
+        search: worker::SearchArtifact,
+        threshold: f32,
+    ) -> Result<PreparedReview, JobFlowError> {
+        let candidate_count = search.candidate_count();
+        let (candidates, candidates_truncated) = search.candidate_artifacts()?;
+        let mut review = artifacts::ReviewArtifacts {
+            candidates,
+            candidates_truncated,
+            warnings: Vec::new(),
+            warnings_truncated: false,
+            conflicts: Vec::new(),
+            conflicts_truncated: false,
+        };
+        let selected_index = match worker::auto_decision(input, &review, 0, threshold) {
+            worker::AutoDecision::Execute { candidate_index } => candidate_index,
+            worker::AutoDecision::NeedsReview { .. } => 0,
+        };
+        let resolved = search.resolve_selected(selected_index).await?;
+        let conflict_count = resolved.conflict_count()?;
+        let diagnostics = resolved.review_diagnostics();
+        review.warnings = diagnostics.warnings;
+        review.warnings_truncated = diagnostics.warnings_truncated;
+        review.conflicts = diagnostics.conflicts;
+        review.conflicts_truncated = diagnostics.conflicts_truncated;
+        let mut automatic = worker::auto_decision(input, &review, conflict_count, threshold);
+        if matches!(automatic, worker::AutoDecision::Execute { .. }) {
+            automatic = resolved.plan().map_or_else(
+                |_| worker::AutoDecision::NeedsReview {
+                    reason: AutoReviewReason::InvalidPlan,
+                },
+                |plan| self.auto_plan_decision(&plan, automatic),
+            );
+        }
+        Ok(PreparedReview {
+            candidate_count,
+            conflict_count,
+            automatic,
+        })
     }
 
     fn auto_plan_decision(

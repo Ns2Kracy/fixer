@@ -7,14 +7,14 @@ Fixer separates planning from filesystem mutation. Writers produce a typed `fixe
 `plan` never writes:
 
 ```bash
-fixer --offline plan ./library/Arrival.mkv --kind movie --json
+fixer --offline plan ./library/Arrival.mkv --kind movie --placement in-place --json
 ```
 
 `scrape` also previews by default. `--dry-run` makes that intent explicit; only `--apply` executes:
 
 ```bash
-fixer --offline scrape ./library/Arrival.mkv --kind movie --dry-run
-fixer --offline scrape ./library/Arrival.mkv --kind movie --apply
+fixer --offline scrape ./library/Arrival.mkv --kind movie --placement in-place --dry-run
+fixer --offline scrape ./library/Arrival.mkv --kind movie --placement in-place --apply
 ```
 
 `--dry-run` and `--apply` conflict. Review-required merge policy returns exit code `4` before execution even when `--apply` was requested.
@@ -83,7 +83,7 @@ assert_eq!(template.render(&context)?.to_string_lossy(), "In the Mood for Love (
 
 Path output must remain relative and rejects traversal, absolute paths, unsafe components, control characters, and platform-reserved punctuation. Content templates share the bounded variable/filter parser but return text. Templates execute no arbitrary code and perform no I/O.
 
-The CLI uses `{{ title | sanitize }} ({{ year }})` for non-in-place movie folders when a year exists. The server exposes authenticated `POST /api/v1/templates/preview` for no-write path/content previews.
+The built-in organization layout uses `{{ title | sanitize }} ({{ year }})` for movies when a year exists, otherwise `{{ title | sanitize }}`. Television uses `{{ title | sanitize }}/Season NN/<source filename>`. A folder rule can override the package-directory template per rule; the same override is not shared globally. The server exposes authenticated `POST /api/v1/templates/preview` for no-write path/content previews.
 
 ## Provenance manifests
 

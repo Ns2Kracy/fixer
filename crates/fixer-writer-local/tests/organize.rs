@@ -15,7 +15,7 @@ fn titles(value: &str) -> LocalizedValue<String> {
     titles
 }
 
-fn resolved<T>(value: T) -> Resolved<T> {
+const fn resolved<T>(value: T) -> Resolved<T> {
     Resolved {
         value,
         provenance: ProvenanceMap::new(),
@@ -117,6 +117,62 @@ fn movie_preset_places_media_beneath_destination() {
             .iter()
             .all(|operation| operation.target().unwrap().is_relative())
     );
+}
+
+#[test]
+fn directory_source_places_media_recursively_without_copying_replaced_metadata() {
+    let source = tempfile::tempdir().unwrap();
+    let subtitles = source.path().join("Subtitles");
+    std::fs::create_dir_all(&subtitles).unwrap();
+    let media = source.path().join("Arrival.mkv");
+    let subtitle = subtitles.join("Arrival.en.srt");
+    let old_metadata = source.path().join("movie.nfo");
+    std::fs::write(&media, b"movie").unwrap();
+    std::fs::write(&subtitle, b"subtitle").unwrap();
+    std::fs::write(&old_metadata, b"old metadata").unwrap();
+
+    let mut metadata = OutputPlan::new("unused");
+    metadata.push(
+        OutputOperation::write_bytes(
+            "movie.nfo",
+            fixer_core::PlannedContent::new(b"new metadata"),
+        )
+        .unwrap(),
+    );
+    let movie = movie();
+    let plan = organize(OrganizationRequest::new(
+        source.path(),
+        Path::new("/library"),
+        OrganizationMedia::Movie(&movie),
+        OrganizationPlacement::Copy,
+        metadata,
+    ))
+    .unwrap();
+
+    assert!(plan.operations().iter().any(|operation| {
+        matches!(
+            operation,
+            OutputOperation::Copy { source, target }
+                if source == &media && target == Path::new("Arrival (2016)/Arrival (2016).mkv")
+        )
+    }));
+    assert!(plan.operations().iter().any(|operation| {
+        matches!(
+            operation,
+            OutputOperation::Copy { source, target }
+                if source == &subtitle && target == Path::new("Arrival (2016)/Subtitles/Arrival.en.srt")
+        )
+    }));
+    assert!(!plan.operations().iter().any(|operation| {
+        matches!(operation, OutputOperation::Copy { source, .. } if source == &old_metadata)
+    }));
+    assert!(plan.operations().iter().any(|operation| {
+        matches!(
+            operation,
+            OutputOperation::WriteBytes { target, .. }
+                if target == Path::new("Arrival (2016)/movie.nfo")
+        )
+    }));
 }
 
 #[test]
@@ -257,7 +313,7 @@ fn metadata_operations_are_rebased_and_manifest_entries_are_reconciled() {
         .unwrap(),
     );
     metadata.push(OutputOperation::copy("/incoming/cover.jpg", "cover.jpg").unwrap());
-    let metadata = metadata_only(metadata).unwrap();
+    let metadata = metadata_only(&metadata).unwrap();
     let plan = organize(OrganizationRequest::new(
         Path::new("/incoming/Arrival.mkv"),
         Path::new("/library"),

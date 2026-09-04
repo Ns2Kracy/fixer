@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, num::NonZeroI64};
+use std::{collections::BTreeMap, num::NonZeroI64, path::Path as FsPath};
 
 use axum::{
     Json, Router,
@@ -183,7 +183,10 @@ async fn create(
         .create(input)
         .await
         .map_err(map_runtime_error)?;
-    Ok((StatusCode::ACCEPTED, Json(envelope(&job))))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(envelope(&job, state.workspace.as_ref())),
+    ))
 }
 
 fn path_job_input(request: CreatePathJobRequest) -> Result<JobInputDto, ApiError> {
@@ -238,7 +241,7 @@ fn invalid_directories() -> ApiError {
 }
 
 async fn list(
-    State(runtime): State<JobRuntime>,
+    State(state): State<JobApiState>,
     query: Result<Query<ListJobsQuery>, QueryRejection>,
 ) -> Result<Json<JobListEnvelope>, ApiError> {
     let Query(query) =
@@ -247,7 +250,8 @@ async fn list(
     if !(1..=100).contains(&limit) {
         return Err(invalid_input("limit", "must be between 1 and 100"));
     }
-    let mut jobs = runtime
+    let mut jobs = state
+        .runtime
         .list(limit + 1, query.state)
         .await
         .map_err(map_runtime_error)?;
@@ -255,18 +259,21 @@ async fn list(
     jobs.truncate(limit);
     Ok(Json(JobListEnvelope {
         schema_version: SCHEMA_VERSION,
-        jobs: jobs.iter().map(job_dto).collect(),
+        jobs: jobs
+            .iter()
+            .map(|job| job_dto(job, state.workspace.as_ref()))
+            .collect(),
         has_more,
     }))
 }
 
 async fn get_job(
-    State(runtime): State<JobRuntime>,
+    State(state): State<JobApiState>,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<JobEnvelope>, ApiError> {
     let id = extract_id(path)?;
-    let job = runtime.get(id).await.map_err(map_runtime_error)?;
-    Ok(Json(envelope(&job)))
+    let job = state.runtime.get(id).await.map_err(map_runtime_error)?;
+    Ok(Json(envelope(&job, state.workspace.as_ref())))
 }
 
 async fn review_details(
@@ -295,18 +302,24 @@ async fn review_details(
 }
 
 async fn plan_details(
-    State(runtime): State<JobRuntime>,
+    State(state): State<JobApiState>,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<PlanDetailsEnvelope>, ApiError> {
     let id = extract_id(path)?;
-    let (details, requires_approval) = runtime
+    let (mut details, requires_approval) = state
+        .runtime
         .plan_artifacts(id)
         .await
         .map_err(map_runtime_error)?;
+    for operation in &mut details.operations {
+        if let Some(source) = operation.source.as_mut() {
+            *source = display_path(state.workspace.as_ref(), source);
+        }
+    }
     Ok(Json(PlanDetailsEnvelope {
         schema_version: SCHEMA_VERSION,
         job_id: id.get(),
-        output_root: details.output_root,
+        output_root: display_path(state.workspace.as_ref(), &details.output_root),
         operations: details.operations,
         operations_truncated: details.operations_truncated,
         requires_approval,
@@ -314,25 +327,25 @@ async fn plan_details(
 }
 
 async fn retry(
-    State(runtime): State<JobRuntime>,
+    State(state): State<JobApiState>,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<JobEnvelope>, ApiError> {
     let id = extract_id(path)?;
-    let job = runtime.retry(id).await.map_err(map_runtime_error)?;
-    Ok(Json(envelope(&job)))
+    let job = state.runtime.retry(id).await.map_err(map_runtime_error)?;
+    Ok(Json(envelope(&job, state.workspace.as_ref())))
 }
 
 async fn cancel(
-    State(runtime): State<JobRuntime>,
+    State(state): State<JobApiState>,
     path: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<JobEnvelope>, ApiError> {
     let id = extract_id(path)?;
-    let job = runtime.cancel(id).await.map_err(map_runtime_error)?;
-    Ok(Json(envelope(&job)))
+    let job = state.runtime.cancel(id).await.map_err(map_runtime_error)?;
+    Ok(Json(envelope(&job, state.workspace.as_ref())))
 }
 
 async fn review(
-    State(runtime): State<JobRuntime>,
+    State(state): State<JobApiState>,
     path: Result<Path<i64>, PathRejection>,
     request: Result<Json<ReviewRequest>, JsonRejection>,
 ) -> Result<Json<JobEnvelope>, ApiError> {
@@ -356,15 +369,16 @@ async fn review(
     }
     let decision =
         ReviewDecisionDto::new(request.candidate_index, request.accepted_conflict_indexes);
-    let job = runtime
+    let job = state
+        .runtime
         .review(id, decision)
         .await
         .map_err(map_runtime_error)?;
-    Ok(Json(envelope(&job)))
+    Ok(Json(envelope(&job, state.workspace.as_ref())))
 }
 
 async fn execute(
-    State(runtime): State<JobRuntime>,
+    State(state): State<JobApiState>,
     path: Result<Path<i64>, PathRejection>,
     headers: HeaderMap,
     request: Result<Json<ExecuteRequest>, JsonRejection>,
@@ -375,8 +389,12 @@ async fn execute(
         return Err(invalid_input("approved", "must be true"));
     }
     let key = idempotency_key(&headers)?;
-    let job = runtime.execute(id, key).await.map_err(map_runtime_error)?;
-    Ok(Json(envelope(&job)))
+    let job = state
+        .runtime
+        .execute(id, key)
+        .await
+        .map_err(map_runtime_error)?;
+    Ok(Json(envelope(&job, state.workspace.as_ref())))
 }
 
 async fn events(
@@ -462,26 +480,47 @@ fn event_cursor(headers: &HeaderMap) -> Result<Option<&str>, ApiError> {
         .transpose()
 }
 
-fn envelope(job: &JobRecord) -> JobEnvelope {
+fn envelope(job: &JobRecord, workspace: Option<&WorkspaceState>) -> JobEnvelope {
     JobEnvelope {
         schema_version: SCHEMA_VERSION,
-        job: job_dto(job),
+        job: job_dto(job, workspace),
     }
 }
 
-fn job_dto(job: &JobRecord) -> JobDto {
+fn job_dto(job: &JobRecord, workspace: Option<&WorkspaceState>) -> JobDto {
     JobDto {
         id: job.id().get(),
-        input: job.input().clone(),
+        input: display_input(job.input(), workspace),
         state: job.state(),
         progress: job.progress().cloned(),
         review: job.review().copied(),
         review_decision: job.review_decision().cloned(),
         plan: job.plan().cloned(),
-        execution: job.execution().copied(),
+        execution: job.execution().cloned(),
         created_at_ms: job.created_at_ms(),
         updated_at_ms: job.updated_at_ms(),
     }
+}
+
+fn display_input(input: &JobInputDto, workspace: Option<&WorkspaceState>) -> JobInputDto {
+    let mut displayed = JobInputDto::new(
+        input.media_kind(),
+        display_path(workspace, input.input_path()),
+        input.apply(),
+    );
+    if let Some(organization) = input.organization() {
+        let mut organization = organization.clone();
+        organization.destination_path = display_path(workspace, &organization.destination_path);
+        displayed = displayed.with_organization(organization);
+    }
+    displayed
+}
+
+fn display_path(workspace: Option<&WorkspaceState>, path: &str) -> String {
+    workspace.map_or_else(
+        || "Unavailable item".to_owned(),
+        |workspace| workspace.display_path(FsPath::new(path)),
+    )
 }
 
 fn validate_organization(organization: &JobOrganizationDto) -> Result<(), ApiError> {
