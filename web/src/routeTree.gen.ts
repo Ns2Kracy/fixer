@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as FoldersRouteImport } from './routes/folders'
 import { Route as LibraryRouteImport } from './routes/library'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProvidersRouteImport } from './routes/providers'
@@ -24,6 +25,11 @@ import { Route as JobsJobIdReviewRouteImport } from './routes/jobs/$jobId/review
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FoldersRoute = FoldersRouteImport.update({
+  id: '/folders',
+  path: '/folders',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LibraryRoute = LibraryRouteImport.update({
@@ -79,6 +85,7 @@ const JobsJobIdReviewRoute = JobsJobIdReviewRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/folders': typeof FoldersRoute
   '/library': typeof LibraryRoute
   '/login': typeof LoginRoute
   '/providers': typeof ProvidersRoute
@@ -92,6 +99,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/folders': typeof FoldersRoute
   '/library': typeof LibraryRoute
   '/login': typeof LoginRoute
   '/providers': typeof ProvidersRoute
@@ -106,6 +114,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/folders': typeof FoldersRoute
   '/library': typeof LibraryRoute
   '/login': typeof LoginRoute
   '/providers': typeof ProvidersRoute
@@ -121,6 +130,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/folders'
     | '/library'
     | '/login'
     | '/providers'
@@ -134,6 +144,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/folders'
     | '/library'
     | '/login'
     | '/providers'
@@ -147,6 +158,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/folders'
     | '/library'
     | '/login'
     | '/providers'
@@ -161,6 +173,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  FoldersRoute: typeof FoldersRoute
   LibraryRoute: typeof LibraryRoute
   LoginRoute: typeof LoginRoute
   ProvidersRoute: typeof ProvidersRoute
@@ -180,6 +193,13 @@ declare module '@tanstack/solid-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/folders': {
+      id: '/folders'
+      path: '/folders'
+      fullPath: '/folders'
+      preLoaderRoute: typeof FoldersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/library': {
@@ -257,6 +277,7 @@ declare module '@tanstack/solid-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  FoldersRoute: FoldersRoute,
   LibraryRoute: LibraryRoute,
   LoginRoute: LoginRoute,
   ProvidersRoute: ProvidersRoute,

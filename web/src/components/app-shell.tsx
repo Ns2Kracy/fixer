@@ -10,12 +10,13 @@ import { ThemeSelect } from "./ui/theme-select";
 
 const navigation = [
   { to: "/", label: "Workspace", marker: "01" },
-  { to: "/jobs", label: "Jobs", marker: "02" },
-  { to: "/search", label: "Search", marker: "03" },
-  { to: "/library", label: "Library", marker: "04" },
-  { to: "/providers", label: "Providers", marker: "05" },
-  { to: "/settings", label: "Settings", marker: "06" },
-  { to: "/templates", label: "Templates", marker: "07" },
+  { to: "/folders", label: "Folders", marker: "02" },
+  { to: "/jobs", label: "Jobs", marker: "03" },
+  { to: "/search", label: "Search", marker: "04" },
+  { to: "/library", label: "Library", marker: "05" },
+  { to: "/providers", label: "Providers", marker: "06" },
+  { to: "/settings", label: "Settings", marker: "07" },
+  { to: "/templates", label: "Templates", marker: "08" },
 ] as const;
 
 export function AppShell(): JSX.Element {
