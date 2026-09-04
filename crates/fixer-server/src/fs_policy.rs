@@ -81,12 +81,42 @@ impl FsPolicy {
             };
             self.validate_write(target)?;
 
-            if let Some(source) = operation.source() {
+            if let OutputOperation::Move { source, .. } = operation {
+                self.validate_destructive_source(source)?;
+            } else if let Some(source) = operation.source() {
                 let source = resolve_source(operation, &root, source);
                 self.validate_read(source)?;
             }
         }
         Ok(())
+    }
+
+    fn validate_destructive_source(&self, source: &Path) -> Result<PathBuf, FsPolicyError> {
+        if !source.is_absolute() {
+            return Err(FsPolicyError::DestructiveSourceNotAbsolute {
+                path: source.to_owned(),
+            });
+        }
+        let parent = source
+            .parent()
+            .ok_or_else(|| FsPolicyError::NoExistingAncestor {
+                path: source.to_owned(),
+            })?;
+        if !self.roots.iter().any(|root| parent.starts_with(root)) {
+            return Err(FsPolicyError::OutsideAllowedRoots {
+                path: source.to_owned(),
+            });
+        }
+        let ancestor = nearest_existing_ancestor(parent)?;
+        let canonical_parent =
+            ancestor
+                .canonicalize()
+                .map_err(|source_error| FsPolicyError::Canonicalize {
+                    path: ancestor.to_owned(),
+                    source: source_error,
+                })?;
+        self.require_allowed(source, &canonical_parent)?;
+        self.validate_read(source)
     }
 
     fn require_allowed(&self, requested: &Path, canonical: &Path) -> Result<(), FsPolicyError> {
@@ -175,6 +205,8 @@ pub enum FsPolicyError {
     Canonicalize { path: PathBuf, source: io::Error },
     #[error("filesystem path `{path}` has no existing ancestor")]
     NoExistingAncestor { path: PathBuf },
+    #[error("destructive source path `{path}` must be absolute")]
+    DestructiveSourceNotAbsolute { path: PathBuf },
     #[error("filesystem path `{path}` is outside the allowed media roots")]
     OutsideAllowedRoots { path: PathBuf },
 }

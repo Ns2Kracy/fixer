@@ -1,5 +1,5 @@
 use fixer_core::{OutputOperation, OutputPlan};
-use fixer_server::FsPolicy;
+use fixer_server::{FsPolicy, FsPolicyError};
 
 #[test]
 fn canonical_roots_allow_existing_reads_and_future_writes_beneath_them() {
@@ -56,6 +56,55 @@ fn symlinks_cannot_escape_for_reads_or_future_writes() {
             .validate_write(library.join("escape/new.json"))
             .is_err()
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn move_rejects_outside_root_symlink_to_an_allowed_file() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let library = root.path().join("library");
+    let outside = root.path().join("outside");
+    std::fs::create_dir(&library).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    let source = library.join("source.mkv");
+    let outside_link = outside.join("source.mkv");
+    std::fs::write(&source, b"media").unwrap();
+    symlink(&source, &outside_link).unwrap();
+    let policy = FsPolicy::new([&library]).unwrap();
+    let mut plan = OutputPlan::new(&library);
+    plan.push(OutputOperation::Move {
+        source: outside_link.clone(),
+        target: "movie.mkv".into(),
+    });
+
+    let error = policy.validate_plan(&plan).unwrap_err();
+
+    assert!(matches!(
+        error,
+        FsPolicyError::OutsideAllowedRoots { path } if path == outside_link
+    ));
+    assert!(source.exists());
+}
+
+#[test]
+fn move_rejects_relative_sources_at_the_server_boundary() {
+    let root = tempfile::tempdir().unwrap();
+    let library = root.path().join("library");
+    std::fs::create_dir(&library).unwrap();
+    std::fs::write(library.join("source.mkv"), b"media").unwrap();
+    let policy = FsPolicy::new([&library]).unwrap();
+    let mut plan = OutputPlan::new(&library);
+    plan.push(OutputOperation::Move {
+        source: "source.mkv".into(),
+        target: "movie.mkv".into(),
+    });
+
+    assert!(matches!(
+        policy.validate_plan(&plan).unwrap_err(),
+        FsPolicyError::DestructiveSourceNotAbsolute { path } if path == std::path::Path::new("source.mkv")
+    ));
 }
 
 #[test]

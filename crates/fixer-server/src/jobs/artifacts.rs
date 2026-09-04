@@ -294,7 +294,13 @@ mod tests {
                 .unwrap(),
         );
         output.push(OutputOperation::copy("source.mkv", "Movie/copy.mkv").unwrap());
-        output.push(OutputOperation::move_file("source.mkv", "Movie/move.mkv").unwrap());
+        output.push(
+            OutputOperation::move_file(
+                std::env::current_dir().unwrap().join("source.mkv"),
+                "Movie/move.mkv",
+            )
+            .unwrap(),
+        );
         output.push(OutputOperation::symlink("source.mkv", "Movie/symlink.mkv").unwrap());
         output.push(OutputOperation::hardlink("source.mkv", "Movie/hardlink.mkv").unwrap());
         output.push(OutputOperation::reflink("source.mkv", "Movie/reflink.mkv").unwrap());

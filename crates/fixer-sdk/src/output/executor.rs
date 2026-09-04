@@ -416,10 +416,39 @@ fn publish_move_direct(
         OverwritePolicy::NoOverwrite => {
             fs::hard_link(source, target).map(|()| DirectMoveOutcome::Published)
         }
-        OverwritePolicy::Replace => {
-            fs::rename(source, target).map(|()| DirectMoveOutcome::PublishedAndSourceRemoved)
-        }
+        OverwritePolicy::Replace => publish_move_replacement(source, target)
+            .map(|()| DirectMoveOutcome::PublishedAndSourceRemoved),
     }
+}
+
+#[cfg(not(windows))]
+fn publish_move_replacement(source: &Path, target: &Path) -> io::Result<()> {
+    fs::rename(source, target)
+}
+
+#[cfg(windows)]
+fn publish_move_replacement(source: &Path, target: &Path) -> io::Result<()> {
+    replace_existing_on_windows_with(source, target, fs::rename, fs::remove_file)
+}
+
+#[cfg(any(test, windows))]
+fn replace_existing_on_windows_with(
+    source: &Path,
+    target: &Path,
+    mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
+    mut remove: impl FnMut(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    rename(source, target).or_else(|first_error| {
+        if matches!(
+            first_error.kind(),
+            io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
+        ) {
+            remove(target)?;
+            rename(source, target)
+        } else {
+            Err(first_error)
+        }
+    })
 }
 
 fn remove_moved_source(source: &Path) -> Result<(), ExecutionError> {
@@ -542,18 +571,7 @@ fn publish_replacement(temp: &Path, target: &Path) -> Result<(), ExecutionError>
 
 #[cfg(windows)]
 fn publish_replacement(temp: &Path, target: &Path) -> Result<(), ExecutionError> {
-    let result = fs::rename(temp, target)
-        .or_else(|first_error| {
-            if matches!(
-                first_error.kind(),
-                io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
-            ) {
-                fs::remove_file(target)?;
-                fs::rename(temp, target)
-            } else {
-                Err(first_error)
-            }
-        })
+    let result = replace_existing_on_windows_with(temp, target, fs::rename, fs::remove_file)
         .map_err(|error| io_error("replace target", target, error));
     if result.is_err() {
         let _ = fs::remove_file(temp);
@@ -805,8 +823,41 @@ fn io_error(action: &'static str, path: &Path, source: io::Error) -> ExecutionEr
 
 #[cfg(test)]
 mod tests {
-    use super::{ExecutionError, OverwritePolicy, execute_move_after_validation};
+    use super::{
+        ExecutionError, OverwritePolicy, execute_move_after_validation,
+        replace_existing_on_windows_with,
+    };
     use std::{fs, io};
+
+    #[test]
+    fn move_windows_replace_retries_after_removing_an_existing_target() {
+        let mut rename_attempts = 0;
+        let mut removed = false;
+
+        replace_existing_on_windows_with(
+            std::path::Path::new("source.mkv"),
+            std::path::Path::new("target.mkv"),
+            |_, _| {
+                rename_attempts += 1;
+                if rename_attempts == 1 {
+                    Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        "test collision",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+            |_| {
+                removed = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(rename_attempts, 2);
+        assert!(removed);
+    }
 
     #[test]
     fn move_cross_device_fallback_publishes_then_removes_source() {

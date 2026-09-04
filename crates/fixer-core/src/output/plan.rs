@@ -81,7 +81,7 @@ impl OutputOperation {
         target: impl Into<PathBuf>,
     ) -> Result<Self, CoreError> {
         Ok(Self::Move {
-            source: non_empty_path(source, "output.source")?,
+            source: absolute_source(source)?,
             target: safe_target(target)?,
         })
     }
@@ -155,6 +155,17 @@ fn safe_target(value: impl Into<PathBuf>) -> Result<PathBuf, CoreError> {
         });
     }
     Ok(value)
+}
+fn absolute_source(value: impl Into<PathBuf>) -> Result<PathBuf, CoreError> {
+    let value = non_empty_path(value, "output.source")?;
+    if value.is_absolute() {
+        Ok(value)
+    } else {
+        Err(CoreError::InvalidDomainValue {
+            field: "output.source",
+            value: value.display().to_string(),
+        })
+    }
 }
 fn non_empty_path(value: impl Into<PathBuf>, field: &'static str) -> Result<PathBuf, CoreError> {
     let value = value.into();

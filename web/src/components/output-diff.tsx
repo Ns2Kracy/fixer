@@ -6,6 +6,7 @@ const labels = {
   create_directory: "Create directory",
   write: "Write metadata",
   copy: "Copy media",
+  move: "Move media",
   symlink: "Create symlink",
   hardlink: "Create hardlink",
   reflink: "Create Reflink",

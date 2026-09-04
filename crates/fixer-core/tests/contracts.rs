@@ -1,8 +1,9 @@
 use fixer_core::{
-    BookCandidate, BoxFuture, Candidate, ExternalId, FetchRequest, Header, HttpClient, HttpError,
-    HttpMethod, HttpRequest, HttpResponse, MatchQuery, Matcher, MediaKind, MetadataDocument, Movie,
-    MovieCandidate, OutputOperation, OutputPlan, PlannedContent, PlanningError, Provider,
-    ProviderDescriptor, ProviderError, ProviderId, SearchRequest, WorkId, WriteRequest, Writer,
+    BookCandidate, BoxFuture, Candidate, CoreError, ExternalId, FetchRequest, Header, HttpClient,
+    HttpError, HttpMethod, HttpRequest, HttpResponse, MatchQuery, Matcher, MediaKind,
+    MetadataDocument, Movie, MovieCandidate, OutputOperation, OutputPlan, PlannedContent,
+    PlanningError, Provider, ProviderDescriptor, ProviderError, ProviderId, SearchRequest, WorkId,
+    WriteRequest, Writer,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -144,12 +145,10 @@ fn output_plans_serialize_with_previewable_sources_and_targets() {
         .unwrap(),
     );
     plan.push(OutputOperation::copy("incoming/movie.mkv", "Movie (2000)/movie.mkv").unwrap());
+    let move_source = std::env::current_dir().unwrap().join("incoming/bonus.mkv");
     let move_operation =
-        OutputOperation::move_file("incoming/bonus.mkv", "Movie (2000)/bonus.mkv").unwrap();
-    assert_eq!(
-        move_operation.source(),
-        Some(std::path::Path::new("incoming/bonus.mkv"))
-    );
+        OutputOperation::move_file(&move_source, "Movie (2000)/bonus.mkv").unwrap();
+    assert_eq!(move_operation.source(), Some(move_source.as_path()));
     assert_eq!(
         move_operation.target(),
         Some(std::path::Path::new("Movie (2000)/bonus.mkv"))
@@ -158,7 +157,7 @@ fn output_plans_serialize_with_previewable_sources_and_targets() {
         serde_json::to_value(&move_operation).unwrap(),
         serde_json::json!({
             "operation": "move",
-            "source": "incoming/bonus.mkv",
+            "source": move_source,
             "target": "Movie (2000)/bonus.mkv"
         })
     );
@@ -188,6 +187,19 @@ fn output_plans_serialize_with_previewable_sources_and_targets() {
     let json = serde_json::to_string(&plan).unwrap();
     let decoded: OutputPlan = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded, plan);
+}
+
+#[test]
+fn move_operations_require_absolute_sources() {
+    let error = OutputOperation::move_file("incoming/movie.mkv", "Movie/movie.mkv").unwrap_err();
+
+    assert!(matches!(
+        error,
+        CoreError::InvalidDomainValue {
+            field: "output.source",
+            value
+        } if value == "incoming/movie.mkv"
+    ));
 }
 
 #[test]

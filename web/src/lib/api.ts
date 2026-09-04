@@ -383,6 +383,7 @@ export type OutputOperationKind =
   | "create_directory"
   | "write"
   | "copy"
+  | "move"
   | "symlink"
   | "hardlink"
   | "reflink";

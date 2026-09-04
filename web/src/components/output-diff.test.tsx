@@ -28,4 +28,25 @@ describe("OutputDiff", () => {
     expect(region).toHaveTextContent("movie.json");
     expect(region).toHaveTextContent("128 bytes prepared");
   });
+
+  it("labels destructive media moves explicitly", () => {
+    render(() => (
+      <OutputDiff
+        outputRoot="/media/library"
+        operations={[
+          {
+            index: 0,
+            kind: "move",
+            source: "/media/incoming/movie.mkv",
+            target: "Movie/movie.mkv",
+          },
+        ]}
+      />
+    ));
+
+    expect(screen.getByText("Move media")).toBeInTheDocument();
+    expect(
+      screen.getByText("/media/incoming/movie.mkv → Movie/movie.mkv"),
+    ).toBeInTheDocument();
+  });
 });

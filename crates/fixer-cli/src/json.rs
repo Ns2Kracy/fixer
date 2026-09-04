@@ -111,12 +111,16 @@ mod tests {
     #[test]
     fn move_operation_uses_move_json_name() {
         let mut plan = OutputPlan::new("library");
-        plan.push(OutputOperation::move_file("incoming.mkv", "movie.mkv").unwrap());
+        let source = std::env::current_dir().unwrap().join("incoming.mkv");
+        plan.push(OutputOperation::move_file(&source, "movie.mkv").unwrap());
 
         let value = serde_json::to_value(PlanDto::new("movie", &plan.output_root, &plan)).unwrap();
 
         assert_eq!(value["operations"][0]["operation"], "move");
-        assert_eq!(value["operations"][0]["source"], "incoming.mkv");
+        assert_eq!(
+            value["operations"][0]["source"],
+            serde_json::Value::String(source.to_string_lossy().into_owned())
+        );
         assert_eq!(value["operations"][0]["target"], "movie.mkv");
     }
 }
