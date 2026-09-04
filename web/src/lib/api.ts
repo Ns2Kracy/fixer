@@ -164,6 +164,59 @@ export interface ListLibraryRequest {
   path?: string;
 }
 
+export interface DirectoryRef {
+  root_id: string;
+  path: string;
+}
+
+export type IngestionMediaMode = "auto" | { fixed: MediaKind };
+export type IngestionPlacement =
+  | "move"
+  | "copy"
+  | "hardlink"
+  | "symlink"
+  | "reflink";
+export type IngestionRuleStatus =
+  | "watching"
+  | "processing"
+  | "needs_review"
+  | "paused"
+  | "error";
+
+export interface IngestionRuleRequest {
+  name: string;
+  source: DirectoryRef;
+  destination: DirectoryRef;
+  media_kind_mode: IngestionMediaMode;
+  placement: IngestionPlacement;
+  path_template_override: string | null;
+  enabled: boolean;
+}
+
+export interface IngestionRuleDto extends IngestionRuleRequest {
+  id: number;
+  status: IngestionRuleStatus;
+  last_error: string | null;
+  created_at_ms: number;
+  updated_at_ms: number;
+}
+
+export interface IngestionRuleEnvelope {
+  schema_version: SchemaVersion;
+  rule: IngestionRuleDto;
+}
+
+export interface IngestionRuleListEnvelope {
+  schema_version: SchemaVersion;
+  rules: IngestionRuleDto[];
+}
+
+export interface IngestionScanEnvelope {
+  schema_version: SchemaVersion;
+  rule_id: number;
+  requested: boolean;
+}
+
 export interface SearchMatch {
   root_id: string;
   path: string;
@@ -251,6 +304,15 @@ export interface ReviewSummary {
   schema_version: SchemaVersion;
   candidate_count: number;
   conflict_count: number;
+  automation_reason?:
+    | "manual_job"
+    | "candidate_list_truncated"
+    | "no_candidates"
+    | "confidence_below_threshold"
+    | "tied_top_candidates"
+    | "metadata_conflicts"
+    | "invalid_plan"
+    | "destination_collision";
 }
 
 export interface ReviewDecisionDto {
@@ -470,6 +532,34 @@ export class ApiClient {
     return this.#request(`/library?${query.toString()}`);
   }
 
+  listIngestionRules(): Promise<IngestionRuleListEnvelope> {
+    return this.#request("/ingestion-rules");
+  }
+
+  createIngestionRule(
+    request: IngestionRuleRequest,
+  ): Promise<IngestionRuleEnvelope> {
+    return this.#request("/ingestion-rules", { method: "POST", body: request });
+  }
+
+  updateIngestionRule(
+    id: number,
+    request: IngestionRuleRequest,
+  ): Promise<IngestionRuleEnvelope> {
+    return this.#request(`/ingestion-rules/${id}`, {
+      method: "PUT",
+      body: request,
+    });
+  }
+
+  deleteIngestionRule(id: number): Promise<void> {
+    return this.#request(`/ingestion-rules/${id}`, { method: "DELETE" });
+  }
+
+  rescanIngestionRule(id: number): Promise<IngestionScanEnvelope> {
+    return this.#request(`/ingestion-rules/${id}/scan`, { method: "POST" });
+  }
+
   search(request: SearchRequest): Promise<SearchEnvelope> {
     const query = new URLSearchParams({
       media_kind: request.mediaKind,
@@ -580,7 +670,7 @@ export class ApiClient {
   async #request<T>(
     path: string,
     options: {
-      method?: "GET" | "POST" | "PUT";
+      method?: "GET" | "POST" | "PUT" | "DELETE";
       body?: unknown;
       headers?: Record<string, string>;
     } = {},

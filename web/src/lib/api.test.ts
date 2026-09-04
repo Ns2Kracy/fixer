@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiClient,
   type ApiError,
+  type IngestionRuleRequest,
   type UpdateWorkspaceSettingsRequest,
 } from "./api";
 
@@ -214,6 +215,69 @@ describe("ApiClient", () => {
         headers: expect.objectContaining({ "x-csrf-token": "csrf" }),
       }),
     );
+  });
+
+  it("manages folder rules with opaque directories and required placement", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (_url, init) => {
+        if (init?.method === "DELETE")
+          return new Response(null, { status: 204 });
+        return new Response(JSON.stringify({ schema_version: 1, rules: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      });
+    const client = new ApiClient({
+      fetch: fetchMock,
+      csrfToken: () => "folder-csrf",
+    });
+    const request: IngestionRuleRequest = {
+      name: "Incoming movies",
+      source: { root_id: "root-0", path: "Downloads" },
+      destination: { root_id: "root-0", path: "Movies" },
+      media_kind_mode: { fixed: "movie" },
+      placement: "hardlink",
+      path_template_override: null,
+      enabled: true,
+    };
+
+    await client.listIngestionRules();
+    await client.createIngestionRule(request);
+    await client.updateIngestionRule(7, request);
+    await client.deleteIngestionRule(7);
+    await client.rescanIngestionRule(7);
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/v1/ingestion-rules",
+      "/api/v1/ingestion-rules",
+      "/api/v1/ingestion-rules/7",
+      "/api/v1/ingestion-rules/7",
+      "/api/v1/ingestion-rules/7/scan",
+    ]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "POST",
+    ]);
+    for (const index of [1, 2]) {
+      expect(fetchMock.mock.calls[index]?.[1]).toEqual(
+        expect.objectContaining({
+          body: JSON.stringify(request),
+          headers: expect.objectContaining({
+            "content-type": "application/json",
+            "x-csrf-token": "folder-csrf",
+          }),
+        }),
+      );
+    }
+    for (const index of [3, 4]) {
+      expect(fetchMock.mock.calls[index]?.[1]?.headers).toEqual(
+        expect.objectContaining({ "x-csrf-token": "folder-csrf" }),
+      );
+    }
   });
 
   it("requests opaque library/search resources with encoded query parameters", async () => {
