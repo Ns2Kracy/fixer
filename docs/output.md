@@ -37,7 +37,7 @@ Plan JSON uses schema version `1`:
 }
 ```
 
-The stable operation names are `create_directory`, `write_bytes`, `copy`, `symlink`, `hardlink`, and `reflink`. Write content is omitted from the CLI plan DTO.
+The stable operation names are `create_directory`, `write_bytes`, `copy`, `move`, `symlink`, `hardlink`, and `reflink`. Write content is omitted from the CLI plan DTO.
 
 ## Writer outputs
 
@@ -119,15 +119,17 @@ assert_eq!(report.operations().len(), operation_count);
 
 Preparation and execution enforce these boundaries:
 
-- operation targets must be safe relative paths under the output root;
+- operation targets must be safe relative paths under the output root, and `move` sources must be absolute;
 - symlinked output ancestors that could escape the root are rejected;
 - source and target fingerprints are captured at preparation and checked again before execution;
 - existing file-like targets fail under the default no-overwrite policy; an existing directory satisfies `create_directory`;
 - write/copy/reflink bytes are created in a unique temporary file, synced for byte writes, then published at the target;
-- no-overwrite publication uses a hardlink from the temporary file to the final name, so even `write_bytes`, `copy`, and reflink workflows require target-filesystem hardlink support;
+- no-overwrite publication for write/copy/reflink uses a hardlink from the temporary file to the final name, so those workflows require target-filesystem hardlink support;
+- same-filesystem `move` uses rename rather than hardlink; on non-Windows platforms it first creates an exclusive final-target reservation, while Windows rename supplies no-clobber behavior;
+- only a cross-device rename error activates the `move` copy fallback; the source fingerprint is checked after copying and again before removal, unpublished temporary files are cleaned on stale input, and source removal occurs only after publication;
 - temporary artifacts are removed after publication failures where possible.
 
-Under default no-overwrite, each byte/copy/reflink target is published as one complete file. Atomicity is not plan-wide. A plan executes operations in order and stops at the first error. `ExecutionFailure::report()` lists completed and failed operations, and completed earlier operations remain on disk. There is no whole-plan rollback. Directories created earlier can also remain. Review the report before retrying; no-overwrite and stale fingerprints protect against silently repeating completed work.
+Under default no-overwrite, each write/copy/reflink target and each cross-device `move` copy is published as one complete file. A same-filesystem `move` publishes with rename; its exclusive empty-file reservation can be briefly visible on non-Windows platforms. If a cross-device source changes after publication, the copied target remains, the changed source is preserved, and execution reports a stale plan. Atomicity is not plan-wide. A plan executes operations in order and stops at the first error. `ExecutionFailure::report()` lists completed and failed operations, and completed earlier operations remain on disk. There is no whole-plan rollback. Directories created earlier can also remain. Review the report before retrying; no-overwrite and stale fingerprints protect against silently repeating completed work.
 
 `OverwritePolicy::Replace` is an explicit SDK option. On non-Windows platforms it renames the temporary file over the target. On Windows, replacement can remove the old target before a second rename; failure after removal has no rollback. The CLI and server use default no-overwrite and expose no replace flag.
 

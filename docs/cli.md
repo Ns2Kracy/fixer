@@ -168,7 +168,7 @@ fixer --offline plan ./shows/Example.Show.S01E01.mkv \
 }
 ```
 
-Operation names are `create_directory`, `write_bytes`, `copy`, `symlink`, `hardlink`, and `reflink`. Planned byte content is intentionally omitted.
+Operation names are `create_directory`, `write_bytes`, `copy`, `move`, `symlink`, `hardlink`, and `reflink`. Planned byte content is intentionally omitted.
 
 ## Scrape
 

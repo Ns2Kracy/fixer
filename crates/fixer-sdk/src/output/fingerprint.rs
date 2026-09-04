@@ -35,6 +35,10 @@ impl PathFingerprint {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::Missing),
             Err(error) => return Err(error),
         };
+        Ok(Self::from_metadata(&metadata))
+    }
+
+    pub(super) fn from_metadata(metadata: &fs::Metadata) -> Self {
         let file_type = metadata.file_type();
         let kind = if file_type.is_file() {
             FileKind::File
@@ -60,11 +64,27 @@ impl PathFingerprint {
         };
         #[cfg(not(unix))]
         let identity = None;
-        Ok(Self::Present {
+        Self::Present {
             kind,
             len: metadata.len(),
             modified_unix_nanos,
             identity,
-        })
+        }
+    }
+
+    pub(super) fn same_file_identity(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                Self::Present {
+                    identity: Some(left),
+                    ..
+                },
+                Self::Present {
+                    identity: Some(right),
+                    ..
+                }
+            ) if left == right
+        )
     }
 }

@@ -207,6 +207,9 @@ pub trait OutputPlanExt: Sized {
 }
 impl OutputPlanExt for OutputPlan {
     fn prepare(self) -> Result<PreparedOutputPlan, ExecutionError> {
+        for operation in self.operations() {
+            validate_operation(operation)?;
+        }
         let root = absolute_path(&self.output_root)?;
         let mut paths = BTreeMap::<PathBuf, PathFingerprint>::new();
         for operation in self.operations() {
@@ -369,12 +372,6 @@ fn execute_operation(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DirectMoveOutcome {
-    Published,
-    PublishedAndSourceRemoved,
-}
-
 fn execute_move(
     operation: &OutputOperation,
     root: &Path,
@@ -393,32 +390,170 @@ fn execute_move_after_validation(
     source: &Path,
     target: &Path,
     overwrite: OverwritePolicy,
-    direct_move: impl FnOnce(&Path, &Path, OverwritePolicy) -> io::Result<DirectMoveOutcome>,
+    direct_move: impl FnOnce(&Path, &Path, OverwritePolicy) -> io::Result<()>,
 ) -> Result<(), ExecutionError> {
+    execute_move_after_validation_with(
+        source,
+        target,
+        overwrite,
+        direct_move,
+        copy_temp,
+        publish_copied_move,
+    )
+}
+
+fn execute_move_after_validation_with<DirectMove, CopyTemp, PublishCopiedMove>(
+    source: &Path,
+    target: &Path,
+    overwrite: OverwritePolicy,
+    direct_move: DirectMove,
+    copy_to_temp: CopyTemp,
+    publish_copy: PublishCopiedMove,
+) -> Result<(), ExecutionError>
+where
+    DirectMove: FnOnce(&Path, &Path, OverwritePolicy) -> io::Result<()>,
+    CopyTemp: FnOnce(&Path, &Path) -> Result<PathBuf, ExecutionError>,
+    PublishCopiedMove: FnOnce(&Path, &Path, OverwritePolicy) -> Result<(), ExecutionError>,
+{
+    let source_fingerprint = capture_move_source(source)?;
     match direct_move(source, target, overwrite) {
-        Ok(DirectMoveOutcome::Published) => remove_moved_source(source),
-        Ok(DirectMoveOutcome::PublishedAndSourceRemoved) => Ok(()),
+        Ok(()) => finish_direct_move(source, target, &source_fingerprint),
         Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
-            let temp = copy_temp(source, target)?;
-            publish_temp(&temp, target, overwrite)?;
+            ensure_source_fresh(source, &source_fingerprint)?;
+            let temp = copy_to_temp(source, target)?;
+            if let Err(error) = ensure_source_fresh(source, &source_fingerprint) {
+                let _ = fs::remove_file(&temp);
+                return Err(error);
+            }
+            if let Err(error) = publish_copy(&temp, target, overwrite) {
+                let _ = fs::remove_file(&temp);
+                return Err(error);
+            }
+            ensure_source_fresh(source, &source_fingerprint)?;
             remove_moved_source(source)
         }
         Err(error) => Err(map_target_io("move file", target, error)),
     }
 }
 
-fn publish_move_direct(
+fn capture_move_source(source: &Path) -> Result<PathFingerprint, ExecutionError> {
+    let fingerprint = PathFingerprint::capture(source)
+        .map_err(|error| io_error("fingerprint move source", source, error))?;
+    if fingerprint == PathFingerprint::Missing {
+        Err(ExecutionError::SourceUnavailable {
+            path: source.to_path_buf(),
+        })
+    } else {
+        Ok(fingerprint)
+    }
+}
+
+fn ensure_source_fresh(source: &Path, expected: &PathFingerprint) -> Result<(), ExecutionError> {
+    let current = PathFingerprint::capture(source)
+        .map_err(|error| io_error("fingerprint move source", source, error))?;
+    if &current == expected {
+        Ok(())
+    } else {
+        Err(ExecutionError::StalePlan {
+            path: source.to_path_buf(),
+        })
+    }
+}
+
+fn finish_direct_move(
     source: &Path,
     target: &Path,
-    overwrite: OverwritePolicy,
-) -> io::Result<DirectMoveOutcome> {
-    match overwrite {
-        OverwritePolicy::NoOverwrite => {
-            fs::hard_link(source, target).map(|()| DirectMoveOutcome::Published)
-        }
-        OverwritePolicy::Replace => publish_move_replacement(source, target)
-            .map(|()| DirectMoveOutcome::PublishedAndSourceRemoved),
+    source_fingerprint: &PathFingerprint,
+) -> Result<(), ExecutionError> {
+    if source == target
+        || matches!(
+            (source.canonicalize(), target.canonicalize()),
+            (Ok(source), Ok(target)) if source == target
+        )
+    {
+        return Ok(());
     }
+    let current = PathFingerprint::capture(source)
+        .map_err(|error| io_error("fingerprint moved source", source, error))?;
+    if current == PathFingerprint::Missing {
+        return Ok(());
+    }
+    let published = PathFingerprint::capture(target)
+        .map_err(|error| io_error("fingerprint moved target", target, error))?;
+    if &current != source_fingerprint || !current.same_file_identity(&published) {
+        return Err(ExecutionError::StalePlan {
+            path: source.to_path_buf(),
+        });
+    }
+    remove_moved_source(source)
+}
+
+fn publish_move_direct(source: &Path, target: &Path, overwrite: OverwritePolicy) -> io::Result<()> {
+    match overwrite {
+        OverwritePolicy::NoOverwrite => publish_move_no_overwrite(source, target),
+        OverwritePolicy::Replace => publish_move_replacement(source, target),
+    }
+}
+
+#[cfg(not(windows))]
+fn publish_move_no_overwrite(source: &Path, target: &Path) -> io::Result<()> {
+    publish_move_no_overwrite_with(
+        source,
+        target,
+        reserve_move_target,
+        |source, target| fs::rename(source, target),
+        |target| fs::remove_file(target),
+    )
+}
+
+#[cfg(windows)]
+fn publish_move_no_overwrite(source: &Path, target: &Path) -> io::Result<()> {
+    fs::rename(source, target)
+}
+
+fn reserve_move_target(target: &Path) -> io::Result<PathFingerprint> {
+    let reservation = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)?;
+    reservation
+        .metadata()
+        .map(|metadata| PathFingerprint::from_metadata(&metadata))
+}
+
+fn publish_move_no_overwrite_with<Reserve, Rename, Cleanup>(
+    source: &Path,
+    target: &Path,
+    reserve: Reserve,
+    rename: Rename,
+    cleanup: Cleanup,
+) -> io::Result<()>
+where
+    Reserve: FnOnce(&Path) -> io::Result<PathFingerprint>,
+    Rename: FnOnce(&Path, &Path) -> io::Result<()>,
+    Cleanup: FnOnce(&Path) -> io::Result<()>,
+{
+    let reservation = reserve(target)?;
+    if PathFingerprint::capture(target)? != reservation {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "move target reservation changed",
+        ));
+    }
+    if let Err(rename_error) = rename(source, target) {
+        match PathFingerprint::capture(target)? {
+            current if current == reservation => cleanup(target)?,
+            PathFingerprint::Missing => {}
+            PathFingerprint::Present { .. } => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "move target reservation changed",
+                ));
+            }
+        }
+        return Err(rename_error);
+    }
+    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -429,6 +564,22 @@ fn publish_move_replacement(source: &Path, target: &Path) -> io::Result<()> {
 #[cfg(windows)]
 fn publish_move_replacement(source: &Path, target: &Path) -> io::Result<()> {
     replace_existing_on_windows_with(source, target, fs::rename, fs::remove_file)
+}
+
+fn publish_copied_move(
+    temp: &Path,
+    target: &Path,
+    overwrite: OverwritePolicy,
+) -> Result<(), ExecutionError> {
+    let result = match overwrite {
+        OverwritePolicy::NoOverwrite => publish_move_no_overwrite(temp, target)
+            .map_err(|error| map_target_io("publish copied move", target, error)),
+        OverwritePolicy::Replace => publish_replacement(temp, target),
+    };
+    if result.is_err() {
+        let _ = fs::remove_file(temp);
+    }
+    result
 }
 
 #[cfg(any(test, windows))]
@@ -649,6 +800,19 @@ fn absolute_target(root: &Path, operation: &OutputOperation) -> PathBuf {
     root.join(relative_target(operation))
 }
 
+fn validate_operation(operation: &OutputOperation) -> Result<(), ExecutionError> {
+    validate_relative_target(relative_target(operation))?;
+    if let OutputOperation::Move { source, .. } = operation
+        && !source.is_absolute()
+    {
+        return Err(ExecutionError::InvalidPlan(format!(
+            "move source must be absolute: `{}`",
+            source.display()
+        )));
+    }
+    Ok(())
+}
+
 fn validate_relative_target(target: &Path) -> Result<(), ExecutionError> {
     if target.as_os_str().is_empty()
         || target.is_absolute()
@@ -824,10 +988,11 @@ fn io_error(action: &'static str, path: &Path, source: io::Error) -> ExecutionEr
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionError, OverwritePolicy, execute_move_after_validation,
-        replace_existing_on_windows_with,
+        ExecutionError, OverwritePolicy, copy_temp, execute_move_after_validation,
+        execute_move_after_validation_with, publish_copied_move, publish_move_no_overwrite_with,
+        replace_existing_on_windows_with, reserve_move_target,
     };
-    use std::{fs, io};
+    use std::{cell::Cell, fs, io};
 
     #[test]
     fn move_windows_replace_retries_after_removing_an_existing_target() {
@@ -917,31 +1082,200 @@ mod tests {
     }
 
     #[test]
-    fn move_does_not_fallback_for_other_direct_errors() {
+    fn move_cross_device_change_after_copy_is_stale_and_unpublished() {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source.mkv");
         let target = root.path().join("library/movie.mkv");
-        fs::write(&source, b"incoming").unwrap();
+        fs::write(&source, b"original").unwrap();
 
-        let error = execute_move_after_validation(
+        let error = execute_move_after_validation_with(
             &source,
             &target,
             OverwritePolicy::NoOverwrite,
             |_, _, _| {
                 Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "test failure",
+                    io::ErrorKind::CrossesDevices,
+                    "test boundary",
                 ))
+            },
+            |source, target| {
+                let temp = copy_temp(source, target)?;
+                fs::write(source, b"changed after copy")
+                    .map_err(|error| super::io_error("change test source", source, error))?;
+                Ok(temp)
+            },
+            publish_copied_move,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ExecutionError::StalePlan { path } if path == source));
+        assert_eq!(fs::read(&source).unwrap(), b"changed after copy");
+        assert!(!target.exists());
+        assert!(
+            fs::read_dir(target.parent().unwrap())
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".fixer-tmp"))
+        );
+    }
+
+    #[test]
+    fn move_cross_device_replacement_after_publication_is_preserved() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.mkv");
+        let target = root.path().join("library/movie.mkv");
+        fs::write(&source, b"original").unwrap();
+        let source_to_replace = source.clone();
+
+        let error = execute_move_after_validation_with(
+            &source,
+            &target,
+            OverwritePolicy::NoOverwrite,
+            |_, _, _| {
+                Err(io::Error::new(
+                    io::ErrorKind::CrossesDevices,
+                    "test boundary",
+                ))
+            },
+            copy_temp,
+            move |temp, target, overwrite| {
+                publish_copied_move(temp, target, overwrite)?;
+                fs::remove_file(&source_to_replace).map_err(|error| {
+                    super::io_error("replace test source", &source_to_replace, error)
+                })?;
+                fs::write(&source_to_replace, b"new replacement").map_err(|error| {
+                    super::io_error("replace test source", &source_to_replace, error)
+                })
             },
         )
         .unwrap_err();
 
-        assert!(matches!(
-            error,
-            ExecutionError::Io { source, .. }
-                if source.kind() == io::ErrorKind::PermissionDenied
-        ));
+        assert!(matches!(error, ExecutionError::StalePlan { path } if path == source));
+        assert_eq!(fs::read(&target).unwrap(), b"original");
+        assert_eq!(fs::read(&source).unwrap(), b"new replacement");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn move_replace_does_not_remove_a_different_source_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.mkv");
+        let target = root.path().join("target.mkv");
+        fs::write(&source, b"original").unwrap();
+        fs::hard_link(&source, &target).unwrap();
+
+        let error = execute_move_after_validation_with(
+            &source,
+            &target,
+            OverwritePolicy::Replace,
+            |source, target, _| {
+                fs::rename(source, target)?;
+                fs::remove_file(source)?;
+                fs::write(source, b"replacement")
+            },
+            copy_temp,
+            publish_copied_move,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ExecutionError::StalePlan { path } if path == source));
+        assert_eq!(fs::read(&target).unwrap(), b"original");
+        assert_eq!(fs::read(&source).unwrap(), b"replacement");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn move_no_overwrite_reserves_then_renames_without_hardlinking() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.mkv");
+        let target = root.path().join("target.mkv");
+        fs::write(&source, b"incoming").unwrap();
+        let reserve_calls = Cell::new(0);
+        let rename_calls = Cell::new(0);
+
+        publish_move_no_overwrite_with(
+            &source,
+            &target,
+            |target| {
+                reserve_calls.set(reserve_calls.get() + 1);
+                reserve_move_target(target)
+            },
+            |source, target| {
+                rename_calls.set(rename_calls.get() + 1);
+                fs::rename(source, target)
+            },
+            |target| fs::remove_file(target),
+        )
+        .unwrap();
+
+        assert_eq!(reserve_calls.get(), 1);
+        assert_eq!(rename_calls.get(), 1);
+        assert!(!source.exists());
+        assert_eq!(fs::read(&target).unwrap(), b"incoming");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn move_no_overwrite_does_not_rename_over_a_changed_reservation() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.mkv");
+        let target = root.path().join("target.mkv");
+        fs::write(&source, b"incoming").unwrap();
+        let rename_calls = Cell::new(0);
+        let cleanup_calls = Cell::new(0);
+
+        let error = publish_move_no_overwrite_with(
+            &source,
+            &target,
+            |target| {
+                let reservation = reserve_move_target(target)?;
+                fs::remove_file(target)?;
+                fs::write(target, b"collision")?;
+                Ok(reservation)
+            },
+            |source, target| {
+                rename_calls.set(rename_calls.get() + 1);
+                fs::rename(source, target)
+            },
+            |target| {
+                cleanup_calls.set(cleanup_calls.get() + 1);
+                fs::remove_file(target)
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(rename_calls.get(), 0);
+        assert_eq!(cleanup_calls.get(), 0);
         assert_eq!(fs::read(&source).unwrap(), b"incoming");
-        assert!(!target.exists());
+        assert_eq!(fs::read(&target).unwrap(), b"collision");
+    }
+
+    #[test]
+    fn move_does_not_fallback_for_other_direct_errors() {
+        for kind in [io::ErrorKind::PermissionDenied, io::ErrorKind::Unsupported] {
+            let root = tempfile::tempdir().unwrap();
+            let source = root.path().join("source.mkv");
+            let target = root.path().join("library/movie.mkv");
+            fs::write(&source, b"incoming").unwrap();
+
+            let error = execute_move_after_validation(
+                &source,
+                &target,
+                OverwritePolicy::NoOverwrite,
+                |_, _, _| Err(io::Error::new(kind, "test failure")),
+            )
+            .unwrap_err();
+
+            assert!(matches!(
+                error,
+                ExecutionError::Io { source, .. } if source.kind() == kind
+            ));
+            assert_eq!(fs::read(&source).unwrap(), b"incoming");
+            assert!(!target.exists());
+        }
     }
 }

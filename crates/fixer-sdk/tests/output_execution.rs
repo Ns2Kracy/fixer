@@ -55,6 +55,37 @@ fn deserialized_traversal_is_rejected_again_at_the_sdk_boundary() {
 }
 
 #[test]
+fn deserialized_relative_move_source_is_rejected_without_moving_cwd_file() {
+    let cwd = std::env::current_dir().unwrap();
+    let sandbox = tempfile::Builder::new()
+        .prefix("fixer-relative-move-")
+        .tempdir_in(&cwd)
+        .unwrap();
+    let source = sandbox.path().join("source.mkv");
+    fs::write(&source, b"cwd media").unwrap();
+    let relative_source = source.strip_prefix(&cwd).unwrap();
+    let output = sandbox.path().join("library");
+    let value = serde_json::json!({
+        "output_root": output,
+        "operations": [{
+            "operation": "move",
+            "source": relative_source,
+            "target": "movie.mkv"
+        }]
+    });
+    let plan: OutputPlan = serde_json::from_value(value).unwrap();
+
+    assert!(matches!(
+        plan.clone().prepare().unwrap_err(),
+        ExecutionError::InvalidPlan(_)
+    ));
+    let failure = plan.execute(ExecutionPolicy::default()).unwrap_err();
+    assert!(matches!(failure.error(), ExecutionError::InvalidPlan(_)));
+    assert_eq!(fs::read(&source).unwrap(), b"cwd media");
+    assert!(!sandbox.path().join("library/movie.mkv").exists());
+}
+
+#[test]
 fn changing_a_source_after_prepare_rejects_the_stale_plan() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source.mkv");
@@ -169,6 +200,46 @@ fn move_replace_policy_replaces_target_and_removes_source() {
 
     assert!(!source.exists());
     assert_eq!(fs::read(output.join("movie.mkv")).unwrap(), b"incoming");
+}
+
+#[test]
+fn move_replace_with_identical_source_and_target_keeps_the_file() {
+    let root = tempfile::tempdir().unwrap();
+    let output = root.path().join("library");
+    let target = output.join("movie.mkv");
+    fs::create_dir_all(&output).unwrap();
+    fs::write(&target, b"media").unwrap();
+    let mut plan = OutputPlan::new(&output);
+    plan.push(OutputOperation::move_file(&target, "movie.mkv").unwrap());
+
+    plan.execute(ExecutionPolicy::default().with_overwrite(OverwritePolicy::Replace))
+        .unwrap();
+
+    assert_eq!(fs::read(&target).unwrap(), b"media");
+}
+
+#[cfg(unix)]
+#[test]
+fn move_replace_removes_a_source_hardlinked_to_the_target() {
+    use std::os::unix::fs::MetadataExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("incoming.mkv");
+    let output = root.path().join("library");
+    let target = output.join("movie.mkv");
+    fs::create_dir_all(&output).unwrap();
+    fs::write(&source, b"shared media").unwrap();
+    fs::hard_link(&source, &target).unwrap();
+    let inode = fs::metadata(&source).unwrap().ino();
+    let mut plan = OutputPlan::new(&output);
+    plan.push(OutputOperation::move_file(&source, "movie.mkv").unwrap());
+
+    plan.execute(ExecutionPolicy::default().with_overwrite(OverwritePolicy::Replace))
+        .unwrap();
+
+    assert!(!source.exists());
+    assert_eq!(fs::read(&target).unwrap(), b"shared media");
+    assert_eq!(fs::metadata(&target).unwrap().ino(), inode);
 }
 
 #[test]
