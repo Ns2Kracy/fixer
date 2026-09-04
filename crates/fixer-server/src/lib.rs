@@ -4,6 +4,7 @@ pub mod api;
 mod app;
 pub mod auth;
 mod fs_policy;
+pub mod ingestion;
 pub mod jobs;
 mod network_policy;
 mod observability;

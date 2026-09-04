@@ -1,6 +1,10 @@
 use std::{collections::BTreeMap, str::FromStr};
 
 use fixer_server::{
+    ingestion::model::{
+        IngestionRuleInput, MediaKindMode, RuleDirectory, RulePlacement, RuleStatus,
+        SourceFingerprint, SourceReservation,
+    },
     jobs::model::{
         ExecutionSummary, JobInputDto, JobMediaKind, JobState, PlanSummary, ProgressSummary,
         ReviewDecisionDto, ReviewSummary,
@@ -567,4 +571,200 @@ async fn unsupported_versions_in_every_persisted_dto_column_are_rejected_on_read
             StoreError::Json(_)
         ));
     }
+}
+
+fn ingestion_rule_input(mode: MediaKindMode, placement: RulePlacement) -> IngestionRuleInput {
+    IngestionRuleInput::new(
+        "Incoming media",
+        RuleDirectory::new("root-source", "incoming").unwrap(),
+        RuleDirectory::new("root-destination", "library").unwrap(),
+        mode,
+        placement,
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn ingestion_rule_crud_preserves_required_placement_modes_and_optional_fields() {
+    let (_root, store) = store().await;
+    let created = store
+        .create_ingestion_rule(ingestion_rule_input(
+            MediaKindMode::Auto,
+            RulePlacement::Move,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(created.name(), "Incoming media");
+    assert_eq!(created.source().root_id(), "root-source");
+    assert_eq!(created.source().relative_path(), "incoming");
+    assert_eq!(created.destination().root_id(), "root-destination");
+    assert_eq!(created.destination().relative_path(), "library");
+    assert_eq!(created.media_kind_mode(), MediaKindMode::Auto);
+    assert_eq!(created.placement(), RulePlacement::Move);
+    assert_eq!(created.path_template_override(), None);
+    assert!(created.enabled());
+    assert_eq!(created.last_error(), None);
+    assert!(created.id().get() > 0);
+    assert_eq!(created.created_at_ms(), created.updated_at_ms());
+
+    let replacement = ingestion_rule_input(
+        MediaKindMode::Fixed(JobMediaKind::Movie),
+        RulePlacement::Hardlink,
+    )
+    .with_path_template_override("{title} ({year})/{title}")
+    .unwrap()
+    .with_enabled(false)
+    .with_last_error("source root is unavailable")
+    .unwrap();
+    let updated = store
+        .update_ingestion_rule(created.id(), replacement)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        updated.media_kind_mode(),
+        MediaKindMode::Fixed(JobMediaKind::Movie)
+    );
+    assert_eq!(updated.placement(), RulePlacement::Hardlink);
+    assert_eq!(
+        updated.path_template_override(),
+        Some("{title} ({year})/{title}")
+    );
+    assert!(!updated.enabled());
+    assert_eq!(updated.last_error(), Some("source root is unavailable"));
+    assert!(updated.updated_at_ms() >= updated.created_at_ms());
+    assert_eq!(
+        store.get_ingestion_rule(created.id()).await.unwrap(),
+        Some(updated.clone())
+    );
+    assert_eq!(store.list_ingestion_rules(10).await.unwrap(), vec![updated]);
+    assert!(matches!(
+        store.list_ingestion_rules(101).await,
+        Err(StoreError::CorruptRecord(_))
+    ));
+
+    assert!(store.delete_ingestion_rule(created.id()).await.unwrap());
+    assert!(
+        store
+            .get_ingestion_rule(created.id())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(!store.delete_ingestion_rule(created.id()).await.unwrap());
+}
+
+#[tokio::test]
+async fn ingestion_source_fingerprint_reservation_and_job_association_are_idempotent() {
+    let (_root, store) = store().await;
+    let rule = store
+        .create_ingestion_rule(ingestion_rule_input(
+            MediaKindMode::Fixed(JobMediaKind::Television),
+            RulePlacement::Symlink,
+        ))
+        .await
+        .unwrap();
+    let fingerprint = SourceFingerprint::new("Show/Season 01", 1_024, 1_725_000_000_000).unwrap();
+
+    let first = store
+        .reserve_source(rule.id(), fingerprint.clone())
+        .await
+        .unwrap();
+    assert!(first.is_reserved());
+    assert_eq!(first.source().rule_id(), rule.id());
+    assert_eq!(first.source().fingerprint(), &fingerprint);
+    assert_eq!(first.source().status(), RuleStatus::Processing);
+    assert_eq!(first.source().job_id(), None);
+
+    let duplicate = store.reserve_source(rule.id(), fingerprint).await.unwrap();
+    assert!(!duplicate.is_reserved());
+    assert_eq!(duplicate.source(), first.source());
+
+    let job = store
+        .create_job(JobInputDto::new(
+            JobMediaKind::Television,
+            "/media/Show/Season 01",
+            false,
+        ))
+        .await
+        .unwrap();
+    let associated = store
+        .associate_source_job(first.source().id(), job.id())
+        .await
+        .unwrap();
+    assert_eq!(associated.job_id(), Some(job.id()));
+    assert_eq!(
+        store
+            .associate_source_job(first.source().id(), job.id())
+            .await
+            .unwrap(),
+        associated
+    );
+    let reviewed = store
+        .update_source_status(first.source().id(), RuleStatus::NeedsReview)
+        .await
+        .unwrap();
+    assert_eq!(reviewed.status(), RuleStatus::NeedsReview);
+    assert_eq!(reviewed.job_id(), Some(job.id()));
+}
+
+#[tokio::test]
+async fn ingestion_rules_and_observations_survive_reopen() {
+    let root = tempfile::tempdir().unwrap();
+    let database = root.path().join("jobs.sqlite3");
+    let store = SqliteJobStore::open(&database).await.unwrap();
+    let rule = store
+        .create_ingestion_rule(
+            ingestion_rule_input(MediaKindMode::Auto, RulePlacement::Reflink)
+                .with_path_template_override("{kind}/{title}")
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let fingerprint = SourceFingerprint::new("Arrival.mkv", 2_048, 1_725_000_000_123).unwrap();
+    let reserved = store
+        .reserve_source(rule.id(), fingerprint.clone())
+        .await
+        .unwrap();
+    assert!(matches!(reserved, SourceReservation::Reserved(_)));
+    let source = reserved.source().clone();
+    drop(store);
+
+    let reopened = SqliteJobStore::open(&database).await.unwrap();
+    assert_eq!(
+        reopened.get_ingestion_rule(rule.id()).await.unwrap(),
+        Some(rule)
+    );
+    let existing = reopened
+        .reserve_source(source.rule_id(), fingerprint)
+        .await
+        .unwrap();
+    assert!(matches!(existing, SourceReservation::Existing(_)));
+    assert_eq!(existing.source(), &source);
+}
+
+#[test]
+fn ingestion_model_rejects_unbounded_persistence_inputs() {
+    assert!(RuleDirectory::new("", "incoming").is_err());
+    assert!(RuleDirectory::new("root", "x".repeat(4_097)).is_err());
+    assert!(SourceFingerprint::new("", 1, 1).is_err());
+    assert!(SourceFingerprint::new("movie.mkv", u64::MAX, 1).is_err());
+    assert!(SourceFingerprint::new("movie.mkv", 1, -1).is_err());
+    assert!(
+        IngestionRuleInput::new(
+            "x".repeat(101),
+            RuleDirectory::new("source", "").unwrap(),
+            RuleDirectory::new("destination", "").unwrap(),
+            MediaKindMode::Auto,
+            RulePlacement::Copy,
+        )
+        .is_err()
+    );
+    assert!(
+        ingestion_rule_input(MediaKindMode::Auto, RulePlacement::Copy)
+            .with_path_template_override("x".repeat(4_097))
+            .is_err()
+    );
 }

@@ -18,6 +18,12 @@ use crate::{
         session::issue_session_secrets,
         token::{digest, issue_secret},
     },
+    ingestion::model::{
+        IngestionModelError, IngestionRule, IngestionRuleId, IngestionRuleInput,
+        IngestionRuleParts, IngestionSource, IngestionSourceId, IngestionSourceParts,
+        MediaKindMode, RuleDirectory, RulePlacement, RuleStatus, SourceFingerprint,
+        SourceReservation,
+    },
     jobs::model::{JobInputDto, JobState, ProgressSummary},
     store::{ExecutionReservation, JobId, JobRecord, JobRecordParts, JobUpdate, StoreError},
 };
@@ -25,6 +31,9 @@ use crate::{
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 const ACTIVE_STATES: [&str; 5] = ["scanning", "searching", "resolving", "planning", "writing"];
 const RECORD_COLUMNS: &str = "id, input_json, state, progress_json, review_json, review_decision_json, plan_json, execution_json, created_at_ms, updated_at_ms";
+const INGESTION_RULE_COLUMNS: &str = "id, name, source_root_id, source_relative_path, destination_root_id, destination_relative_path, media_kind_mode, fixed_media_kind, placement, path_template_override, enabled, last_error, created_at_ms, updated_at_ms";
+const INGESTION_SOURCE_COLUMNS: &str = "id, rule_id, relative_source_path, size_bytes, modified_at_ms, status, job_id, created_at_ms, updated_at_ms";
+const MAX_INGESTION_RULE_LIST_LIMIT: usize = 100;
 
 #[derive(Clone)]
 pub struct SqliteJobStore {
@@ -217,6 +226,208 @@ impl SqliteJobStore {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn create_ingestion_rule(
+        &self,
+        input: IngestionRuleInput,
+    ) -> Result<IngestionRule, StoreError> {
+        let now = timestamp_ms()?;
+        let (mode, fixed_kind) = input.media_kind_mode().storage_parts();
+        let result = sqlx::query(
+            "INSERT INTO ingestion_rules (name, source_root_id, source_relative_path, destination_root_id, destination_relative_path, media_kind_mode, fixed_media_kind, placement, path_template_override, enabled, last_error, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(input.name())
+        .bind(input.source().root_id())
+        .bind(input.source().relative_path())
+        .bind(input.destination().root_id())
+        .bind(input.destination().relative_path())
+        .bind(mode)
+        .bind(fixed_kind)
+        .bind(input.placement().as_str())
+        .bind(input.path_template_override())
+        .bind(i64::from(input.enabled()))
+        .bind(input.last_error())
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        let id = IngestionRuleId::from_database(result.last_insert_rowid())
+            .map_err(corrupt_ingestion_record)?;
+        self.get_ingestion_rule(id).await?.ok_or_else(|| {
+            StoreError::CorruptRecord("new ingestion rule could not be reloaded".to_owned())
+        })
+    }
+
+    pub async fn list_ingestion_rules(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<IngestionRule>, StoreError> {
+        if limit > MAX_INGESTION_RULE_LIST_LIMIT {
+            return Err(StoreError::CorruptRecord(format!(
+                "ingestion rule list limit must not exceed {MAX_INGESTION_RULE_LIST_LIMIT}"
+            )));
+        }
+        let limit = i64::try_from(limit).map_err(|_| {
+            StoreError::CorruptRecord("ingestion rule list limit exceeds SQLite range".to_owned())
+        })?;
+        let sql = format!(
+            "SELECT {INGESTION_RULE_COLUMNS} FROM ingestion_rules ORDER BY id DESC LIMIT ?"
+        );
+        let rows = sqlx::query(&sql).bind(limit).fetch_all(&self.pool).await?;
+        rows.iter().map(decode_ingestion_rule).collect()
+    }
+
+    pub async fn get_ingestion_rule(
+        &self,
+        id: IngestionRuleId,
+    ) -> Result<Option<IngestionRule>, StoreError> {
+        let sql = format!("SELECT {INGESTION_RULE_COLUMNS} FROM ingestion_rules WHERE id = ?");
+        sqlx::query(&sql)
+            .bind(id.get())
+            .fetch_optional(&self.pool)
+            .await?
+            .map(|row| decode_ingestion_rule(&row))
+            .transpose()
+    }
+
+    pub async fn update_ingestion_rule(
+        &self,
+        id: IngestionRuleId,
+        input: IngestionRuleInput,
+    ) -> Result<Option<IngestionRule>, StoreError> {
+        let (mode, fixed_kind) = input.media_kind_mode().storage_parts();
+        let sql = format!(
+            "UPDATE ingestion_rules SET name = ?, source_root_id = ?, source_relative_path = ?, destination_root_id = ?, destination_relative_path = ?, media_kind_mode = ?, fixed_media_kind = ?, placement = ?, path_template_override = ?, enabled = ?, last_error = ?, updated_at_ms = ? WHERE id = ? RETURNING {INGESTION_RULE_COLUMNS}"
+        );
+        sqlx::query(&sql)
+            .bind(input.name())
+            .bind(input.source().root_id())
+            .bind(input.source().relative_path())
+            .bind(input.destination().root_id())
+            .bind(input.destination().relative_path())
+            .bind(mode)
+            .bind(fixed_kind)
+            .bind(input.placement().as_str())
+            .bind(input.path_template_override())
+            .bind(i64::from(input.enabled()))
+            .bind(input.last_error())
+            .bind(timestamp_ms()?)
+            .bind(id.get())
+            .fetch_optional(&self.pool)
+            .await?
+            .map(|row| decode_ingestion_rule(&row))
+            .transpose()
+    }
+
+    pub async fn delete_ingestion_rule(&self, id: IngestionRuleId) -> Result<bool, StoreError> {
+        let result = sqlx::query("DELETE FROM ingestion_rules WHERE id = ?")
+            .bind(id.get())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn reserve_source(
+        &self,
+        rule_id: IngestionRuleId,
+        fingerprint: SourceFingerprint,
+    ) -> Result<SourceReservation, StoreError> {
+        let now = timestamp_ms()?;
+        let mut transaction = self.pool.begin().await?;
+        let inserted = sqlx::query(
+            "INSERT INTO ingestion_sources (rule_id, relative_source_path, size_bytes, modified_at_ms, status, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, 'processing', ?, ?) ON CONFLICT(rule_id, relative_source_path, size_bytes, modified_at_ms) DO NOTHING",
+        )
+        .bind(rule_id.get())
+        .bind(fingerprint.relative_source_path())
+        .bind(fingerprint.size_for_database())
+        .bind(fingerprint.modified_at_ms())
+        .bind(now)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        let sql = format!(
+            "SELECT {INGESTION_SOURCE_COLUMNS} FROM ingestion_sources WHERE rule_id = ? AND relative_source_path = ? AND size_bytes = ? AND modified_at_ms = ?"
+        );
+        let row = sqlx::query(&sql)
+            .bind(rule_id.get())
+            .bind(fingerprint.relative_source_path())
+            .bind(fingerprint.size_for_database())
+            .bind(fingerprint.modified_at_ms())
+            .fetch_one(&mut *transaction)
+            .await?;
+        let source = decode_ingestion_source(&row)?;
+        transaction.commit().await?;
+        if inserted == 1 {
+            Ok(SourceReservation::Reserved(source))
+        } else {
+            Ok(SourceReservation::Existing(source))
+        }
+    }
+
+    pub async fn associate_source_job(
+        &self,
+        source_id: IngestionSourceId,
+        job_id: JobId,
+    ) -> Result<IngestionSource, StoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let sql = format!(
+            "UPDATE ingestion_sources SET job_id = ?, updated_at_ms = ? WHERE id = ? AND job_id IS NULL RETURNING {INGESTION_SOURCE_COLUMNS}"
+        );
+        if let Some(row) = sqlx::query(&sql)
+            .bind(job_id.get())
+            .bind(timestamp_ms()?)
+            .bind(source_id.get())
+            .fetch_optional(&mut *transaction)
+            .await?
+        {
+            let source = decode_ingestion_source(&row)?;
+            transaction.commit().await?;
+            return Ok(source);
+        }
+
+        let sql = format!("SELECT {INGESTION_SOURCE_COLUMNS} FROM ingestion_sources WHERE id = ?");
+        let row = sqlx::query(&sql)
+            .bind(source_id.get())
+            .fetch_optional(&mut *transaction)
+            .await?;
+        if let Some(row) = row {
+            let source = decode_ingestion_source(&row)?;
+            transaction.commit().await?;
+            if source.job_id() == Some(job_id) {
+                Ok(source)
+            } else {
+                Err(StoreError::IngestionSourceJobConflict {
+                    id: source_id.get(),
+                })
+            }
+        } else {
+            transaction.rollback().await?;
+            Err(StoreError::IngestionSourceNotFound {
+                id: source_id.get(),
+            })
+        }
+    }
+
+    pub async fn update_source_status(
+        &self,
+        source_id: IngestionSourceId,
+        status: RuleStatus,
+    ) -> Result<IngestionSource, StoreError> {
+        let sql = format!(
+            "UPDATE ingestion_sources SET status = ?, updated_at_ms = ? WHERE id = ? RETURNING {INGESTION_SOURCE_COLUMNS}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(status.as_str())
+            .bind(timestamp_ms()?)
+            .bind(source_id.get())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(StoreError::IngestionSourceNotFound {
+                id: source_id.get(),
+            })?;
+        decode_ingestion_source(&row)
     }
 
     pub async fn create_job(&self, input: JobInputDto) -> Result<JobRecord, StoreError> {
@@ -481,6 +692,98 @@ fn lease_path(database_file: File) -> Result<PathBuf, StoreError> {
     let directory = std::env::temp_dir().join("fixer-server-store-leases");
     std::fs::create_dir_all(&directory)?;
     Ok(directory.join(format!("sqlite-{:016x}.lock", hasher.finish())))
+}
+
+fn decode_ingestion_rule(row: &SqliteRow) -> Result<IngestionRule, StoreError> {
+    let id =
+        IngestionRuleId::from_database(row.try_get("id")?).map_err(corrupt_ingestion_record)?;
+    let name: String = row.try_get("name")?;
+    let source_root_id: String = row.try_get("source_root_id")?;
+    let source_relative_path: String = row.try_get("source_relative_path")?;
+    let destination_root_id: String = row.try_get("destination_root_id")?;
+    let destination_relative_path: String = row.try_get("destination_relative_path")?;
+    let media_kind_mode: String = row.try_get("media_kind_mode")?;
+    let fixed_media_kind: Option<String> = row.try_get("fixed_media_kind")?;
+    let placement: String = row.try_get("placement")?;
+    let path_template_override: Option<String> = row.try_get("path_template_override")?;
+    let enabled: i64 = row.try_get("enabled")?;
+    let last_error: Option<String> = row.try_get("last_error")?;
+    let created_at_ms: i64 = row.try_get("created_at_ms")?;
+    let updated_at_ms: i64 = row.try_get("updated_at_ms")?;
+    validate_timestamps(created_at_ms, updated_at_ms)?;
+
+    let source = RuleDirectory::new(source_root_id, source_relative_path)
+        .map_err(corrupt_ingestion_record)?;
+    let destination = RuleDirectory::new(destination_root_id, destination_relative_path)
+        .map_err(corrupt_ingestion_record)?;
+    let mode = MediaKindMode::from_storage(&media_kind_mode, fixed_media_kind.as_deref())
+        .map_err(corrupt_ingestion_record)?;
+    let placement = RulePlacement::from_storage(&placement).map_err(corrupt_ingestion_record)?;
+    let enabled = match enabled {
+        0 => false,
+        1 => true,
+        _ => {
+            return Err(StoreError::CorruptRecord(
+                "ingestion rule enabled flag must be zero or one".to_owned(),
+            ));
+        }
+    };
+    let mut input = IngestionRuleInput::new(name, source, destination, mode, placement)
+        .map_err(corrupt_ingestion_record)?
+        .with_enabled(enabled);
+    if let Some(template) = path_template_override {
+        input = input
+            .with_path_template_override(template)
+            .map_err(corrupt_ingestion_record)?;
+    }
+    if let Some(error) = last_error {
+        input = input
+            .with_last_error(error)
+            .map_err(corrupt_ingestion_record)?;
+    }
+
+    Ok(IngestionRule::from_parts(IngestionRuleParts {
+        id,
+        input,
+        created_at_ms,
+        updated_at_ms,
+    }))
+}
+
+fn decode_ingestion_source(row: &SqliteRow) -> Result<IngestionSource, StoreError> {
+    let id =
+        IngestionSourceId::from_database(row.try_get("id")?).map_err(corrupt_ingestion_record)?;
+    let rule_id = IngestionRuleId::from_database(row.try_get("rule_id")?)
+        .map_err(corrupt_ingestion_record)?;
+    let relative_source_path: String = row.try_get("relative_source_path")?;
+    let size_bytes: i64 = row.try_get("size_bytes")?;
+    let modified_at_ms: i64 = row.try_get("modified_at_ms")?;
+    let status: String = row.try_get("status")?;
+    let job_id: Option<i64> = row.try_get("job_id")?;
+    let created_at_ms: i64 = row.try_get("created_at_ms")?;
+    let updated_at_ms: i64 = row.try_get("updated_at_ms")?;
+    validate_timestamps(created_at_ms, updated_at_ms)?;
+
+    let size_bytes = u64::try_from(size_bytes).map_err(|_| {
+        StoreError::CorruptRecord("ingestion source size must not be negative".to_owned())
+    })?;
+    let fingerprint = SourceFingerprint::new(relative_source_path, size_bytes, modified_at_ms)
+        .map_err(corrupt_ingestion_record)?;
+    let status = RuleStatus::from_storage(&status).map_err(corrupt_ingestion_record)?;
+    let job_id = job_id.map(JobId::from_database).transpose()?;
+    Ok(IngestionSource::from_parts(IngestionSourceParts {
+        id,
+        rule_id,
+        fingerprint,
+        status,
+        job_id,
+        created_at_ms,
+        updated_at_ms,
+    }))
+}
+
+fn corrupt_ingestion_record(error: IngestionModelError) -> StoreError {
+    StoreError::CorruptRecord(error.to_string())
 }
 
 fn decode_record(row: &SqliteRow) -> Result<JobRecord, StoreError> {

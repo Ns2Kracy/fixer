@@ -177,6 +177,10 @@ pub enum StoreError {
     InvalidTransition { from: JobState, to: JobState },
     #[error("job {id} does not exist")]
     NotFound { id: i64 },
+    #[error("ingestion source {id} does not exist")]
+    IngestionSourceNotFound { id: i64 },
+    #[error("ingestion source {id} is already associated with another job")]
+    IngestionSourceJobConflict { id: i64 },
     #[error("job {id} state changed: expected {expected}, found {actual}")]
     StateConflict {
         id: i64,
