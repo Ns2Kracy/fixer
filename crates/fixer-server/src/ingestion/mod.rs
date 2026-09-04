@@ -1,3 +1,4 @@
+pub mod discovery;
 pub mod model;
 
 use tokio::sync::broadcast;

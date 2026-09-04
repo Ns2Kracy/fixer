@@ -67,6 +67,8 @@ pub struct ScanWarning {
 #[derive(Debug, Clone, Default)]
 pub struct ScanResult {
     pub documents: Vec<Movie>,
+    /// Movie roots aligned by index with `documents`.
+    pub roots: Vec<PathBuf>,
     pub warnings: Vec<ScanWarning>,
 }
 
@@ -111,7 +113,12 @@ fn scan_directory(directory: &Path, result: &mut ScanResult) -> Result<(), Local
                 Some("nfo") => parse_nfo(&input).map(Some),
                 _ => unreachable!("extension was filtered above"),
             }) {
-            Ok(Some(document)) => result.documents.push(document),
+            Ok(Some(document)) => {
+                result.documents.push(document);
+                result
+                    .roots
+                    .push(path.parent().unwrap_or(directory).to_path_buf());
+            }
             Ok(None) => {}
             Err(error) => result.warnings.push(ScanWarning {
                 path,
