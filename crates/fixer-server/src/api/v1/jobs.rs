@@ -10,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response, Sse},
     routing::{get, post},
 };
+use fixer_writer_local::{PathTemplate, TemplateContext};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -18,8 +19,8 @@ use crate::{
         JobRuntime, RuntimeError,
         artifacts::{CandidateArtifact, ConflictArtifact, OperationArtifact, WarningArtifact},
         model::{
-            ExecutionSummary, JobInputDto, JobMediaKind, JobState, PlanSummary, ProgressSummary,
-            ReviewDecisionDto, ReviewSummary,
+            ExecutionSummary, JobInputDto, JobMediaKind, JobOrganizationDto, JobState, PlanSummary,
+            ProgressSummary, ReviewDecisionDto, ReviewSummary,
         },
     },
     store::{JobId, JobRecord, StoreError},
@@ -49,6 +50,8 @@ struct CreateJobRequest {
     media_kind: JobMediaKind,
     input_path: String,
     apply: bool,
+    #[serde(default)]
+    organization: Option<JobOrganizationDto>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,7 +143,11 @@ async fn create(
     if request.input_path.trim().is_empty() {
         return Err(invalid_input("input_path", "must not be empty"));
     }
-    let input = JobInputDto::new(request.media_kind, request.input_path, request.apply);
+    let mut input = JobInputDto::new(request.media_kind, request.input_path, request.apply);
+    if let Some(organization) = request.organization {
+        validate_organization(&organization)?;
+        input = input.with_organization(organization);
+    }
     let job = runtime.create(input).await.map_err(map_runtime_error)?;
     Ok((StatusCode::ACCEPTED, Json(envelope(&job))))
 }
@@ -392,6 +399,46 @@ fn job_dto(job: &JobRecord) -> JobDto {
     }
 }
 
+fn validate_organization(organization: &JobOrganizationDto) -> Result<(), ApiError> {
+    if organization.destination_path.trim().is_empty()
+        || organization.destination_path.len() > 4096
+        || organization.destination_path.chars().any(char::is_control)
+    {
+        return Err(invalid_input(
+            "organization.destination_path",
+            "must contain between 1 and 4096 bytes without control characters",
+        ));
+    }
+    if organization.origin_rule_id.is_some_and(|id| id <= 0) {
+        return Err(invalid_input(
+            "organization.origin_rule_id",
+            "must be a positive integer when provided",
+        ));
+    }
+    if let Some(template) = organization.path_template.as_deref() {
+        if template.len() > 4096 || template.chars().any(char::is_control) {
+            return Err(invalid_input(
+                "organization.path_template",
+                "must contain no more than 4096 bytes without control characters",
+            ));
+        }
+        let context =
+            TemplateContext::preview("Example", "example-id", Some(2000), Some("Edition".into()))
+                .map_err(|_| {
+                invalid_input("organization.path_template", "template validation failed")
+            })?;
+        PathTemplate::new(template)
+            .and_then(|template| template.render(&context))
+            .map_err(|_| {
+                invalid_input(
+                    "organization.path_template",
+                    "must render to a safe relative output path",
+                )
+            })?;
+    }
+    Ok(())
+}
+
 fn map_json_rejection(_error: JsonRejection) -> ApiError {
     invalid_input("body", "must be valid JSON matching the job schema")
 }
@@ -402,6 +449,10 @@ fn map_runtime_error(error: RuntimeError) -> ApiError {
         RuntimeError::FilesystemPolicy(_) => invalid_input(
             "input_path",
             "must resolve beneath a configured media root without symlink escapes",
+        ),
+        RuntimeError::OrganizationFilesystemPolicy(_) => invalid_input(
+            "organization.destination_path",
+            "must resolve to a configured media directory without symlink escapes",
         ),
         RuntimeError::CancellationConflict(state) => ApiError::new(
             StatusCode::CONFLICT,

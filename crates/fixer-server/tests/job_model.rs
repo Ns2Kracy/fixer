@@ -1,8 +1,11 @@
 use std::fmt::Debug;
 
-use fixer_server::jobs::model::{
-    ExecutionSummary, JobInputDto, JobMediaKind, JobState, PlanSummary, ProgressSummary,
-    ReviewDecisionDto, ReviewSummary,
+use fixer_server::{
+    ingestion::model::RulePlacement,
+    jobs::model::{
+        ExecutionSummary, JobInputDto, JobMediaKind, JobOrganizationDto, JobState, PlanSummary,
+        ProgressSummary, ReviewDecisionDto, ReviewSummary,
+    },
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -71,6 +74,47 @@ fn job_input_and_summaries_are_stable_server_owned_dtos() {
         json!({"schema_version": 1, "completed_operations": 4, "failed_operations": 1})
     );
     assert_round_trip(&execution);
+}
+
+#[test]
+fn organization_snapshot_is_optional_and_backward_compatible() {
+    let legacy = json!({
+        "schema_version": 1,
+        "media_kind": "movie",
+        "input_path": "/media/Arrival.mkv",
+        "apply": false
+    });
+    let decoded: JobInputDto = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(decoded.organization(), None);
+    assert_eq!(serde_json::to_value(decoded).unwrap(), legacy);
+
+    let organization = JobOrganizationDto {
+        destination_path: "/library".to_owned(),
+        placement: RulePlacement::Hardlink,
+        path_template: Some("Classics/{{ title | sanitize }}".to_owned()),
+        origin_rule_id: Some(42),
+        auto_execute: true,
+    };
+    let input = JobInputDto::new(JobMediaKind::Movie, "/media/Arrival.mkv", false)
+        .with_organization(organization.clone());
+    assert_eq!(input.organization(), Some(&organization));
+    assert_eq!(
+        serde_json::to_value(&input).unwrap(),
+        json!({
+            "schema_version": 1,
+            "media_kind": "movie",
+            "input_path": "/media/Arrival.mkv",
+            "apply": false,
+            "organization": {
+                "destination_path": "/library",
+                "placement": "hardlink",
+                "path_template": "Classics/{{ title | sanitize }}",
+                "origin_rule_id": 42,
+                "auto_execute": true
+            }
+        })
+    );
+    assert_round_trip(&input);
 }
 
 #[test]

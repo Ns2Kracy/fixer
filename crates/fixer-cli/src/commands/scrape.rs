@@ -10,10 +10,10 @@ use fixer_provider_local::{
     EpisodeHint, LocalProvider, MediaHint, ScanWarning, identify_episode_path, identify_path,
     parse_matroska_tags, scan, scan_anime, scan_books, scan_music, scan_television,
 };
-use fixer_sdk::output::{ExecutionPolicy, OutputPlanExt, PlacementMode, plan_media_placement};
+use fixer_sdk::output::{ExecutionPolicy, OutputPlanExt};
 use fixer_writer_local::{
-    AnimeWriter, BookWriter, JsonWriter, MusicWriter, PathTemplate, TelevisionWriter,
-    TemplateContext,
+    AnimeWriter, BookWriter, JsonWriter, MusicWriter, OrganizationMedia, OrganizationPlacement,
+    OrganizationRequest, TelevisionWriter, metadata_only, organize,
 };
 use std::path::{Path, PathBuf};
 
@@ -37,19 +37,13 @@ impl<'a> PlanDiagnostics<'a> {
 
 #[derive(Debug, Clone, Copy)]
 struct FinalizationPolicy {
-    output_preset: OutputPreset,
     conflict_policy: ConflictPolicy,
     conflicts: usize,
 }
 
 impl FinalizationPolicy {
-    const fn new(
-        output_preset: OutputPreset,
-        conflict_policy: ConflictPolicy,
-        conflicts: usize,
-    ) -> Self {
+    const fn new(conflict_policy: ConflictPolicy, conflicts: usize) -> Self {
         Self {
-            output_preset,
             conflict_policy,
             conflicts,
         }
@@ -145,14 +139,14 @@ async fn scrape_anime(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
     let plan = AnimeWriter
         .plan_resolved(&resolved, output_root)
         .map_err(AppError::new)?;
+    let plan = apply_output_preset(plan, config.output_preset)?;
     finish_plan(
         plan,
         &args,
         output_root,
         PlanDiagnostics::new(&result.warnings, &resolved.warnings),
-        None,
         mode,
-        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.conflict_policy, conflicts),
     )
 }
 
@@ -219,14 +213,14 @@ async fn scrape_book(args: ScrapeArgs, config: &Config, mode: OutputMode) -> App
     let plan = writer
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
+    let plan = apply_output_preset(plan, config.output_preset)?;
     finish_plan(
         plan,
         &args,
         &output_root,
         PlanDiagnostics::new(&warnings, &resolved.warnings),
-        None,
         mode,
-        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.conflict_policy, conflicts),
     )
 }
 
@@ -251,19 +245,30 @@ async fn scrape_movie(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
         query = query.year(year);
     }
     let resolved = query.resolve().await.map_err(AppError::new)?;
-    let output_root = movie_output_root(&args.path, args.placement(), &resolved)?;
+    let output_root = scan_root.to_path_buf();
     let conflicts = resolved.conflicts.len();
     let plan = JsonWriter
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
+    let plan = apply_output_preset(plan, config.output_preset)?;
+    let plan = if args.placement() == PlacementArg::InPlace {
+        plan
+    } else {
+        organization_plan(
+            &args,
+            &output_root,
+            OrganizationMedia::Movie(&resolved),
+            None,
+            plan,
+        )?
+    };
     finish_plan(
         plan,
         &args,
         &output_root,
         PlanDiagnostics::new(&result.warnings, &resolved.warnings),
-        None,
         mode,
-        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.conflict_policy, conflicts),
     )
 }
 
@@ -299,14 +304,14 @@ async fn scrape_music(args: ScrapeArgs, config: &Config, mode: OutputMode) -> Ap
     let plan = MusicWriter::default()
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
+    let plan = apply_output_preset(plan, config.output_preset)?;
     finish_plan(
         plan,
         &args,
         &output_root,
         PlanDiagnostics::new(&warnings, &resolved.warnings),
-        None,
         mode,
-        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.conflict_policy, conflicts),
     )
 }
 
@@ -359,65 +364,45 @@ async fn scrape_television(
         }
     }
     let resolved = query.resolve().await.map_err(AppError::new)?;
-    let output_root = television_output_root(series_root, args.placement(), &resolved);
+    let output_root = if args.placement() == PlacementArg::InPlace {
+        series_root.to_path_buf()
+    } else {
+        series_root.parent().unwrap_or(series_root).to_path_buf()
+    };
     let conflicts = resolved.conflicts.len();
     let plan = TelevisionWriter
         .plan_resolved(&resolved, &output_root)
         .map_err(AppError::new)?;
+    let plan = apply_output_preset(plan, config.output_preset)?;
+    let plan = if args.placement() == PlacementArg::InPlace {
+        plan
+    } else {
+        organization_plan(
+            &args,
+            &output_root,
+            OrganizationMedia::Television(&resolved),
+            placement_target.as_deref(),
+            plan,
+        )?
+    };
     finish_plan(
         plan,
         &args,
         &output_root,
         PlanDiagnostics::new(&warnings, &resolved.warnings),
-        placement_target.as_deref(),
         mode,
-        FinalizationPolicy::new(config.output_preset, config.conflict_policy, conflicts),
+        FinalizationPolicy::new(config.conflict_policy, conflicts),
     )
 }
 
 fn finish_plan(
-    mut plan: fixer_core::OutputPlan,
+    plan: fixer_core::OutputPlan,
     args: &ScrapeArgs,
     output_root: &Path,
     diagnostics: PlanDiagnostics<'_>,
-    placement_target: Option<&Path>,
     mode: OutputMode,
     policy: FinalizationPolicy,
 ) -> AppResult<RunStatus> {
-    plan = apply_output_preset(plan, policy.output_preset)?;
-    if args.placement() != PlacementArg::InPlace {
-        if !args.path.is_file() {
-            return Err(AppError::invalid_input(
-                "non-in-place placement requires a media file path",
-            ));
-        }
-        let target = placement_target.map_or_else(
-            || PathBuf::from(args.path.file_name().expect("file path was checked above")),
-            PathBuf::from,
-        );
-        if output_root.join(&target) != args.path {
-            let placement = if args.placement() == PlacementArg::Move {
-                let source = args.path.canonicalize().map_err(AppError::new)?;
-                let mut placement = fixer_core::OutputPlan::new(output_root);
-                placement.push(
-                    fixer_core::OutputOperation::move_file(source, target)
-                        .map_err(AppError::new)?,
-                );
-                placement
-            } else {
-                plan_media_placement(
-                    &args.path,
-                    output_root,
-                    target,
-                    placement_mode(args.placement()),
-                )
-                .map_err(AppError::new)?
-            };
-            for operation in placement.operations() {
-                plan.push(operation.clone());
-            }
-        }
-    }
     if policy.rejects() {
         return Err(AppError::new(format!(
             "conflict policy rejected {} metadata conflict(s)",
@@ -592,68 +577,40 @@ fn tagged_episode_season(path: &Path) -> Option<u32> {
         .and_then(|tags| tags.season)
 }
 
-fn movie_output_root(
-    path: &Path,
-    placement: PlacementArg,
-    resolved: &fixer_core::Resolved<Movie>,
-) -> AppResult<PathBuf> {
-    let base = scan_root(path)?;
-    if placement == PlacementArg::InPlace {
-        return Ok(base.to_path_buf());
+fn organization_plan(
+    args: &ScrapeArgs,
+    destination_path: &Path,
+    media: OrganizationMedia<'_>,
+    media_target: Option<&Path>,
+    metadata_plan: fixer_core::OutputPlan,
+) -> AppResult<fixer_core::OutputPlan> {
+    if !args.path.is_file() {
+        return Err(AppError::invalid_input(
+            "non-in-place placement requires a media file path",
+        ));
     }
-    let context =
-        TemplateContext::movie(resolved, ["zh-CN", "en", "und"]).map_err(AppError::new)?;
-    let source = if resolved.value.release_year().is_some() {
-        "{{ title | sanitize }} ({{ year }})"
-    } else {
-        "{{ title | sanitize }}"
-    };
-    let folder = PathTemplate::new(source)
-        .and_then(|template| template.render(&context))
-        .map_err(AppError::new)?;
-    Ok(base.join(folder))
+    let source = args.path.canonicalize().map_err(AppError::new)?;
+    let mut request = OrganizationRequest::new(
+        &source,
+        destination_path,
+        media,
+        organization_placement(args.placement()),
+        metadata_plan,
+    );
+    if let Some(target) = media_target {
+        request = request.with_media_target(target);
+    }
+    organize(request).map_err(AppError::new)
 }
 
-fn television_output_root(
-    series_root: &Path,
-    placement: PlacementArg,
-    resolved: &fixer_core::Resolved<fixer_core::Series>,
-) -> PathBuf {
-    if placement == PlacementArg::InPlace {
-        return series_root.to_path_buf();
-    }
-    let base = series_root.parent().unwrap_or(series_root);
-    let title = resolved
-        .value
-        .titles
-        .entries()
-        .first()
-        .map_or("television", |entry| entry.value().as_str());
-    base.join(safe_folder_name(title))
-}
-
-fn safe_folder_name(value: &str) -> String {
-    let cleaned = value
-        .chars()
-        .map(|character| {
-            if character.is_control()
-                || matches!(
-                    character,
-                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
-                )
-            {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect::<String>();
-    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    let cleaned = cleaned.trim_matches([' ', '.']);
-    if cleaned.is_empty() {
-        "television".to_owned()
-    } else {
-        cleaned.to_owned()
+fn organization_placement(placement: PlacementArg) -> OrganizationPlacement {
+    match placement {
+        PlacementArg::InPlace => unreachable!("in-place plans bypass organization"),
+        PlacementArg::Move => OrganizationPlacement::Move,
+        PlacementArg::Symlink => OrganizationPlacement::Symlink,
+        PlacementArg::Hardlink => OrganizationPlacement::Hardlink,
+        PlacementArg::Copy => OrganizationPlacement::Copy,
+        PlacementArg::Reflink => OrganizationPlacement::Reflink,
     }
 }
 
@@ -662,87 +619,9 @@ fn apply_output_preset(
     preset: OutputPreset,
 ) -> AppResult<fixer_core::OutputPlan> {
     if preset == OutputPreset::Full {
-        return Ok(plan);
-    }
-    let dropped_targets = plan
-        .operations()
-        .iter()
-        .filter(|operation| {
-            !matches!(
-                operation,
-                fixer_core::OutputOperation::CreateDirectory { .. }
-                    | fixer_core::OutputOperation::WriteBytes { .. }
-            )
-        })
-        .filter_map(fixer_core::OutputOperation::target)
-        .map(Path::to_path_buf)
-        .collect::<Vec<_>>();
-    let mut filtered = fixer_core::OutputPlan::new(plan.output_root.clone());
-    for operation in plan.operations() {
-        match operation {
-            fixer_core::OutputOperation::CreateDirectory { .. } => filtered.push(operation.clone()),
-            fixer_core::OutputOperation::WriteBytes { target, content } => {
-                if target.file_name().and_then(|name| name.to_str()) == Some("fixer-manifest.json")
-                {
-                    filtered.push(reconcile_manifest(target, content, &dropped_targets)?);
-                } else {
-                    filtered.push(operation.clone());
-                }
-            }
-            fixer_core::OutputOperation::Copy { .. }
-            | fixer_core::OutputOperation::Move { .. }
-            | fixer_core::OutputOperation::Symlink { .. }
-            | fixer_core::OutputOperation::Hardlink { .. }
-            | fixer_core::OutputOperation::Reflink { .. } => {}
-        }
-    }
-    Ok(filtered)
-}
-
-fn reconcile_manifest(
-    target: &Path,
-    content: &fixer_core::PlannedContent,
-    dropped_targets: &[PathBuf],
-) -> AppResult<fixer_core::OutputOperation> {
-    let mut manifest: serde_json::Value = serde_json::from_slice(content.as_bytes())
-        .map_err(|error| AppError::new(format!("invalid planned manifest: {error}")))?;
-    if let Some(planned_files) = manifest.get_mut("planned_files") {
-        match planned_files {
-            serde_json::Value::Array(files) => files.retain(|file| {
-                file.as_str().is_none_or(|file| {
-                    !dropped_targets
-                        .iter()
-                        .any(|target| target == Path::new(file))
-                })
-            }),
-            serde_json::Value::Object(files) => files.retain(|_, file| {
-                file.as_str().is_none_or(|file| {
-                    !dropped_targets
-                        .iter()
-                        .any(|target| target == Path::new(file))
-                })
-            }),
-            _ => {}
-        }
-    }
-    let mut bytes = serde_json::to_vec_pretty(&manifest)
-        .map_err(|error| AppError::new(format!("could not serialize planned manifest: {error}")))?;
-    bytes.push(b'\n');
-    fixer_core::OutputOperation::write_bytes(
-        target.to_path_buf(),
-        fixer_core::PlannedContent::new(bytes),
-    )
-    .map_err(AppError::new)
-}
-
-fn placement_mode(placement: PlacementArg) -> PlacementMode {
-    match placement {
-        PlacementArg::InPlace => PlacementMode::InPlace,
-        PlacementArg::Move => unreachable!("move placement is planned directly"),
-        PlacementArg::Symlink => PlacementMode::RelativeSymlink,
-        PlacementArg::Hardlink => PlacementMode::Hardlink,
-        PlacementArg::Copy => PlacementMode::Copy,
-        PlacementArg::Reflink => PlacementMode::Reflink,
+        Ok(plan)
+    } else {
+        metadata_only(plan).map_err(AppError::new)
     }
 }
 

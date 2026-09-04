@@ -3,6 +3,8 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::ingestion::model::RulePlacement;
+
 const SCHEMA_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +46,19 @@ pub enum JobMediaKind {
     Television,
 }
 
+/// Immutable organization settings captured when a job is created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobOrganizationDto {
+    pub destination_path: String,
+    pub placement: RulePlacement,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_rule_id: Option<i64>,
+    pub auto_execute: bool,
+}
+
 /// Versioned, server-owned input persisted for one scraping job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -52,6 +67,8 @@ pub struct JobInputDto {
     media_kind: JobMediaKind,
     input_path: String,
     apply: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    organization: Option<JobOrganizationDto>,
 }
 
 impl JobInputDto {
@@ -61,7 +78,13 @@ impl JobInputDto {
             media_kind,
             input_path: input_path.into(),
             apply,
+            organization: None,
         }
+    }
+
+    pub fn with_organization(mut self, organization: JobOrganizationDto) -> Self {
+        self.organization = Some(organization);
+        self
     }
 
     pub const fn media_kind(&self) -> JobMediaKind {
@@ -74,6 +97,10 @@ impl JobInputDto {
 
     pub const fn apply(&self) -> bool {
         self.apply
+    }
+
+    pub const fn organization(&self) -> Option<&JobOrganizationDto> {
+        self.organization.as_ref()
     }
 }
 

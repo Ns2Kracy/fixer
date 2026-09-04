@@ -14,12 +14,16 @@ use fixer_provider_local::{
     scan_television,
 };
 use fixer_sdk::{AnimeSearch, BookSearch, Fixer, MovieSearch, MusicSearch, TelevisionSearch};
-use fixer_writer_local::{AnimeWriter, BookWriter, JsonWriter, MusicWriter, TelevisionWriter};
+use fixer_writer_local::{
+    AnimeWriter, BookWriter, JsonWriter, MusicWriter, OrganizationMedia, OrganizationPlacement,
+    OrganizationRequest, TelevisionWriter, metadata_only, organize,
+};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::{sync::watch, task::JoinHandle};
 
 use crate::{
+    ingestion::model::RulePlacement,
     jobs::{
         ExecutionTaskRegistry, artifacts,
         model::{JobInputDto, JobMediaKind, ReviewDecisionDto},
@@ -100,6 +104,7 @@ pub struct ScannedJob {
     title: String,
     isbn: Option<Isbn13>,
     output_root: PathBuf,
+    input: JobInputDto,
 }
 
 pub enum SearchArtifact {
@@ -108,6 +113,7 @@ pub enum SearchArtifact {
         title: String,
         count: u64,
         output_root: PathBuf,
+        input: JobInputDto,
     },
     Book {
         search: BookSearch,
@@ -115,24 +121,28 @@ pub enum SearchArtifact {
         count: u64,
         isbn: Option<Isbn13>,
         output_root: PathBuf,
+        input: JobInputDto,
     },
     Movie {
         search: MovieSearch,
         title: String,
         count: u64,
         output_root: PathBuf,
+        input: JobInputDto,
     },
     Music {
         search: MusicSearch,
         title: String,
         count: u64,
         output_root: PathBuf,
+        input: JobInputDto,
     },
     Television {
         search: TelevisionSearch,
         title: String,
         count: u64,
         output_root: PathBuf,
+        input: JobInputDto,
     },
 }
 
@@ -140,23 +150,28 @@ pub enum ResolvedArtifact {
     Anime {
         resolved: Resolved<AnimeSeries>,
         output_root: PathBuf,
+        input: JobInputDto,
     },
     Book {
         resolved: Resolved<BookWork>,
         isbn: Option<Isbn13>,
         output_root: PathBuf,
+        input: JobInputDto,
     },
     Movie {
         resolved: Resolved<Movie>,
         output_root: PathBuf,
+        input: JobInputDto,
     },
     Music {
         resolved: Resolved<MusicReleaseGroup>,
         output_root: PathBuf,
+        input: JobInputDto,
     },
     Television {
         resolved: Resolved<Series>,
         output_root: PathBuf,
+        input: JobInputDto,
     },
 }
 
@@ -186,6 +201,7 @@ impl WorkerFlow {
                     title: path_query_title(Path::new(input.input_path()))?,
                     isbn: None,
                     output_root: scan_root(Path::new(input.input_path()))?,
+                    input: input.clone(),
                 }),
                 SdkJobSource::Static(config) => {
                     let input = input.clone();
@@ -244,6 +260,7 @@ impl ScannedJob {
             title,
             isbn,
             output_root,
+            input,
         } = self;
         let artifact = match media_kind {
             JobMediaKind::Anime => {
@@ -253,6 +270,7 @@ impl ScannedJob {
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
+                    input,
                 }
             }
             JobMediaKind::Book => {
@@ -267,6 +285,7 @@ impl ScannedJob {
                     search,
                     isbn,
                     output_root,
+                    input,
                 }
             }
             JobMediaKind::Movie => {
@@ -276,6 +295,7 @@ impl ScannedJob {
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
+                    input,
                 }
             }
             JobMediaKind::Music => {
@@ -285,6 +305,7 @@ impl ScannedJob {
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
+                    input,
                 }
             }
             JobMediaKind::Television => {
@@ -294,6 +315,7 @@ impl ScannedJob {
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
+                    input,
                 }
             }
         };
@@ -362,44 +384,54 @@ impl SearchArtifact {
             Self::Anime {
                 search,
                 output_root,
+                input,
                 ..
             } => ResolvedArtifact::Anime {
                 resolved: search.select(index)?.fetch_selected().await?,
                 output_root,
+                input,
             },
             Self::Book {
                 search,
                 isbn,
                 output_root,
+                input,
                 ..
             } => ResolvedArtifact::Book {
                 resolved: search.select(index)?.fetch_selected().await?,
                 isbn,
                 output_root,
+                input,
             },
             Self::Movie {
                 search,
                 output_root,
+                input,
                 ..
             } => ResolvedArtifact::Movie {
                 resolved: search.select(index)?.fetch_selected().await?,
                 output_root,
+                input,
             },
             Self::Music {
                 search,
                 output_root,
+                input,
                 ..
             } => ResolvedArtifact::Music {
                 resolved: search.select(index)?.fetch_selected().await?,
                 output_root,
+                input,
             },
             Self::Television {
                 search,
                 output_root,
+                input,
                 ..
             } => ResolvedArtifact::Television {
                 resolved: search.select(index)?.fetch_selected().await?,
                 output_root,
+                input,
             },
         })
     }
@@ -427,17 +459,22 @@ impl ResolvedArtifact {
     }
 
     pub fn plan(&self) -> Result<OutputPlan, JobFlowError> {
-        let plan = match self {
+        match self {
             Self::Anime {
                 resolved,
                 output_root,
-            } => AnimeWriter
-                .plan_resolved(resolved, output_root)
-                .map_err(planning_error)?,
+                input,
+            } => {
+                let plan = AnimeWriter
+                    .plan_resolved(resolved, output_root)
+                    .map_err(planning_error)?;
+                organization_plan(input, OrganizationMedia::Anime(resolved), plan)
+            }
             Self::Book {
                 resolved,
                 isbn,
                 output_root,
+                input,
             } => {
                 let isbn = isbn.clone().or_else(|| {
                     let [edition] = resolved.value.editions.as_slice() else {
@@ -445,30 +482,42 @@ impl ResolvedArtifact {
                     };
                     Some(edition.isbn_13.clone())
                 });
-                BookWriter::for_isbn(isbn.ok_or(JobFlowError::MissingBookIsbn)?)
+                let plan = BookWriter::for_isbn(isbn.ok_or(JobFlowError::MissingBookIsbn)?)
                     .plan_resolved(resolved, output_root)
-                    .map_err(planning_error)?
+                    .map_err(planning_error)?;
+                organization_plan(input, OrganizationMedia::Book(resolved), plan)
             }
             Self::Movie {
                 resolved,
                 output_root,
-            } => JsonWriter
-                .plan_resolved(resolved, output_root)
-                .map_err(planning_error)?,
+                input,
+            } => {
+                let plan = JsonWriter
+                    .plan_resolved(resolved, output_root)
+                    .map_err(planning_error)?;
+                organization_plan(input, OrganizationMedia::Movie(resolved), plan)
+            }
             Self::Music {
                 resolved,
                 output_root,
-            } => MusicWriter::default()
-                .plan_resolved(resolved, output_root)
-                .map_err(planning_error)?,
+                input,
+            } => {
+                let plan = MusicWriter::default()
+                    .plan_resolved(resolved, output_root)
+                    .map_err(planning_error)?;
+                organization_plan(input, OrganizationMedia::Music(resolved), plan)
+            }
             Self::Television {
                 resolved,
                 output_root,
-            } => TelevisionWriter
-                .plan_resolved(resolved, output_root)
-                .map_err(planning_error)?,
-        };
-        Ok(plan)
+                input,
+            } => {
+                let plan = TelevisionWriter
+                    .plan_resolved(resolved, output_root)
+                    .map_err(planning_error)?;
+                organization_plan(input, OrganizationMedia::Television(resolved), plan)
+            }
+        }
     }
 
     pub fn plan_fingerprint(
@@ -552,6 +601,41 @@ impl ResolvedArtifact {
             fingerprint.push(char::from(HEX[usize::from(byte & 0x0f)]));
         }
         Ok(fingerprint)
+    }
+}
+
+fn organization_plan(
+    input: &JobInputDto,
+    media: OrganizationMedia<'_>,
+    metadata_plan: OutputPlan,
+) -> Result<OutputPlan, JobFlowError> {
+    let Some(organization) = input.organization() else {
+        return Ok(metadata_plan);
+    };
+    let source = Path::new(input.input_path())
+        .canonicalize()
+        .map_err(planning_error)?;
+    let metadata_plan = metadata_only(metadata_plan).map_err(planning_error)?;
+    let mut request = OrganizationRequest::new(
+        &source,
+        Path::new(&organization.destination_path),
+        media,
+        organization_placement(organization.placement),
+        metadata_plan,
+    );
+    if let Some(template) = organization.path_template.as_deref() {
+        request = request.with_path_template(template);
+    }
+    organize(request).map_err(planning_error)
+}
+
+const fn organization_placement(placement: RulePlacement) -> OrganizationPlacement {
+    match placement {
+        RulePlacement::Move => OrganizationPlacement::Move,
+        RulePlacement::Copy => OrganizationPlacement::Copy,
+        RulePlacement::Hardlink => OrganizationPlacement::Hardlink,
+        RulePlacement::Symlink => OrganizationPlacement::Symlink,
+        RulePlacement::Reflink => OrganizationPlacement::Reflink,
     }
 }
 
@@ -656,6 +740,7 @@ fn scan_with_config(
         title,
         isbn,
         output_root,
+        input: input.clone(),
     })
 }
 

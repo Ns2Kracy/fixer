@@ -112,6 +112,80 @@ fn cursor_with_sequence(cursor: &str, sequence: u64) -> String {
 }
 
 #[tokio::test]
+async fn organization_snapshot_plans_source_to_destination() {
+    let source = tempfile::tempdir().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    let media = source.path().join("Source Name.mkv");
+    std::fs::write(&media, b"fixture").unwrap();
+    let store = SqliteJobStore::open(source.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/jobs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "media_kind": "movie",
+                    "input_path": media,
+                    "apply": false,
+                    "organization": {
+                        "destination_path": destination.path(),
+                        "placement": "copy",
+                        "path_template": "Curated/{{ title | sanitize }}",
+                        "origin_rule_id": 7,
+                        "auto_execute": false
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let created = response_json(response).await;
+    assert_eq!(created["job"]["input"]["organization"]["origin_rule_id"], 7);
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+    review_job(&router, 1).await;
+
+    let response = send(
+        &router,
+        Request::get("/api/v1/jobs/1/plan")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let plan = response_json(response).await;
+    assert_eq!(
+        plan["output_root"],
+        destination.path().to_string_lossy().as_ref()
+    );
+    assert_eq!(plan["operations"].as_array().unwrap().len(), 2);
+    assert_eq!(plan["operations"][0]["kind"], "copy");
+    assert_eq!(
+        plan["operations"][0]["source"],
+        media.canonicalize().unwrap().to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        plan["operations"][0]["target"],
+        "Curated/Fixture Movie/Fixture Movie.mkv"
+    );
+    assert_eq!(plan["operations"][1]["kind"], "write");
+    assert_eq!(
+        plan["operations"][1]["target"],
+        "Curated/Fixture Movie/movie.json"
+    );
+
+    workers.shutdown().await;
+}
+
+#[tokio::test]
 async fn review_and_idempotent_approval_execute_one_fixture_plan() {
     let directory = tempfile::tempdir().unwrap();
     let media = directory.path().join("fixture.mkv");

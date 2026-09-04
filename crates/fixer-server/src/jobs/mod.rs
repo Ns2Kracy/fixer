@@ -195,11 +195,27 @@ impl JobRuntime {
     pub(crate) async fn create(&self, input: JobInputDto) -> Result<JobRecord, RuntimeError> {
         let input = if let Some(policy) = &self.fs_policy {
             let canonical = policy.validate_read(input.input_path())?;
-            JobInputDto::new(
+            let mut validated = JobInputDto::new(
                 input.media_kind(),
                 canonical.to_string_lossy().into_owned(),
                 input.apply(),
-            )
+            );
+            if let Some(organization) = input.organization() {
+                let mut organization = organization.clone();
+                let destination = policy
+                    .validate_read(&organization.destination_path)
+                    .map_err(RuntimeError::OrganizationFilesystemPolicy)?;
+                if !destination.is_dir() {
+                    return Err(RuntimeError::OrganizationFilesystemPolicy(
+                        FsPolicyError::PathNotDirectory {
+                            path: organization.destination_path.into(),
+                        },
+                    ));
+                }
+                organization.destination_path = destination.to_string_lossy().into_owned();
+                validated = validated.with_organization(organization);
+            }
+            validated
         } else {
             input
         };
@@ -827,6 +843,8 @@ pub(crate) enum RuntimeError {
     Store(#[from] StoreError),
     #[error(transparent)]
     FilesystemPolicy(#[from] FsPolicyError),
+    #[error("organization destination violates the filesystem policy: {0}")]
+    OrganizationFilesystemPolicy(#[source] FsPolicyError),
     #[error("job in state {0} cannot be cancelled at this stage")]
     CancellationConflict(JobState),
     #[error("job in state {0} cannot be reviewed")]
