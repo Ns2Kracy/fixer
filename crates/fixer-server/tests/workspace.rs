@@ -373,6 +373,167 @@ async fn settings_persistence_failure_keeps_shared_memory_unchanged() {
 }
 
 #[tokio::test]
+async fn directory_refs_remain_stable_when_roots_reorder() {
+    let parent = TempDir::new().unwrap();
+    let root_a = parent.path().join("root-a");
+    let root_b = parent.path().join("root-b");
+    std::fs::create_dir(&root_a).unwrap();
+    std::fs::create_dir(&root_b).unwrap();
+
+    let first = workspace_app(WorkspaceState::new([&root_a, &root_b]).unwrap())
+        .oneshot(
+            Request::get("/api/v1/library/roots")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let second = workspace_app(WorkspaceState::new([&root_b, &root_a]).unwrap())
+        .oneshot(
+            Request::get("/api/v1/library/roots")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let first = response_json(first).await;
+    let second = response_json(second).await;
+    let ids_by_label = |response: &Value| {
+        response["roots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|root| {
+                (
+                    root["label"].as_str().unwrap().to_owned(),
+                    root["id"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+
+    assert_eq!(ids_by_label(&first), ids_by_label(&second));
+    for id in ids_by_label(&first).into_values() {
+        assert!(id.starts_with("root-"));
+        assert_ne!(id, "root-0");
+    }
+    assert!(
+        !first
+            .to_string()
+            .contains(&parent.path().display().to_string())
+    );
+}
+
+#[tokio::test]
+async fn directory_ref_resolves_and_displays_only_safe_relative_directories() {
+    let root = TempDir::new().unwrap();
+    std::fs::create_dir_all(root.path().join("Library/Nested")).unwrap();
+    std::fs::write(root.path().join("Library/media.mkv"), b"fixture").unwrap();
+    let app = workspace_app(WorkspaceState::new([root.path()]).unwrap());
+    let roots = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/library/roots")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let root_id = response_json(roots).await["roots"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let resolved = app
+        .clone()
+        .oneshot(
+            Request::get(format!(
+                "/api/v1/library?root_id={root_id}&path=Library%2FNested"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resolved.status(), StatusCode::OK);
+    let resolved = response_json(resolved).await;
+    assert_eq!(resolved["root_id"], root_id);
+    assert_eq!(resolved["path"], "Library/Nested");
+    assert!(
+        !resolved
+            .to_string()
+            .contains(&root.path().display().to_string())
+    );
+
+    for (path, code) in [
+        ("Library%2Fmedia.mkv", "library_path_not_directory"),
+        ("..%2Foutside", "invalid_library_path"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/v1/library?root_id={root_id}&path={path}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let error = response_json(response).await;
+        assert_eq!(error["error"]["code"], code);
+        assert!(
+            !error
+                .to_string()
+                .contains(&root.path().display().to_string())
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn directory_ref_rejects_symlink_escapes_without_leaking_paths() {
+    use std::os::unix::fs::symlink;
+
+    let parent = TempDir::new().unwrap();
+    let root = parent.path().join("root");
+    let outside = parent.path().join("outside");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    symlink(&outside, root.join("escape")).unwrap();
+    let app = workspace_app(WorkspaceState::new([&root]).unwrap());
+    let roots = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/library/roots")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let root_id = response_json(roots).await["roots"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/api/v1/library?root_id={root_id}&path=escape"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error = response_json(response).await;
+    assert_eq!(error["error"]["code"], "invalid_library_path");
+    assert!(
+        !error
+            .to_string()
+            .contains(&parent.path().display().to_string())
+    );
+}
+
+#[tokio::test]
 async fn library_and_search_accept_only_opaque_configured_roots() {
     let root = TempDir::new().unwrap();
     std::fs::create_dir(root.path().join("Books")).unwrap();
@@ -391,7 +552,8 @@ async fn library_and_search_accept_only_opaque_configured_roots() {
         .unwrap();
     assert_eq!(roots.status(), StatusCode::OK);
     let roots = response_json(roots).await;
-    assert_eq!(roots["roots"][0]["id"], "root-0");
+    let root_id = roots["roots"][0]["id"].as_str().unwrap().to_owned();
+    assert!(root_id.starts_with("root-"));
     assert!(
         roots["roots"][0]["label"]
             .as_str()
@@ -401,7 +563,7 @@ async fn library_and_search_accept_only_opaque_configured_roots() {
     let listing = app
         .clone()
         .oneshot(
-            Request::get("/api/v1/library?root_id=root-0&path=Books")
+            Request::get(format!("/api/v1/library?root_id={root_id}&path=Books"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -409,7 +571,7 @@ async fn library_and_search_accept_only_opaque_configured_roots() {
         .unwrap();
     assert_eq!(listing.status(), StatusCode::OK);
     let listing = response_json(listing).await;
-    assert_eq!(listing["root_id"], "root-0");
+    assert_eq!(listing["root_id"], root_id);
     assert_eq!(listing["path"], "Books");
     assert_eq!(listing["entries"][0]["path"], "Books/Fixture Book.epub");
 
@@ -438,14 +600,14 @@ async fn library_and_search_accept_only_opaque_configured_roots() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|result| result["root_id"] == "root-0")
+                .all(|result| result["root_id"].as_str() == Some(root_id.as_str()))
         );
     }
 
     for uri in [
-        "/api/v1/library?root_id=root-0&path=..%2Foutside",
-        "/api/v1/library?root_id=root-0&path=%2Ftmp",
-        "/api/v1/library?root_id=missing&path=",
+        format!("/api/v1/library?root_id={root_id}&path=..%2Foutside"),
+        format!("/api/v1/library?root_id={root_id}&path=%2Ftmp"),
+        "/api/v1/library?root_id=missing&path=".to_owned(),
     ] {
         let response = app
             .clone()

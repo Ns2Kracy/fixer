@@ -47,6 +47,21 @@ impl FsPolicy {
         Ok(canonical)
     }
 
+    /// Validates two configured directories and rejects relationships that can
+    /// create recursive ingestion or organization loops.
+    pub fn validate_directory_pair(
+        &self,
+        source: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
+    ) -> Result<(PathBuf, PathBuf), FsPolicyError> {
+        let source = self.validate_directory(source.as_ref())?;
+        let destination = self.validate_directory(destination.as_ref())?;
+        if source.starts_with(&destination) || destination.starts_with(&source) {
+            return Err(FsPolicyError::OverlappingDirectories);
+        }
+        Ok((source, destination))
+    }
+
     /// Validates a potentially non-existent writable path using its nearest
     /// existing ancestor, preventing traversal through symlinks outside a root.
     pub fn validate_write(&self, path: impl AsRef<Path>) -> Result<PathBuf, FsPolicyError> {
@@ -89,6 +104,16 @@ impl FsPolicy {
             }
         }
         Ok(())
+    }
+
+    fn validate_directory(&self, path: &Path) -> Result<PathBuf, FsPolicyError> {
+        let canonical = self.validate_read(path)?;
+        if !canonical.is_dir() {
+            return Err(FsPolicyError::PathNotDirectory {
+                path: path.to_owned(),
+            });
+        }
+        Ok(canonical)
     }
 
     fn validate_destructive_source(&self, source: &Path) -> Result<PathBuf, FsPolicyError> {
@@ -207,6 +232,10 @@ pub enum FsPolicyError {
     NoExistingAncestor { path: PathBuf },
     #[error("destructive source path `{path}` must be absolute")]
     DestructiveSourceNotAbsolute { path: PathBuf },
+    #[error("filesystem path `{path}` is not a directory")]
+    PathNotDirectory { path: PathBuf },
+    #[error("source and destination directories must not overlap")]
+    OverlappingDirectories,
     #[error("filesystem path `{path}` is outside the allowed media roots")]
     OutsideAllowedRoots { path: PathBuf },
 }

@@ -32,6 +32,35 @@ fn canonical_roots_allow_existing_reads_and_future_writes_beneath_them() {
     );
 }
 
+#[test]
+fn directory_pair_rejects_equal_or_ancestor_paths() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let nested = source.join("nested");
+    let destination = root.path().join("destination");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::create_dir(&destination).unwrap();
+    let policy = FsPolicy::new([root.path()]).unwrap();
+
+    assert_eq!(
+        policy
+            .validate_directory_pair(&source, &destination)
+            .unwrap(),
+        (
+            source.canonicalize().unwrap(),
+            destination.canonicalize().unwrap()
+        )
+    );
+    for (source, destination) in [(&source, &source), (&source, &nested), (&nested, &source)] {
+        assert!(matches!(
+            policy
+                .validate_directory_pair(source, destination)
+                .unwrap_err(),
+            FsPolicyError::OverlappingDirectories
+        ));
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn symlinks_cannot_escape_for_reads_or_future_writes() {

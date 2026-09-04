@@ -16,8 +16,8 @@ use crate::{
     WorkspaceState,
     api::error::ApiError,
     workspace::{
-        LibraryEntry, ProviderProbeResult, RootSummary, SearchMatch, WorkspaceSettingsInput,
-        WorkspaceSettingsSnapshot,
+        DirectoryRef, LibraryEntry, ProviderProbeResult, RootSummary, SearchMatch,
+        WorkspaceSettingsInput, WorkspaceSettingsSnapshot,
     },
 };
 
@@ -69,8 +69,8 @@ struct RootsEnvelope {
 #[derive(Serialize)]
 struct LibraryEnvelope {
     schema_version: u32,
-    root_id: String,
-    path: String,
+    #[serde(flatten)]
+    directory: DirectoryRef,
     entries: Vec<LibraryEntry>,
     truncated: bool,
 }
@@ -185,14 +185,17 @@ async fn list_library(
             "must contain a configured root_id and an optional relative path",
         )
     })?;
-    let listing = tokio::task::spawn_blocking(move || state.list(&query.root_id, &query.path))
+    let reference = DirectoryRef {
+        root_id: query.root_id,
+        path: query.path,
+    };
+    let listing = tokio::task::spawn_blocking(move || state.list(&reference))
         .await
         .map_err(map_blocking_task_error)?
         .map_err(|error| map_state_error(&error))?;
     Ok(Json(LibraryEnvelope {
         schema_version: SCHEMA_VERSION,
-        root_id: listing.root_id,
-        path: listing.path,
+        directory: listing.directory,
         entries: listing.entries,
         truncated: listing.truncated,
     }))

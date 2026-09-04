@@ -18,6 +18,7 @@ use fixer_runtime::{
 };
 use language_tags::LanguageTag;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 
@@ -132,6 +133,20 @@ pub(super) struct RootSummary {
     pub(super) label: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DirectoryRef {
+    pub(super) root_id: String,
+    pub(super) path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ResolvedDirectory {
+    pub(super) root_id: String,
+    pub(super) relative_path: String,
+    pub(super) canonical_path: PathBuf,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum LibraryEntryKind {
@@ -150,8 +165,7 @@ pub(super) struct LibraryEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LibraryListing {
-    pub(super) root_id: String,
-    pub(super) path: String,
+    pub(super) directory: DirectoryRef,
     pub(super) entries: Vec<LibraryEntry>,
     pub(super) truncated: bool,
 }
@@ -303,7 +317,7 @@ impl WorkspaceState {
                 .unwrap_or("Media root")
                 .to_owned();
             canonical_roots.push(WorkspaceRoot {
-                id: format!("root-{}", canonical_roots.len()),
+                id: stable_root_id(&path),
                 label,
                 path,
             });
@@ -344,17 +358,48 @@ impl WorkspaceState {
             .collect()
     }
 
-    pub(super) fn list(
+    pub(super) fn resolve_directory(
         &self,
-        root_id: &str,
-        relative: &str,
-    ) -> Result<LibraryListing, WorkspaceStateError> {
-        let root = self.root(root_id)?;
-        let directory = resolve_relative(root, relative)?;
-        if !directory.is_dir() {
+        reference: &DirectoryRef,
+    ) -> Result<ResolvedDirectory, WorkspaceStateError> {
+        let root = self.root(&reference.root_id)?;
+        let canonical_path = resolve_relative(root, &reference.path)?;
+        if !canonical_path.is_dir() {
             return Err(WorkspaceStateError::NotDirectory);
         }
-        let mut entries = fs::read_dir(&directory)
+        Ok(ResolvedDirectory {
+            root_id: root.id.clone(),
+            relative_path: relative_display(&root.path, &canonical_path)?,
+            canonical_path,
+        })
+    }
+
+    pub(super) fn display_directory(
+        &self,
+        directory: &ResolvedDirectory,
+    ) -> Result<DirectoryRef, WorkspaceStateError> {
+        let root = self.root(&directory.root_id)?;
+        let canonical_path = resolve_relative(root, &directory.relative_path)?;
+        if !canonical_path.is_dir() {
+            return Err(WorkspaceStateError::NotDirectory);
+        }
+        if canonical_path != directory.canonical_path {
+            return Err(WorkspaceStateError::InvalidPath);
+        }
+        Ok(DirectoryRef {
+            root_id: root.id.clone(),
+            path: directory.relative_path.clone(),
+        })
+    }
+
+    pub(super) fn list(
+        &self,
+        reference: &DirectoryRef,
+    ) -> Result<LibraryListing, WorkspaceStateError> {
+        let resolved = self.resolve_directory(reference)?;
+        let directory = self.display_directory(&resolved)?;
+        let root = self.root(&resolved.root_id)?;
+        let mut entries = fs::read_dir(&resolved.canonical_path)
             .map_err(|_| WorkspaceStateError::Inspect)?
             .filter_map(Result::ok)
             .filter_map(|entry| library_entry(root, &entry).transpose())
@@ -367,8 +412,7 @@ impl WorkspaceState {
         let truncated = entries.len() > MAX_LIBRARY_ENTRIES;
         entries.truncate(MAX_LIBRARY_ENTRIES);
         Ok(LibraryListing {
-            root_id: root.id.clone(),
-            path: normalize_display_path(relative),
+            directory,
             entries,
             truncated,
         })
@@ -761,6 +805,19 @@ const fn invalid(field: &'static str, reason: &'static str) -> WorkspaceStateErr
     WorkspaceStateError::InvalidInput { field, reason }
 }
 
+fn stable_root_id(path: &Path) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let digest = Sha256::digest(path.as_os_str().as_encoded_bytes());
+    let mut id = String::with_capacity("root-".len() + digest.len() * 2);
+    id.push_str("root-");
+    for byte in digest {
+        id.push(char::from(HEX[usize::from(byte >> 4)]));
+        id.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    id
+}
+
 fn resolve_relative(root: &WorkspaceRoot, relative: &str) -> Result<PathBuf, WorkspaceStateError> {
     if relative.len() > MAX_RELATIVE_PATH_BYTES || relative.contains('\\') {
         return Err(WorkspaceStateError::InvalidPath);
@@ -836,10 +893,6 @@ fn relative_display(root: &Path, path: &Path) -> Result<String, WorkspaceStateEr
         })
         .collect::<Vec<_>>()
         .join("/"))
-}
-
-fn normalize_display_path(path: &str) -> String {
-    path.trim_matches('/').to_owned()
 }
 
 fn endpoint<'a>(config: &'a FixerConfig, provider: &str) -> Option<&'a str> {
