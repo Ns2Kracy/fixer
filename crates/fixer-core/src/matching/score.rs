@@ -37,6 +37,10 @@ impl MatchScore {
     }
 
     /// Returns normalized confidence while preserving the integer total for ranking.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "external-ID scores return early; remaining weights total at most 240, exactly representable as f32"
+    )]
     pub fn confidence(&self) -> f32 {
         if self
             .evidence
