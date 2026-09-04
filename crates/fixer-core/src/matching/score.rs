@@ -35,6 +35,33 @@ impl MatchScore {
         let total = evidence.iter().map(|item| item.points).sum();
         Self { total, evidence }
     }
+
+    /// Returns normalized confidence while preserving the integer total for ranking.
+    pub fn confidence(&self) -> f32 {
+        if self
+            .evidence
+            .iter()
+            .any(|item| item.kind == MatchEvidenceKind::ExternalId && item.points > 0)
+        {
+            return 1.0;
+        }
+
+        let maximum = [
+            (MatchEvidenceKind::Title, 100),
+            (MatchEvidenceKind::Alias, 70),
+            (MatchEvidenceKind::Year, 20),
+            (MatchEvidenceKind::Sequence, 50),
+        ]
+        .into_iter()
+        .filter(|(kind, _)| self.evidence.iter().any(|item| item.kind == *kind))
+        .map(|(_, points)| points)
+        .sum::<i32>();
+
+        if maximum == 0 {
+            return 0.0;
+        }
+        (self.total as f32 / maximum as f32).clamp(0.0, 1.0)
+    }
 }
 
 /// Typed matching input independent of provider implementation.

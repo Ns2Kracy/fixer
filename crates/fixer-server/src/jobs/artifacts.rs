@@ -34,6 +34,7 @@ pub struct CandidateArtifact {
     pub year: Option<u16>,
     pub sequence: Option<String>,
     pub score: i32,
+    pub confidence: f32,
     pub evidence: Vec<EvidenceArtifact>,
     pub evidence_truncated: bool,
 }
@@ -122,6 +123,7 @@ pub fn candidates(
                 year,
                 sequence: sequence.map(text),
                 score: score.total,
+                confidence: score.confidence(),
                 evidence,
                 evidence_truncated,
             })

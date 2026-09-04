@@ -341,6 +341,7 @@ export interface CandidateArtifact {
   year?: number;
   sequence?: string;
   score: number;
+  confidence: number;
   evidence: EvidenceArtifact[];
   evidence_truncated: boolean;
 }

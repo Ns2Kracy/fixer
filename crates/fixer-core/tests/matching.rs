@@ -15,6 +15,119 @@ fn candidate(id: &str, title: &str, year: Option<u16>) -> Candidate {
     )
 }
 
+fn candidate_with_sequence(id: &str, title: &str, year: Option<u16>, sequence: &str) -> Candidate {
+    Candidate::Movie(
+        MovieCandidate::new(
+            ProviderId::new("fixture").unwrap(),
+            ExternalId::new("tmdb", id).unwrap(),
+            title,
+            year,
+        )
+        .unwrap()
+        .with_sequence(sequence)
+        .unwrap(),
+    )
+}
+
+#[test]
+fn confidence_normalizes_available_evidence() {
+    enum Expectation {
+        Equal(f32),
+        AtLeast(f32),
+        Below(f32),
+    }
+
+    struct Case {
+        name: &'static str,
+        query: MatchQuery,
+        candidate: Candidate,
+        expectation: Expectation,
+    }
+
+    let cases = [
+        Case {
+            name: "exact external ID",
+            query: MatchQuery::movie("Unrelated Query")
+                .unwrap()
+                .with_external_id(ExternalId::new("tmdb", "1").unwrap()),
+            candidate: candidate("1", "Different Candidate", None),
+            expectation: Expectation::Equal(1.0),
+        },
+        Case {
+            name: "exact title and year",
+            query: MatchQuery::movie("The Great Movie")
+                .unwrap()
+                .with_year(2000),
+            candidate: candidate("2", "The Great Movie", Some(2000)),
+            expectation: Expectation::AtLeast(0.9),
+        },
+        Case {
+            name: "partial title",
+            query: MatchQuery::movie("The Great Movie").unwrap(),
+            candidate: candidate("3", "Great Movie", None),
+            expectation: Expectation::Below(0.9),
+        },
+        Case {
+            name: "negative year",
+            query: MatchQuery::movie("The Great Movie")
+                .unwrap()
+                .with_year(2000),
+            candidate: candidate("4", "The Great Movie", Some(1999)),
+            expectation: Expectation::Below(0.9),
+        },
+        Case {
+            name: "negative sequence",
+            query: MatchQuery::movie("The Great Movie")
+                .unwrap()
+                .with_sequence("part-1")
+                .unwrap(),
+            candidate: candidate_with_sequence("5", "The Great Movie", None, "part-2"),
+            expectation: Expectation::Below(0.9),
+        },
+        Case {
+            name: "negative evidence clamps to zero",
+            query: MatchQuery::movie("No Match")
+                .unwrap()
+                .with_alias("Another Title")
+                .unwrap()
+                .with_year(2000)
+                .with_sequence("part-1")
+                .unwrap(),
+            candidate: candidate_with_sequence("6", "Different", Some(1999), "part-2"),
+            expectation: Expectation::Equal(0.0),
+        },
+    ];
+
+    for case in cases {
+        let confidence = Matcher
+            .score(&case.query, &case.candidate)
+            .unwrap()
+            .confidence();
+        assert!(
+            (0.0..=1.0).contains(&confidence),
+            "{} confidence {confidence} was not normalized",
+            case.name
+        );
+        match case.expectation {
+            Expectation::Equal(expected) => assert!(
+                (confidence - expected).abs() < f32::EPSILON,
+                "{} confidence {confidence} did not equal {expected}",
+                case.name
+            ),
+            Expectation::AtLeast(minimum) => assert!(
+                confidence >= minimum,
+                "{} confidence {confidence} was below {minimum}",
+                case.name
+            ),
+            Expectation::Below(maximum) => assert!(
+                confidence < maximum,
+                "{} confidence {confidence} was not below {maximum}",
+                case.name
+            ),
+        }
+    }
+}
+
 #[test]
 fn exact_external_ids_outrank_fuzzy_title_evidence() {
     let query = MatchQuery::movie("Completely Different")
