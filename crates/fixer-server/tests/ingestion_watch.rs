@@ -91,7 +91,8 @@ impl Harness {
                 self.workspace.clone(),
                 self.notifications.clone(),
             ),
-            IngestionSupervisorConfig::new(Duration::from_millis(20), reconciliation),
+            IngestionSupervisorConfig::new(Duration::from_millis(20), reconciliation)
+                .with_polling_watcher(Duration::from_millis(20)),
         )
     }
 
@@ -272,7 +273,8 @@ async fn removed_configured_roots_disable_persisted_rules() {
             WorkspaceState::new([replacement.path()]).unwrap(),
             app.notifications.clone(),
         ),
-        IngestionSupervisorConfig::new(Duration::from_millis(20), Duration::from_millis(50)),
+        IngestionSupervisorConfig::new(Duration::from_millis(20), Duration::from_millis(50))
+            .with_polling_watcher(Duration::from_millis(20)),
     );
 
     timeout(Duration::from_secs(2), async {

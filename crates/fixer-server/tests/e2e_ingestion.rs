@@ -82,7 +82,7 @@ async fn response_json(response: axum::response::Response) -> Value {
 }
 
 async fn wait_for_completed(store: &SqliteJobStore, expected: usize) {
-    timeout(WAIT, async {
+    let completed = timeout(WAIT, async {
         loop {
             let jobs = store.list_jobs(100, None).await.unwrap();
             if jobs.len() == expected
@@ -95,8 +95,12 @@ async fn wait_for_completed(store: &SqliteJobStore, expected: usize) {
             sleep(Duration::from_millis(20)).await;
         }
     })
-    .await
-    .unwrap_or_else(|_| panic!("{expected} ingestion jobs did not complete"));
+    .await;
+    if completed.is_err() {
+        let jobs = store.list_jobs(100, None).await.unwrap();
+        let rules = store.list_ingestion_rules(100).await.unwrap();
+        panic!("{expected} ingestion jobs did not complete: jobs={jobs:#?}, rules={rules:#?}");
+    }
 }
 
 async fn wait_for_source_status(database: &Path, relative_path: &str, expected: &str) {
@@ -208,7 +212,8 @@ async fn authenticated_folder_rule_discovers_organizes_watches_and_deduplicates_
     );
     let supervisor = IngestionSupervisor::start_with_config(
         IngestionRuntime::new(store.clone(), runtime.clone(), workspace, notifications),
-        IngestionSupervisorConfig::new(Duration::from_millis(20), Duration::from_millis(80)),
+        IngestionSupervisorConfig::new(Duration::from_millis(20), Duration::from_millis(80))
+            .with_polling_watcher(Duration::from_millis(20)),
     );
 
     wait_for_completed(&store, 2).await;
@@ -251,7 +256,8 @@ async fn authenticated_folder_rule_discovers_organizes_watches_and_deduplicates_
             restarted_workspace,
             IngestionNotifications::new(),
         ),
-        IngestionSupervisorConfig::new(Duration::from_millis(20), Duration::from_millis(80)),
+        IngestionSupervisorConfig::new(Duration::from_millis(20), Duration::from_millis(80))
+            .with_polling_watcher(Duration::from_millis(20)),
     );
     sleep(Duration::from_millis(250)).await;
 

@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config as NotifyConfig, PollWatcher, RecursiveMode, Watcher};
 use thiserror::Error;
 use tokio::{
     sync::{broadcast, mpsc, watch},
@@ -39,6 +39,7 @@ const REMOVED_ROOT_ERROR: &str =
 pub struct IngestionSupervisorConfig {
     debounce: Duration,
     reconciliation: Duration,
+    poll_interval: Option<Duration>,
 }
 
 impl IngestionSupervisorConfig {
@@ -46,7 +47,14 @@ impl IngestionSupervisorConfig {
         Self {
             debounce: debounce.max(Duration::from_millis(1)),
             reconciliation: reconciliation.max(Duration::from_millis(1)),
+            poll_interval: None,
         }
+    }
+
+    /// Uses the portable polling watcher instead of the platform-native backend.
+    pub fn with_polling_watcher(mut self, interval: Duration) -> Self {
+        self.poll_interval = Some(interval.max(Duration::from_millis(1)));
+        self
     }
 }
 
@@ -130,7 +138,7 @@ impl Engine {
         }
     }
 
-    async fn reload(&mut self, watcher: Option<&mut RecommendedWatcher>) {
+    async fn reload(&mut self, watcher: Option<&mut Box<dyn Watcher + Send>>) {
         let rules = match self.runtime.store.list_ingestion_rules(100).await {
             Ok(rules) => rules,
             Err(error) => {
@@ -167,7 +175,7 @@ impl Engine {
 
     async fn sync_watches(
         &mut self,
-        watcher: Option<&mut RecommendedWatcher>,
+        watcher: Option<&mut Box<dyn Watcher + Send>>,
         active: &[ResolvedRule],
     ) {
         let desired = active
@@ -408,18 +416,24 @@ async fn run_supervisor(
     let mut notifications = runtime.notifications.subscribe();
     // A single pending signal is enough: every change rescans all active source rules.
     let (event_sender, mut events) = mpsc::channel(1);
-    let callback_sender = event_sender.clone();
-    let mut watcher = match notify::recommended_watcher(
-        move |event: notify::Result<notify::Event>| match event {
-            Ok(event) if event.paths.iter().any(|path| !is_temporary_path(path)) => {
-                let _ = callback_sender.try_send(Ok(()));
-            }
-            Ok(_) => {}
-            Err(error) => {
-                let _ = callback_sender.try_send(Err(error));
-            }
+    let watcher = config.poll_interval.map_or_else(
+        || {
+            let callback_sender = event_sender.clone();
+            notify::recommended_watcher(move |event| {
+                forward_watcher_event(&callback_sender, event);
+            })
+            .map(|watcher| Box::new(watcher) as Box<dyn Watcher + Send>)
         },
-    ) {
+        |interval| {
+            let callback_sender = event_sender.clone();
+            PollWatcher::new(
+                move |event| forward_watcher_event(&callback_sender, event),
+                NotifyConfig::default().with_poll_interval(interval),
+            )
+            .map(|watcher| Box::new(watcher) as Box<dyn Watcher + Send>)
+        },
+    );
+    let mut watcher = match watcher {
         Ok(watcher) => Some(watcher),
         Err(error) => {
             tracing::warn!(%error, "filesystem watcher initialization failed; using periodic reconciliation");
@@ -473,6 +487,21 @@ async fn run_supervisor(
                 engine.reload(watcher.as_mut()).await;
                 engine.process_dirty().await;
             }
+        }
+    }
+}
+
+fn forward_watcher_event(
+    sender: &mpsc::Sender<notify::Result<()>>,
+    event: notify::Result<notify::Event>,
+) {
+    match event {
+        Ok(event) if event.paths.iter().any(|path| !is_temporary_path(path)) => {
+            let _ = sender.try_send(Ok(()));
+        }
+        Ok(_) => {}
+        Err(error) => {
+            let _ = sender.try_send(Err(error));
         }
     }
 }
