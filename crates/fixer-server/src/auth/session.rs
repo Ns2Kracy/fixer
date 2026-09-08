@@ -1,6 +1,8 @@
 use std::fmt;
 
-use super::token::{SecretError, digest, issue_secret};
+use super::token::{SecretError, derive_secret, digest, issue_secret};
+
+const CSRF_DERIVATION_CONTEXT: &[u8] = b"fixer/csrf/v1";
 
 pub struct IssuedSession {
     token: String,
@@ -48,9 +50,13 @@ pub(crate) struct SessionSecrets {
     pub csrf_digest: [u8; 32],
 }
 
+pub(crate) fn csrf_token_for_session(token: &str) -> String {
+    derive_secret("fixer_csrf_", CSRF_DERIVATION_CONTEXT, token)
+}
+
 pub(crate) fn issue_session_secrets() -> Result<SessionSecrets, SecretError> {
     let token = issue_secret("fixer_session_")?;
-    let csrf_token = issue_secret("fixer_csrf_")?;
+    let csrf_token = csrf_token_for_session(&token);
     Ok(SessionSecrets {
         token_digest: digest(&token),
         csrf_digest: digest(&csrf_token),

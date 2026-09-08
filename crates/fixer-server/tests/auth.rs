@@ -451,6 +451,101 @@ async fn login_sets_strict_http_only_cookie_and_protects_api_routes() {
 }
 
 #[tokio::test]
+async fn browser_csrf_cookie_is_shared_and_recovered_for_existing_sessions() {
+    let (_root, _store, router) = secure_app(true).await;
+    let login = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"username": "admin", "password": "web password"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let cookies = login
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let session_cookie = cookies
+        .iter()
+        .find(|cookie| cookie.starts_with("fixer_session="))
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let csrf_cookie = cookies
+        .iter()
+        .find(|cookie| cookie.starts_with("fixer_csrf="))
+        .unwrap();
+    assert!(csrf_cookie.contains("Path=/"));
+    assert!(csrf_cookie.contains("SameSite=Strict"));
+    assert!(csrf_cookie.contains("Secure"));
+    assert!(!csrf_cookie.contains("HttpOnly"));
+
+    // Simulate two tabs concurrently recovering a pre-cookie session.
+    let status_request = || {
+        Request::get("/api/v1/auth/status")
+            .header(header::COOKIE, &session_cookie)
+            .body(Body::empty())
+            .unwrap()
+    };
+    let (status_a, status_b) = tokio::join!(
+        router.clone().oneshot(status_request()),
+        router.clone().oneshot(status_request()),
+    );
+    let status_a = status_a.unwrap();
+    let status_b = status_b.unwrap();
+    assert_eq!(status_a.status(), StatusCode::OK);
+    assert_eq!(status_b.status(), StatusCode::OK);
+    let refreshed_csrf = |response: &axum::response::Response| {
+        response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .find(|cookie| cookie.starts_with("fixer_csrf="))
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .split_once('=')
+            .unwrap()
+            .1
+            .to_owned()
+    };
+    let csrf_a = refreshed_csrf(&status_a);
+    let csrf_b = refreshed_csrf(&status_b);
+    assert_eq!(csrf_a, csrf_b);
+
+    let accepted = router
+        .oneshot(
+            Request::post("/api/v1/auth/logout")
+                .header(header::COOKIE, session_cookie)
+                .header("x-csrf-token", csrf_a)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::NO_CONTENT);
+    assert!(
+        accepted
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .any(|cookie| cookie.starts_with("fixer_csrf=") && cookie.contains("Max-Age=0"))
+    );
+}
+
+#[tokio::test]
 async fn workspace_routes_require_authentication_and_csrf() {
     let (_root, _store, router) = secure_app(false).await;
 

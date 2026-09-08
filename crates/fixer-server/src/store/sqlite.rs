@@ -15,7 +15,7 @@ use crate::{
     auth::{
         IssuedApiToken, IssuedSession,
         password::{PasswordHashValue, verify_password},
-        session::issue_session_secrets,
+        session::{csrf_token_for_session, issue_session_secrets},
         token::{digest, issue_secret},
     },
     ingestion::model::{
@@ -170,6 +170,25 @@ impl SqliteJobStore {
         .fetch_one(&self.pool)
         .await?;
         Ok(authenticated == 1)
+    }
+
+    pub(crate) async fn synchronize_session_csrf(
+        &self,
+        token: &str,
+    ) -> Result<Option<String>, StoreError> {
+        if !token.starts_with("fixer_session_") {
+            return Ok(None);
+        }
+        let csrf_token = csrf_token_for_session(token);
+        let result = sqlx::query(
+            "UPDATE fixer_sessions SET csrf_digest = ? WHERE token_digest = ? AND expires_at_ms > ?",
+        )
+        .bind(digest(&csrf_token).as_slice())
+        .bind(digest(token).as_slice())
+        .bind(timestamp_ms()?)
+        .execute(&self.pool)
+        .await?;
+        Ok((result.rows_affected() == 1).then_some(csrf_token))
     }
 
     pub async fn revoke_session(&self, token: &str) -> Result<bool, StoreError> {

@@ -785,9 +785,26 @@ async function readJson<T>(response: Response): Promise<T | undefined> {
   }
 }
 
+const CSRF_COOKIE_NAME = "fixer_csrf";
 const CSRF_STORAGE_KEY = "fixer.csrf-token";
 
+function csrfCookieToken(): string | undefined {
+  try {
+    const prefix = `${CSRF_COOKIE_NAME}=`;
+    const cookie = globalThis.document?.cookie
+      .split(";")
+      .map((value) => value.trim())
+      .find((value) => value.startsWith(prefix));
+    const token = cookie?.slice(prefix.length);
+    return token === "" ? undefined : token;
+  } catch {
+    return undefined;
+  }
+}
+
 function sessionCsrfToken(): string | undefined {
+  const cookie = csrfCookieToken();
+  if (cookie !== undefined) return cookie;
   try {
     return globalThis.sessionStorage?.getItem(CSRF_STORAGE_KEY) ?? undefined;
   } catch {

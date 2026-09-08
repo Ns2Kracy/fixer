@@ -52,3 +52,11 @@ pub(crate) fn issue_secret(prefix: &str) -> Result<String, SecretError> {
 pub(crate) fn digest(secret: &str) -> [u8; DIGEST_BYTES] {
     Sha256::digest(secret.as_bytes()).into()
 }
+
+pub(crate) fn derive_secret(prefix: &str, context: &[u8], secret: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(context);
+    digest.update([0]);
+    digest.update(secret.as_bytes());
+    format!("{prefix}{}", URL_SAFE_NO_PAD.encode(digest.finalize()))
+}

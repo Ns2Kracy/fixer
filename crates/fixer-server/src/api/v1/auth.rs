@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::error::ApiError,
-    auth::{AuthState, SESSION_COOKIE_NAME, cookie_value, expired_session_cookie, session_cookie},
+    auth::{
+        AuthState, CSRF_COOKIE_NAME, SESSION_COOKIE_NAME, cookie_value, csrf_cookie,
+        expired_csrf_cookie, expired_session_cookie, session_cookie,
+    },
 };
 
 const SCHEMA_VERSION: u8 = 1;
@@ -64,23 +67,57 @@ async fn status(State(state): State<AuthState>, headers: HeaderMap) -> Result<Re
         .await
         .map_err(|_| unavailable())?;
     let registration_required = username.is_none();
+    let mut refreshed_csrf = None;
     let authenticated = if registration_required {
         false
     } else if let Some(token) = cookie_value(&headers, SESSION_COOKIE_NAME) {
-        state
+        let session_valid = state
             .store()
             .authenticate_session(token, None)
             .await
-            .map_err(|_| unavailable())?
+            .map_err(|_| unavailable())?;
+        if session_valid {
+            let csrf_valid = if let Some(csrf) = cookie_value(&headers, CSRF_COOKIE_NAME) {
+                state
+                    .store()
+                    .authenticate_session(token, Some(csrf))
+                    .await
+                    .map_err(|_| unavailable())?
+            } else {
+                false
+            };
+            if csrf_valid {
+                true
+            } else {
+                refreshed_csrf = state
+                    .store()
+                    .synchronize_session_csrf(token)
+                    .await
+                    .map_err(|_| unavailable())?;
+                refreshed_csrf.is_some()
+            }
+        } else {
+            false
+        }
     } else {
         false
     };
-    Ok(no_store_json(AuthStatusResponse {
+    let mut response = no_store_json(AuthStatusResponse {
         schema_version: SCHEMA_VERSION,
         registration_required,
         authenticated,
         username: if authenticated { username } else { None },
-    }))
+    });
+    if let Some(csrf) = refreshed_csrf {
+        let cookie = HeaderValue::from_str(&csrf_cookie(
+            &csrf,
+            state.secure_cookie(),
+            state.session_lifetime().as_secs(),
+        ))
+        .map_err(|_| unavailable())?;
+        response.headers_mut().append(header::SET_COOKIE, cookie);
+    }
+    Ok(response)
 }
 
 async fn register(
@@ -153,6 +190,12 @@ async fn session_response(state: &AuthState, username: String) -> Result<Respons
         state.session_lifetime().as_secs(),
     ))
     .map_err(|_| unavailable())?;
+    let csrf_cookie = HeaderValue::from_str(&csrf_cookie(
+        session.csrf_token(),
+        state.secure_cookie(),
+        state.session_lifetime().as_secs(),
+    ))
+    .map_err(|_| unavailable())?;
     let mut response = Json(SessionResponse {
         schema_version: SCHEMA_VERSION,
         username,
@@ -161,6 +204,9 @@ async fn session_response(state: &AuthState, username: String) -> Result<Respons
     })
     .into_response();
     response.headers_mut().insert(header::SET_COOKIE, cookie);
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, csrf_cookie);
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -177,8 +223,13 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Result<Re
     }
     let cookie = HeaderValue::from_str(&expired_session_cookie(state.secure_cookie()))
         .map_err(|_| unavailable())?;
+    let csrf_cookie = HeaderValue::from_str(&expired_csrf_cookie(state.secure_cookie()))
+        .map_err(|_| unavailable())?;
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.headers_mut().insert(header::SET_COOKIE, cookie);
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, csrf_cookie);
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

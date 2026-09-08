@@ -24,6 +24,7 @@ pub use session::IssuedSession;
 pub use token::IssuedApiToken;
 
 pub const SESSION_COOKIE_NAME: &str = "fixer_session";
+pub const CSRF_COOKIE_NAME: &str = "fixer_csrf";
 pub const CSRF_HEADER_NAME: &str = "x-csrf-token";
 const DEFAULT_SESSION_LIFETIME: Duration = Duration::from_secs(12 * 60 * 60);
 
@@ -269,6 +270,17 @@ pub(crate) fn session_cookie(token: &str, secure: bool, max_age_seconds: u64) ->
 
 pub(crate) fn expired_session_cookie(secure: bool) -> String {
     session_cookie("", secure, 0)
+}
+
+pub(crate) fn csrf_cookie(token: &str, secure: bool, max_age_seconds: u64) -> String {
+    let secure = if secure { "; Secure" } else { "" };
+    format!(
+        "{CSRF_COOKIE_NAME}={token}; Path=/; SameSite=Strict; Max-Age={max_age_seconds}{secure}"
+    )
+}
+
+pub(crate) fn expired_csrf_cookie(secure: bool) -> String {
+    csrf_cookie("", secure, 0)
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {

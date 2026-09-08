@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiClient,
+  api,
   type ApiError,
   type IngestionRuleRequest,
   type UpdateWorkspaceSettingsRequest,
@@ -10,6 +11,31 @@ import {
 afterEach(() => vi.restoreAllMocks());
 
 describe("ApiClient", () => {
+  it("prefers the shared CSRF cookie over stale tab storage", async () => {
+    sessionStorage.setItem("fixer.csrf-token", "stale-tab-token");
+    document.cookie = "fixer_csrf=shared-cookie-token; Path=/";
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ schema_version: 1, job: { id: 9 } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.retryJob(9);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/jobs/9/retry",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-csrf-token": "shared-cookie-token",
+        }),
+      }),
+    );
+    document.cookie = "fixer_csrf=; Path=/; Max-Age=0";
+    sessionStorage.clear();
+  });
+
   it("sends JSON, cookies, CSRF, and idempotency headers for an approved execution", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
