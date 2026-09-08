@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Link, Outlet, useNavigate } from "@tanstack/solid-router";
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/solid-router";
 import type { JSX } from "@solidjs/web";
-import { createSignal, onCleanup } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 
 import { api } from "../lib/api";
 import { createThemeController, type ThemePreference } from "../lib/theme";
@@ -9,20 +9,30 @@ import { Button } from "./ui/button";
 import { ThemeSelect } from "./ui/theme-select";
 
 const navigation = [
-  { to: "/", label: "Overview", marker: "01" },
-  { to: "/folders", label: "Folders", marker: "02" },
-  { to: "/jobs", label: "Jobs", marker: "03" },
-  { to: "/search", label: "Search", marker: "04" },
-  { to: "/library", label: "Library", marker: "05" },
-  { to: "/providers", label: "Providers", marker: "06" },
-  { to: "/settings", label: "Settings", marker: "07" },
-  { to: "/templates", label: "Templates", marker: "08" },
+  { to: "/", label: "整理" },
+  { to: "/jobs", label: "整理记录" },
+  { to: "/settings", label: "设置" },
+] as const;
+const settingsNavigation = [
+  { to: "/settings", label: "通用与刮削设置" },
+  { to: "/folders", label: "自动整理目录" },
+  { to: "/providers", label: "数据源状态" },
+  { to: "/templates", label: "命名规则" },
+  { to: "/library", label: "浏览文件" },
 ] as const;
 
 export function AppShell(): JSX.Element {
   let main: HTMLElement | undefined;
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
+  const activePrimaryTarget = createMemo(() => {
+    const path = location().pathname;
+    if (path === "/") return "/";
+    if (settingsNavigation.some((item) => item.to === path)) return "/settings";
+    if (path === "/jobs" || path.startsWith("/jobs/")) return "/jobs";
+    return null;
+  });
   const [themePreference, setThemePreference] = createSignal<ThemePreference>(
     "system",
     { ownedWrite: true },
@@ -77,7 +87,7 @@ export function AppShell(): JSX.Element {
           <span class="max-[480px]:hidden">
             <strong class="block font-serif text-lg font-bold">Fixer</strong>
             <small class="block text-[0.68rem] uppercase tracking-[0.08em] text-muted">
-              Metadata operations
+              识别、刮削与文件整理
             </small>
           </span>
         </Link>
@@ -117,36 +127,42 @@ export function AppShell(): JSX.Element {
           aria-label="Primary navigation"
         >
           <p class="mb-4 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted max-[800px]:hidden">
-            Navigate
+            工作区
           </p>
-          <nav class="max-[800px]:overflow-x-auto">
+          <nav aria-label="主导航" class="max-[800px]:overflow-x-auto">
             <ul class="m-0 list-none p-0 max-[800px]:flex max-[800px]:w-max max-[800px]:gap-4">
-              {navigation.map((item) => (
-                <li>
-                  <Link
-                    to={item.to}
-                    activeOptions={{ exact: item.to === "/" }}
-                    preload="intent"
-                    activeProps={{
-                      "aria-current": "page",
-                      class:
-                        "flex gap-3 border-b border-ink px-3 py-3 font-semibold text-ink no-underline max-[800px]:px-2 max-[800px]:py-2 max-[800px]:whitespace-nowrap",
-                    }}
-                    inactiveProps={{
-                      class:
-                        "flex gap-3 border-b border-transparent px-3 py-3 text-muted no-underline transition-colors hover:text-moss max-[800px]:px-2 max-[800px]:py-2 max-[800px]:whitespace-nowrap",
-                    }}
-                  >
-                    <span
-                      class="pt-1 text-[0.65rem] text-muted"
-                      aria-hidden="true"
+              <For each={navigation}>
+                {(item) => (
+                  <li>
+                    <a
+                      href={item.to}
+                      aria-current={
+                        activePrimaryTarget() === item.to ? "page" : undefined
+                      }
+                      class={
+                        activePrimaryTarget() === item.to
+                          ? "flex gap-3 border-b border-ink px-3 py-3 font-semibold text-ink no-underline max-[800px]:px-2 max-[800px]:py-2 max-[800px]:whitespace-nowrap"
+                          : "flex gap-3 border-b border-transparent px-3 py-3 text-muted no-underline transition-colors hover:text-moss max-[800px]:px-2 max-[800px]:py-2 max-[800px]:whitespace-nowrap"
+                      }
+                      onClick={(event) => {
+                        if (
+                          event.button !== 0 ||
+                          event.metaKey ||
+                          event.ctrlKey ||
+                          event.shiftKey ||
+                          event.altKey
+                        ) {
+                          return;
+                        }
+                        event.preventDefault();
+                        void navigate({ to: item.to });
+                      }}
                     >
-                      {item.marker}
-                    </span>
-                    {item.label}
-                  </Link>
-                </li>
-              ))}
+                      {item.label}
+                    </a>
+                  </li>
+                )}
+              </For>
             </ul>
           </nav>
           <div class="mt-auto flex items-start border-t border-line pt-5 text-xs text-muted max-[800px]:hidden">
@@ -167,8 +183,31 @@ export function AppShell(): JSX.Element {
             main = element;
           }}
           tabindex="-1"
-          class="min-w-0 p-[clamp(2rem,6vw,6rem)] focus:outline-none max-[800px]:px-4 max-[800px]:pt-8 max-[800px]:pb-16"
+          class="min-w-0 p-8 focus:outline-none max-[800px]:px-4 max-[800px]:pt-6 max-[800px]:pb-16"
         >
+          <Show
+            when={settingsNavigation.some(
+              (item) => item.to === location().pathname,
+            )}
+          >
+            <nav
+              aria-label="设置分类"
+              class="mb-8 flex flex-wrap gap-5 border-b border-line pb-4 text-sm"
+            >
+              {settingsNavigation.map((item) => (
+                <Link
+                  to={item.to}
+                  activeProps={{
+                    class: "font-bold text-ink",
+                    "aria-current": "page",
+                  }}
+                  inactiveProps={{ class: "text-muted hover:text-ink" }}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </Show>
           <Outlet />
         </main>
       </div>

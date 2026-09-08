@@ -334,3 +334,167 @@ fn metadata_operations_are_rebased_and_manifest_entries_are_reconciled() {
     let manifest: serde_json::Value = serde_json::from_slice(content.as_bytes()).unwrap();
     assert_eq!(manifest["planned_files"], serde_json::json!(["movie.json"]));
 }
+
+#[test]
+fn directory_episodes_and_matching_nfos_and_subtitles_follow_each_season() {
+    let source = tempfile::tempdir().unwrap();
+    std::fs::create_dir(source.path().join("nested")).unwrap();
+    let mut metadata = OutputPlan::new("unused");
+    for (directory, season, episode) in [("", 1, 1), ("nested/", 2, 2)] {
+        let stem = format!("Example.Show.S{season:02}E{episode:02}.1080p");
+        for extension in ["mkv", "en.srt"] {
+            std::fs::write(
+                source.path().join(format!("{directory}{stem}.{extension}")),
+                [],
+            )
+            .unwrap();
+        }
+        metadata.push(
+            OutputOperation::write_bytes(
+                format!("Season {season:02}/S{season:02}E{episode:02}.nfo"),
+                fixer_core::PlannedContent::new(b"episode metadata"),
+            )
+            .unwrap(),
+        );
+    }
+    let television = television();
+    let plan = organize(OrganizationRequest::new(
+        source.path(),
+        Path::new("/library"),
+        OrganizationMedia::Television(&television),
+        OrganizationPlacement::Copy,
+        metadata,
+    ))
+    .unwrap();
+    for (season, episode) in [(1, 1), (2, 2)] {
+        for extension in ["mkv", "en.srt", "nfo"] {
+            let target = PathBuf::from(format!(
+                "Example Show/Season {season:02}/Example.Show.S{season:02}E{episode:02}.1080p.{extension}"
+            ));
+            assert!(
+                plan.operations()
+                    .iter()
+                    .any(|op| op.target() == Some(target.as_path())),
+                "missing {target:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn duplicate_episode_mapping_is_rejected() {
+    let source = tempfile::tempdir().unwrap();
+    for name in ["Show.S01E01.mkv", "Show.S01E01.mp4"] {
+        std::fs::write(source.path().join(name), []).unwrap();
+    }
+    let television = television();
+    assert!(
+        organize(request(
+            source.path(),
+            OrganizationMedia::Television(&television),
+            OrganizationPlacement::Copy
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn ten_flat_episodes_use_season_one_not_first_metadata_season() {
+    let source = tempfile::tempdir().unwrap();
+    let television = television(); // metadata's first season is deliberately 2
+    for episode in 1..=10 {
+        std::fs::write(source.path().join(format!("Show.S01E{episode:02}.mkv")), []).unwrap();
+    }
+    let plan = organize(request(
+        source.path(),
+        OrganizationMedia::Television(&television),
+        OrganizationPlacement::Copy,
+    ))
+    .unwrap();
+    assert_eq!(plan.operations().len(), 10);
+    for episode in 1..=10 {
+        let expected = PathBuf::from(format!("Example Show/Season 01/Show.S01E{episode:02}.mkv"));
+        assert!(
+            plan.operations()
+                .iter()
+                .any(|operation| operation.target() == Some(expected.as_path()))
+        );
+    }
+}
+
+#[test]
+fn ambiguous_multi_episode_and_unidentified_files_are_not_assigned_the_first_season() {
+    let television = television();
+    for name in [
+        "Show.S01E01E02.mkv",
+        "Show.S01E01-E02.mkv",
+        "Show.S01E01-02.mkv",
+        "Show.S01E01.S02E02.mkv",
+        "unknown.mkv",
+    ] {
+        let plan = organize(request(
+            Path::new(name),
+            OrganizationMedia::Television(&television),
+            OrganizationPlacement::Copy,
+        ))
+        .unwrap();
+        assert_eq!(first_target(&plan), Path::new("Example Show").join(name));
+    }
+}
+
+#[test]
+fn season_folder_episode_and_unique_subtitle_are_colocated_but_ambiguous_subtitle_is_preserved() {
+    let source = tempfile::tempdir().unwrap();
+    for season in [1, 2] {
+        let folder = source.path().join(format!("Season {season:02}"));
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("01 - Pilot.mkv"), []).unwrap();
+    }
+    std::fs::create_dir(source.path().join("Subtitles")).unwrap();
+    std::fs::write(source.path().join("Subtitles/01 - Pilot.en.srt"), []).unwrap();
+    let television = television();
+    let plan = organize(request(
+        source.path(),
+        OrganizationMedia::Television(&television),
+        OrganizationPlacement::Copy,
+    ))
+    .unwrap();
+    assert!(plan.operations().iter().any(|operation| operation.target()
+        == Some(Path::new("Example Show/Subtitles/01 - Pilot.en.srt"))));
+    for season in [1, 2] {
+        let expected = PathBuf::from(format!("Example Show/Season {season:02}/01 - Pilot.mkv"));
+        assert!(
+            plan.operations()
+                .iter()
+                .any(|operation| operation.target() == Some(expected.as_path()))
+        );
+    }
+}
+
+#[test]
+fn single_episode_nfo_uses_overridden_media_stem() {
+    let television = television();
+    let mut metadata = OutputPlan::new("unused");
+    metadata.push(
+        OutputOperation::write_bytes(
+            "Season 01/S01E01.nfo",
+            fixer_core::PlannedContent::new(b"nfo"),
+        )
+        .unwrap(),
+    );
+    let plan = organize(
+        OrganizationRequest::new(
+            Path::new("Show.S01E01.mkv"),
+            Path::new("/library"),
+            OrganizationMedia::Television(&television),
+            OrganizationPlacement::Copy,
+            metadata,
+        )
+        .with_media_target(Path::new("Season 01/Renamed.mkv")),
+    )
+    .unwrap();
+    assert_eq!(
+        plan.operations()[1].target().unwrap(),
+        Path::new("Example Show/Season 01/Renamed.nfo")
+    );
+}

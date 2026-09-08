@@ -98,15 +98,10 @@ impl TelevisionSearch {
 
     /// Selects one candidate explicitly.
     pub fn select(self, index: usize) -> Result<SelectedTelevision, SdkError> {
-        let length = self.candidates.len();
-        let candidate = self
-            .candidates
-            .into_iter()
-            .nth(index)
-            .ok_or(SdkError::CandidateOutOfBounds { index, length })?;
+        let candidates = orchestrator::select_candidates(self.candidates, index)?;
         Ok(SelectedTelevision {
             fixer: self.fixer,
-            candidate,
+            candidates,
             warnings: self.warnings,
             ordering: self.ordering,
             external_ids: self.external_ids,
@@ -117,7 +112,7 @@ impl TelevisionSearch {
 /// One explicit television candidate ready to fetch.
 pub struct SelectedTelevision {
     fixer: Fixer,
-    candidate: Candidate,
+    candidates: Vec<Candidate>,
     warnings: Vec<ResolutionWarning>,
     ordering: Option<OrderingScheme>,
     external_ids: Vec<ExternalId>,
@@ -128,7 +123,7 @@ impl SelectedTelevision {
     pub async fn fetch_selected(self) -> Result<Resolved<Series>, SdkError> {
         orchestrator::fetch_series(
             &self.fixer,
-            &[self.candidate],
+            &self.candidates,
             self.warnings,
             self.ordering,
             &self.external_ids,

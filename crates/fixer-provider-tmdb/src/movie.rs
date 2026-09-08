@@ -1,11 +1,10 @@
-use crate::{TmdbConfig, TmdbError};
+use crate::{TmdbConfig, TmdbError, request::get_json};
 use fixer_core::{
     ArtworkKind, ArtworkReference, Candidate, Credit, CreditRole, Duration, ExternalId,
-    FetchRequest, Genre, Header, HttpClient, HttpMethod, HttpRequest, LocalizedValue, MediaKind,
-    Movie, MovieCandidate, MovieRelease, Person, PersonId, Rating, ReleaseDate, ReleaseId,
-    SearchRequest, WorkId,
+    FetchRequest, Genre, HttpClient, LocalizedValue, MediaKind, Movie, MovieCandidate,
+    MovieRelease, Person, PersonId, Rating, ReleaseDate, ReleaseId, SearchRequest, WorkId,
 };
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::Deserialize;
 use std::collections::BTreeSet;
 
 #[derive(Deserialize)]
@@ -154,19 +153,6 @@ pub async fn fetch(
         details,
         request.locales.first().map(ToString::to_string).as_deref(),
     )
-}
-
-async fn get_json<T: DeserializeOwned>(
-    config: &TmdbConfig,
-    url: url::Url,
-    http: &dyn HttpClient,
-) -> Result<T, TmdbError> {
-    let request = HttpRequest::new(HttpMethod::Get, url.to_string()).with_header(
-        Header::new("authorization", format!("Bearer {}", config.token())).map_err(data_error)?,
-    );
-    let response = http.execute(request).await.map_err(TmdbError::from_http)?;
-    serde_json::from_slice(&response.body)
-        .map_err(|error| TmdbError::MalformedResponse(error.to_string()))
 }
 
 #[allow(

@@ -27,6 +27,9 @@ function authenticatedFetch(
         username: "admin",
       });
     }
+    if (url === "/api/v1/ingestion-rules") {
+      return json({ schema_version: 1, rules: [] });
+    }
     return handler(url);
   });
 }
@@ -66,7 +69,7 @@ describe("Fixer app", () => {
       await screen.findByRole("heading", { name: "Fixer access" }),
     ).toBeVisible();
     expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/v1/health",
+      "/api/v1/jobs?limit=50",
       expect.anything(),
     );
   });
@@ -75,8 +78,8 @@ describe("Fixer app", () => {
     vi.stubGlobal(
       "fetch",
       authenticatedFetch((url) => {
-        if (url === "/api/v1/health") {
-          return json({ schema_version: 1, status: "ok", version: "0.1.0" });
+        if (url === "/api/v1/jobs?limit=50") {
+          return json({ schema_version: 1, jobs: [], has_more: false });
         }
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -86,24 +89,25 @@ describe("Fixer app", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Overview",
+        name: "整理",
       }),
     ).toBeVisible();
-    expect(await screen.findByText("Server connected")).toBeVisible();
+    expect(
+      await screen.findByText("暂无待处理作品，请选择源文件夹开始识别"),
+    ).toBeVisible();
     expect(
       screen.queryByRole("link", { name: "Sign in" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Manage folders" }),
+      screen.getByRole("link", { name: "配置自动整理目录 →" }),
     ).toHaveAttribute("href", "/folders");
-    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "整理" })).toHaveAttribute(
       "href",
       "/",
     );
-    expect(screen.getByRole("link", { name: "Folders" })).toHaveAttribute(
-      "href",
-      "/folders",
-    );
+    expect(
+      screen.queryByRole("link", { name: "Folders" }),
+    ).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/workspace/iu);
   });
 
@@ -111,8 +115,8 @@ describe("Fixer app", () => {
     vi.stubGlobal(
       "fetch",
       authenticatedFetch((url) => {
-        if (url === "/api/v1/health") {
-          return json({ schema_version: 1, status: "ok", version: "0.1.0" });
+        if (url === "/api/v1/jobs?limit=50") {
+          return json({ schema_version: 1, jobs: [], has_more: false });
         }
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -124,14 +128,14 @@ describe("Fixer app", () => {
       await screen.findByRole("heading", { name: "Page not found" }),
     ).toBeVisible();
     const overviewLink = screen.getByRole("link", {
-      name: "Return to Overview",
+      name: "返回整理",
     });
     overviewLink.focus();
     await user.keyboard("{Enter}");
 
     expect(
       await screen.findByRole("heading", {
-        name: "Overview",
+        name: "整理",
       }),
     ).toBeVisible();
   });
@@ -140,7 +144,7 @@ describe("Fixer app", () => {
     vi.stubGlobal(
       "fetch",
       authenticatedFetch((url) => {
-        if (url === "/api/v1/health") {
+        if (url === "/api/v1/jobs?limit=50") {
           return json(
             {
               error: {
@@ -166,8 +170,8 @@ describe("Fixer app", () => {
   it("signs out from the header and returns to the login page", async () => {
     sessionStorage.setItem("fixer.csrf-token", "csrf-sign-out");
     const fetchMock = authenticatedFetch((url) => {
-      if (url === "/api/v1/health") {
-        return json({ schema_version: 1, status: "ok", version: "0.1.0" });
+      if (url === "/api/v1/jobs?limit=50") {
+        return json({ schema_version: 1, jobs: [], has_more: false });
       }
       if (url === "/api/v1/auth/logout")
         return new Response(null, { status: 204 });
@@ -178,7 +182,7 @@ describe("Fixer app", () => {
     renderApp();
 
     await screen.findByRole("heading", {
-      name: "Overview",
+      name: "整理",
     });
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
@@ -201,8 +205,8 @@ describe("Fixer app", () => {
     vi.stubGlobal(
       "fetch",
       authenticatedFetch((url) => {
-        if (url === "/api/v1/health") {
-          return json({ schema_version: 1, status: "ok", version: "0.1.0" });
+        if (url === "/api/v1/jobs?limit=50") {
+          return json({ schema_version: 1, jobs: [], has_more: false });
         }
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -211,7 +215,7 @@ describe("Fixer app", () => {
     renderApp();
 
     await screen.findByRole("heading", {
-      name: "Overview",
+      name: "整理",
     });
     await user.tab();
     expect(screen.getByRole("link", { name: "Skip to content" })).toHaveFocus();

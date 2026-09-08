@@ -135,6 +135,8 @@ pub enum AutoReviewReason {
     ConfidenceBelowThreshold,
     TiedTopCandidates,
     MetadataConflicts,
+    ProviderEnrichmentFailed,
+    DiagnosticsTruncated,
     InvalidPlan,
     DestinationCollision,
 }

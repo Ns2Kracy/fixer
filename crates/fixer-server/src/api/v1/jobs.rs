@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::error::ApiError,
     fs_policy::FsPolicy,
-    ingestion::model::RulePlacement,
+    ingestion::{IngestionRuntime, RuleJobError, model::RulePlacement},
     jobs::{
         JobRuntime, RuntimeError,
         artifacts::{CandidateArtifact, ConflictArtifact, OperationArtifact, WarningArtifact},
@@ -35,6 +35,7 @@ const SCHEMA_VERSION: u8 = 1;
 struct JobApiState {
     runtime: JobRuntime,
     workspace: Option<WorkspaceState>,
+    ingestion: Option<IngestionRuntime>,
 }
 
 impl FromRef<JobApiState> for JobRuntime {
@@ -43,7 +44,11 @@ impl FromRef<JobApiState> for JobRuntime {
     }
 }
 
-pub fn router(runtime: JobRuntime, workspace: Option<WorkspaceState>) -> Router {
+pub fn router(
+    runtime: JobRuntime,
+    workspace: Option<WorkspaceState>,
+    ingestion: Option<IngestionRuntime>,
+) -> Router {
     Router::new()
         .route("/jobs", get(list).post(create).fallback(get_or_post_only))
         .route("/jobs/{id}", get(get_job).fallback(get_only))
@@ -56,14 +61,34 @@ pub fn router(runtime: JobRuntime, workspace: Option<WorkspaceState>) -> Router 
         .route("/jobs/{id}/plan", get(plan_details).fallback(get_only))
         .route("/jobs/{id}/execute", post(execute).fallback(post_only))
         .route("/jobs/{id}/events", get(events).fallback(get_only))
-        .with_state(JobApiState { runtime, workspace })
+        .with_state(JobApiState {
+            runtime,
+            workspace,
+            ingestion,
+        })
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum CreateJobRequest {
+    RuleDirectory(CreateRuleDirectoryJobRequest),
     Directory(CreateDirectoryJobRequest),
     Path(CreatePathJobRequest),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RuleSelector {
+    Matching,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateRuleDirectoryJobRequest {
+    rule: RuleSelector,
+    source: DirectoryRef,
+    #[serde(default)]
+    media_kind: Option<JobMediaKind>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,17 +197,34 @@ async fn create(
     request: Result<Json<CreateJobRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
     let Json(request) = request.map_err(map_json_rejection)?;
-    let input = match request {
-        CreateJobRequest::Directory(request) => {
-            directory_job_input(state.workspace.as_ref(), &request)?
+    let job = match request {
+        CreateJobRequest::RuleDirectory(request) => {
+            let RuleSelector::Matching = request.rule;
+            state
+                .ingestion
+                .as_ref()
+                .ok_or_else(invalid_rule_job)?
+                .create_rule_job(&request.source, request.media_kind)
+                .await
+                .map_err(|error| map_rule_job_error(&error))?
         }
-        CreateJobRequest::Path(request) => path_job_input(request)?,
+        CreateJobRequest::Directory(request) => {
+            let input = directory_job_input(state.workspace.as_ref(), &request)?;
+            state
+                .runtime
+                .create(input)
+                .await
+                .map_err(map_runtime_error)?
+        }
+        CreateJobRequest::Path(request) => {
+            let input = path_job_input(request)?;
+            state
+                .runtime
+                .create(input)
+                .await
+                .map_err(map_runtime_error)?
+        }
     };
-    let job = state
-        .runtime
-        .create(input)
-        .await
-        .map_err(map_runtime_error)?;
     Ok((
         StatusCode::ACCEPTED,
         Json(envelope(&job, state.workspace.as_ref())),
@@ -231,6 +273,55 @@ fn directory_job_input(
         origin_rule_id: None,
         auto_execute: false,
     }))
+}
+
+fn invalid_rule_job() -> ApiError {
+    invalid_input(
+        "rule",
+        "matching requires folder rules and configured library roots",
+    )
+}
+
+fn map_rule_job_error(error: &RuleJobError) -> ApiError {
+    match error {
+        RuleJobError::NoMatchingRule => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "no_matching_folder_rule",
+            "No enabled Folder rule matches the selected directory",
+            None,
+        ),
+        RuleJobError::NoWork => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unrecognized_media",
+            "The selected directory contains no recognizable media work",
+            None,
+        ),
+        RuleJobError::MultipleWorks => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "multiple_media_works",
+            "Select a directory containing exactly one media work",
+            None,
+        ),
+        RuleJobError::AmbiguousMedia => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ambiguous_media_kind",
+            "Choose the media kind for the selected work",
+            None,
+        ),
+        RuleJobError::InvalidMediaKindOverride => {
+            invalid_input("media_kind", "must match the fixed Folder rule")
+        }
+        RuleJobError::Workspace(_) | RuleJobError::FilesystemPolicy(_) => invalid_directories(),
+        RuleJobError::Discovery(_) | RuleJobError::Fingerprint(_) => {
+            invalid_input("source", "could not be recognized as a single media work")
+        }
+        RuleJobError::Store(_) | RuleJobError::Join(_) | RuleJobError::Runtime(_) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "rule_job_error",
+            "The selected folder could not be queued",
+            None,
+        ),
+    }
 }
 
 fn invalid_directories() -> ApiError {

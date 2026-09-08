@@ -1,11 +1,10 @@
-use crate::{TmdbConfig, TmdbError};
+use crate::{TmdbConfig, TmdbError, request::get_json};
 use fixer_core::{
     ArtworkKind, ArtworkReference, Candidate, Credit, CreditRole, Duration, Episode,
-    EpisodeSequence, ExternalId, FetchRequest, Header, HttpClient, HttpMethod, HttpRequest,
-    LocalizedValue, MediaKind, OrderingScheme, Person, PersonId, SearchRequest, Season, Series,
-    TelevisionCandidate, WorkId,
+    EpisodeSequence, ExternalId, FetchRequest, HttpClient, LocalizedValue, MediaKind,
+    OrderingScheme, Person, PersonId, SearchRequest, Season, Series, TelevisionCandidate, WorkId,
 };
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::Deserialize;
 use std::collections::BTreeSet;
 
 #[derive(Deserialize)]
@@ -361,19 +360,6 @@ fn add_artwork(
             .with_external_id(id),
     );
     Ok(())
-}
-
-async fn get_json<T: DeserializeOwned>(
-    config: &TmdbConfig,
-    url: url::Url,
-    http: &dyn HttpClient,
-) -> Result<T, TmdbError> {
-    let request = HttpRequest::new(HttpMethod::Get, url.to_string()).with_header(
-        Header::new("authorization", format!("Bearer {}", config.token())).map_err(data_error)?,
-    );
-    let response = http.execute(request).await.map_err(TmdbError::from_http)?;
-    serde_json::from_slice(&response.body)
-        .map_err(|error| TmdbError::MalformedResponse(error.to_string()))
 }
 
 fn normalized_language(language: &str) -> &str {

@@ -351,11 +351,12 @@ impl Provider for LocalProvider {
             let media_kind = request.media_kind();
             self.descriptor.ensure_support(media_kind)?;
             match request {
-                SearchRequest::Movie { year, .. } => self
+                SearchRequest::Movie { title, year, .. } => self
                     .movie_documents
                     .iter()
                     .map(|(external_id, movie)| {
-                        let title = first_title(&movie.titles, "local movie has no title")?;
+                        let title =
+                            matching_title(&movie.titles, &title, "local movie has no title")?;
                         MovieCandidate::new(
                             self.descriptor.id().clone(),
                             external_id.clone(),

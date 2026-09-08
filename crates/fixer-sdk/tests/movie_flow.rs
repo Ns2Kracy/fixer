@@ -172,7 +172,18 @@ async fn local_and_tmdb_merge_complementary_movie_fields() {
         .http_client(ReqwestHttpClient::new(HttpConfig::default()).unwrap())
         .build()
         .unwrap();
-    let resolved = fixer.movie("花样年华").year(2000).resolve().await.unwrap();
+    let search = fixer.movie("花样年华").year(2000).search().await.unwrap();
+    let index = search
+        .candidates()
+        .iter()
+        .position(|candidate| candidate.provider().as_str() == "local")
+        .unwrap();
+    let resolved = search
+        .select(index)
+        .unwrap()
+        .fetch_selected()
+        .await
+        .unwrap();
     assert!(
         resolved
             .value

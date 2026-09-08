@@ -57,15 +57,10 @@ impl MovieSearch {
 
     /// Selects one candidate explicitly.
     pub fn select(self, index: usize) -> Result<SelectedMovie, SdkError> {
-        let length = self.candidates.len();
-        let candidate = self
-            .candidates
-            .into_iter()
-            .nth(index)
-            .ok_or(SdkError::CandidateOutOfBounds { index, length })?;
+        let candidates = orchestrator::select_candidates(self.candidates, index)?;
         Ok(SelectedMovie {
             fixer: self.fixer,
-            candidate,
+            candidates,
             warnings: self.warnings,
         })
     }
@@ -74,12 +69,12 @@ impl MovieSearch {
 /// One explicit candidate ready to fetch.
 pub struct SelectedMovie {
     fixer: Fixer,
-    candidate: Candidate,
+    candidates: Vec<Candidate>,
     warnings: Vec<ResolutionWarning>,
 }
 impl SelectedMovie {
     /// Fetches and resolves the explicitly selected candidate.
     pub async fn fetch_selected(self) -> Result<Resolved<Movie>, SdkError> {
-        orchestrator::fetch_movies(&self.fixer, &[self.candidate], self.warnings).await
+        orchestrator::fetch_movies(&self.fixer, &self.candidates, self.warnings).await
     }
 }

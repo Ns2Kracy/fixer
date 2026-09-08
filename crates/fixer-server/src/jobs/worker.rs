@@ -74,6 +74,21 @@ pub fn auto_decision(
             reason: AutoReviewReason::ManualJob,
         };
     }
+    if review.warnings_truncated {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::DiagnosticsTruncated,
+        };
+    }
+    if review.warnings.iter().any(|warning| {
+        matches!(
+            warning.code.as_str(),
+            "provider_search_failed" | "provider_fetch_failed"
+        )
+    }) {
+        return AutoDecision::NeedsReview {
+            reason: AutoReviewReason::ProviderEnrichmentFailed,
+        };
+    }
     if review.candidates_truncated {
         return AutoDecision::NeedsReview {
             reason: AutoReviewReason::CandidateListTruncated,
@@ -1184,6 +1199,29 @@ mod tests {
             conflicts: Vec::new(),
             conflicts_truncated: false,
         }
+    }
+
+    #[test]
+    fn auto_decision_blocks_failed_enrichment_and_truncated_warnings() {
+        for code in ["provider_search_failed", "provider_fetch_failed"] {
+            let mut review = review(&[1.0]);
+            review
+                .warnings
+                .push(crate::jobs::artifacts::WarningArtifact {
+                    code: code.to_owned(),
+                    message: "remote unavailable".to_owned(),
+                });
+            assert!(matches!(
+                super::auto_decision(&automatic_input(true), &review, 0, 0.9),
+                super::AutoDecision::NeedsReview { .. }
+            ));
+        }
+        let mut review = review(&[1.0]);
+        review.warnings_truncated = true;
+        assert!(matches!(
+            super::auto_decision(&automatic_input(true), &review, 0, 0.9),
+            super::AutoDecision::NeedsReview { .. }
+        ));
     }
 
     #[test]

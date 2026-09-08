@@ -1,7 +1,7 @@
 //! Destination layout and placement planning shared by CLI and server jobs.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs,
     path::{Component, Path, PathBuf},
@@ -93,6 +93,10 @@ pub enum OrganizationError {
     MissingExtension(PathBuf),
     #[error("organization path has no final component: `{0}`")]
     MissingTargetName(PathBuf),
+    #[error("multiple media files identify episode S{season:02}E{episode:02}")]
+    AmbiguousEpisode { season: u32, episode: u32 },
+    #[error("multiple source files map to organization target `{0}`")]
+    DuplicateTarget(PathBuf),
     #[error("relative symlink cannot be represented from `{from}` to `{to}`")]
     RelativeSymlinkUnavailable { from: PathBuf, to: PathBuf },
     #[error("failed to determine the current directory: {0}")]
@@ -121,58 +125,171 @@ pub fn organize(request: OrganizationRequest<'_>) -> Result<OutputPlan, Organiza
         metadata_plan,
     } = request;
     let package = package_path(media, path_template)?;
-    let metadata_operations = metadata_plan
-        .operations()
-        .iter()
-        .map(|operation| rebase_operation(operation, &package))
-        .collect::<Result<Vec<_>, _>>()?;
+    let television = matches!(media, OrganizationMedia::Television(_));
+    let directory = source_path.is_dir();
+    let files = if directory {
+        source_files(source_path)?
+    } else {
+        vec![source_path.to_path_buf()]
+    };
+    let primary = sole_primary_file(&files, media);
+    let mut episode_targets = BTreeMap::new();
+    let mut placements = Vec::new();
+    for source in &files {
+        let relative = if directory {
+            source
+                .strip_prefix(source_path)
+                .map_err(|_| OrganizationError::MissingFileName(source.clone()))?
+        } else {
+            Path::new(
+                source
+                    .file_name()
+                    .ok_or_else(|| OrganizationError::MissingFileName(source.clone()))?,
+            )
+        };
+        let episode = television
+            .then(|| crate::episode_path::episode_number(source))
+            .flatten()
+            .filter(|_| is_primary_media_file(source, media));
+        let target = if Some(source.as_path()) == primary || !directory {
+            target_override.map_or_else(
+                || media_target(source, media, &package),
+                |target| Ok(package.join(target)),
+            )?
+        } else if episode.is_some() {
+            media_target(source, media, &package)?
+        } else {
+            package.join(relative)
+        };
+        if let Some((season, episode)) = episode {
+            if episode_targets
+                .insert((season, episode), target.with_extension("nfo"))
+                .is_some()
+            {
+                return Err(OrganizationError::AmbiguousEpisode { season, episode });
+            }
+        }
+        placements.push((source, target));
+    }
+    if television {
+        colocate_episode_sidecars(&mut placements, &episode_targets, media);
+    }
+    let metadata_operations =
+        organize_metadata_operations(&metadata_plan, &package, &episode_targets, television)?;
     let reserved_targets = metadata_operations
         .iter()
         .filter_map(OutputOperation::target)
         .map(Path::to_path_buf)
         .collect::<BTreeSet<_>>();
+    let mut placed_targets = BTreeSet::new();
     let mut plan = OutputPlan::new(destination_path);
-
-    if source_path.is_dir() {
-        let files = source_files(source_path)?;
-        let primary = sole_primary_file(&files, media);
-        for source in &files {
-            let relative = source
-                .strip_prefix(source_path)
-                .map_err(|_| OrganizationError::MissingFileName(source.clone()))?;
-            let target = if Some(source.as_path()) == primary {
-                target_override.map_or_else(
-                    || media_target(source, media, &package),
-                    |target| Ok(package.join(target)),
-                )?
-            } else {
-                package.join(relative)
-            };
-            if !reserved_targets.contains(&target) {
-                plan.push(placement_operation(
-                    source,
-                    destination_path,
-                    target,
-                    placement,
-                )?);
+    for (source, target) in placements {
+        if !reserved_targets.contains(&target) {
+            if !placed_targets.insert(target.clone()) {
+                return Err(OrganizationError::DuplicateTarget(target));
             }
+            plan.push(placement_operation(
+                source,
+                destination_path,
+                target,
+                placement,
+            )?);
         }
-    } else {
-        let target = target_override.map_or_else(
-            || media_target(source_path, media, &package),
-            |target| Ok(package.join(target)),
-        )?;
-        plan.push(placement_operation(
-            source_path,
-            destination_path,
-            target,
-            placement,
-        )?);
     }
     for operation in metadata_operations {
         plan.push(operation);
     }
     Ok(plan)
+}
+
+fn organize_metadata_operations(
+    metadata_plan: &OutputPlan,
+    package: &Path,
+    episode_targets: &BTreeMap<(u32, u32), PathBuf>,
+    television: bool,
+) -> Result<Vec<OutputOperation>, CoreError> {
+    metadata_plan
+        .operations()
+        .iter()
+        .map(|operation| {
+            if television {
+                let episode_target = operation
+                    .target()
+                    .filter(|path| {
+                        path.extension().is_some_and(|extension| extension == "nfo")
+                            && path
+                                .file_stem()
+                                .and_then(|stem| stem.to_str())
+                                .is_some_and(|stem| stem.starts_with('S'))
+                    })
+                    .and_then(crate::episode_path::episode_number)
+                    .and_then(|episode| episode_targets.get(&episode));
+                if let (Some(target), OutputOperation::WriteBytes { content, .. }) =
+                    (episode_target, operation)
+                {
+                    return OutputOperation::write_bytes(target, content.clone());
+                }
+            }
+            rebase_operation(operation, package)
+        })
+        .collect()
+}
+
+fn colocate_episode_sidecars(
+    placements: &mut [(&PathBuf, PathBuf)],
+    episode_targets: &BTreeMap<(u32, u32), PathBuf>,
+    media: OrganizationMedia<'_>,
+) {
+    let primary = placements
+        .iter()
+        .filter(|(source, _)| {
+            is_primary_media_file(source, media)
+                && crate::episode_path::episode_number(source).is_some()
+        })
+        .map(|(source, target)| ((*source).clone(), target.clone()))
+        .collect::<Vec<_>>();
+    for (source, target) in placements {
+        let extension = source
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !["srt", "ass", "ssa", "sub", "idx", "vtt", "sup", "nfo"].contains(&extension.as_str()) {
+            continue;
+        }
+        if extension == "nfo" {
+            if let Some(nfo) = crate::episode_path::episode_number(source)
+                .and_then(|key| episode_targets.get(&key))
+            {
+                target.clone_from(nfo);
+                continue;
+            }
+        }
+        let Some(name) = source.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let matches = primary
+            .iter()
+            .filter(|(video, _)| {
+                video
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|stem| {
+                        name.strip_prefix(stem)
+                            .is_some_and(|suffix| suffix.starts_with('.'))
+                    })
+            })
+            .collect::<Vec<_>>();
+        if let [(video, destination)] = matches.as_slice() {
+            if let (Some(parent), Some(stem), Some(video_stem)) = (
+                destination.parent(),
+                destination.file_stem().and_then(|stem| stem.to_str()),
+                video.file_stem().and_then(|stem| stem.to_str()),
+            ) {
+                *target = parent.join(format!("{stem}{}", &name[video_stem.len()..]));
+            }
+        }
+    }
 }
 
 fn source_files(root: &Path) -> Result<Vec<PathBuf>, OrganizationError> {
@@ -360,14 +477,11 @@ fn media_target(
             file.set_extension(extension);
             package.join(file)
         }
-        OrganizationMedia::Television(resolved) => {
-            let season = resolved
-                .value
-                .seasons
-                .first()
-                .map_or(0, |season| season.number);
-            package.join(format!("Season {season:02}")).join(file_name)
-        }
+        OrganizationMedia::Television(_) => crate::episode_path::episode_number(source)
+            .map_or_else(
+                || package.join(file_name),
+                |(season, _)| package.join(format!("Season {season:02}")).join(file_name),
+            ),
         OrganizationMedia::Anime(resolved) => {
             let cour = resolved.value.cours.first().map_or(1, |cour| cour.number);
             package.join(format!("Cour {cour:02}")).join(file_name)

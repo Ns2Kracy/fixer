@@ -5,6 +5,7 @@
 mod anime;
 mod book;
 mod content_template;
+mod episode_path;
 mod json;
 mod manifest;
 mod music;

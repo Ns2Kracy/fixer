@@ -78,14 +78,18 @@ describe("jobs workflow", () => {
   it("renders fetched progress and closes the live event connection on unmount", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => json({ schema_version: 1, job })),
+      vi.fn(async () =>
+        json({ schema_version: 1, job: { ...job, state: "scanning" } }),
+      ),
     );
     const view = renderApp("/jobs/7");
 
     expect(
-      await screen.findByRole("heading", { name: "Media/Fixture Movie.mkv" }),
+      await screen.findByRole("heading", { name: "Fixture Movie.mkv" }),
     ).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Job progress" })).toBeVisible();
+    expect(
+      screen.getByText("技术详情 · 处理流水线").closest("details"),
+    ).not.toHaveAttribute("open");
     expect(screen.getByRole("status")).toHaveTextContent("Events: connecting");
     expect(SilentEventSource.instances).toHaveLength(1);
 
@@ -122,6 +126,152 @@ describe("jobs workflow", () => {
     expect(alert).toHaveTextContent("target_exists");
   });
 
+  it("moves from candidate review through plan execution on one detail page", async () => {
+    const planningJob = {
+      ...job,
+      state: "planning",
+      review_decision: {
+        schema_version: 1,
+        candidate_index: 0,
+        accepted_conflict_indexes: [],
+      },
+      plan: {
+        schema_version: 1,
+        operation_count: 1,
+        requires_confirmation: true,
+      },
+    };
+    const completedJob = {
+      ...planningJob,
+      state: "completed",
+      execution: {
+        schema_version: 1,
+        completed_operations: 1,
+        failed_operations: 0,
+      },
+    };
+    let currentJob: typeof job | typeof planningJob | typeof completedJob = job;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/jobs/7/review") && init?.method === "POST") {
+          currentJob = planningJob;
+          return json({ schema_version: 1, job: currentJob });
+        }
+        if (url.includes("/jobs/7/review")) {
+          return json({
+            schema_version: 1,
+            job_id: 7,
+            selected_candidate_index: 0,
+            candidates: [
+              {
+                index: 0,
+                media_kind: "movie",
+                provider: "tmdb",
+                external_id: { namespace: "tmdb", value: "1" },
+                title: "Fixture Movie",
+                score: 100,
+                evidence: [],
+                evidence_truncated: false,
+              },
+            ],
+            candidates_truncated: false,
+            warnings: [],
+            warnings_truncated: false,
+            conflicts: [],
+            conflicts_truncated: false,
+          });
+        }
+        if (url.endsWith("/jobs/7/plan")) {
+          return json({
+            schema_version: 1,
+            job_id: 7,
+            output_root: "/media",
+            operations: [
+              {
+                index: 0,
+                kind: "write",
+                source: null,
+                target: "Fixture Movie/movie.nfo",
+                content_bytes: 128,
+              },
+            ],
+            operations_truncated: false,
+            requires_approval: true,
+          });
+        }
+        if (url.endsWith("/jobs/7/execute") && init?.method === "POST") {
+          currentJob = completedJob;
+          return json({ schema_version: 1, job: currentJob });
+        }
+        return json({ schema_version: 1, job: currentJob });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderApp("/jobs/7");
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Accept candidate and build plan",
+      }),
+    );
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/jobs/7/plan",
+        expect.any(Object),
+      );
+    });
+    expect(
+      await screen.findByRole("heading", {
+        name: "整理预览 · 确认文件去向",
+      }),
+    ).toBeVisible();
+    expect(await screen.findByText("Fixture Movie/movie.nfo")).toBeVisible();
+    await user.click(
+      screen.getByLabelText("I approve these filesystem operations"),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Execute approved plan" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "整理结果" }),
+    ).toBeVisible();
+    expect(screen.getByText(/已完成 1 项操作/u)).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Fixture Movie.mkv" }),
+    ).toBeVisible();
+  });
+
+  it("does not accept a review when no candidates are available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes("/review")
+          ? json({
+              schema_version: 1,
+              job_id: 7,
+              selected_candidate_index: 0,
+              candidates: [],
+              candidates_truncated: false,
+              warnings: [],
+              warnings_truncated: false,
+              conflicts: [],
+              conflicts_truncated: false,
+            })
+          : json({ schema_version: 1, job }),
+      ),
+    );
+    renderApp("/jobs/7");
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Accept candidate and build plan",
+      }),
+    ).toBeDisabled();
+  });
+
   it.each([
     ["queued", false, true],
     ["scanning", false, true],
@@ -139,13 +289,30 @@ describe("jobs workflow", () => {
     async (state, canRetry, canCancel) => {
       vi.stubGlobal(
         "fetch",
-        vi.fn(async () => json({ schema_version: 1, job: { ...job, state } })),
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes("/review"))
+            return json({
+              schema_version: 1,
+              candidates: [],
+              conflicts: [],
+              warnings: [],
+            });
+          if (url.endsWith("/plan"))
+            return json({
+              schema_version: 1,
+              output_root: "/media",
+              operations: [],
+              requires_approval: true,
+            });
+          return json({ schema_version: 1, job: { ...job, state } });
+        }),
       );
       const view = renderApp("/jobs/7");
 
       expect(
         await screen.findByRole("heading", {
-          name: "Media/Fixture Movie.mkv",
+          name: "Fixture Movie.mkv",
         }),
       ).toBeVisible();
       expect(Boolean(screen.queryByRole("button", { name: "Retry job" }))).toBe(
@@ -164,6 +331,28 @@ describe("jobs workflow", () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url === "/api/v1/ingestion-rules") {
+          return json({
+            schema_version: 1,
+            rules: [
+              {
+                id: 4,
+                name: "Stale cached rule",
+                source: { root_id: "root-media", path: "Incoming" },
+                destination: { root_id: "root-media", path: "Library" },
+                media_kind_mode: { fixed: "movie" },
+                placement: "hardlink",
+                path_template_override: null,
+                enabled: true,
+                status: "watching",
+                review_count: 0,
+                last_error: null,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+              },
+            ],
+          });
+        }
         if (url === "/api/v1/library/roots") {
           return json({
             schema_version: 1,
@@ -187,7 +376,25 @@ describe("jobs workflow", () => {
             truncated: false,
           });
         }
+        if (url === "/api/v1/jobs/8")
+          return json({
+            schema_version: 1,
+            job: { ...job, id: 8, state: "queued" },
+          });
         if (init?.method === "POST") {
+          const body = JSON.parse(String(init.body)) as { rule?: string };
+          if (body.rule === "matching") {
+            return json(
+              {
+                error: {
+                  code: "no_matching_folder_rule",
+                  message:
+                    "No enabled Folder rule matches the selected directory",
+                },
+              },
+              422,
+            );
+          }
           return json(
             { schema_version: 1, job: { ...job, id: 8, state: "queued" } },
             202,
@@ -216,34 +423,37 @@ describe("jobs workflow", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    renderApp("/jobs");
+    renderApp("/");
 
-    expect(await screen.findByRole("heading", { name: "Jobs" })).toBeVisible();
-    expect(await screen.findByText("/media/B.mkv")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "整理" })).toBeVisible();
+    expect(await screen.findByText("Fixture Movie.mkv")).toBeVisible();
 
     await user.selectOptions(
       screen.getByLabelText("State filter"),
-      "interrupted",
+      "awaiting_confirmation",
     );
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/v1/jobs?limit=50&state=interrupted",
+        "/api/v1/jobs?limit=50&state=awaiting_confirmation",
         expect.any(Object),
       );
     });
 
     expect(screen.queryByLabelText(/media path/iu)).not.toBeInTheDocument();
-    const createButton = screen.getByRole("button", { name: "Create job" });
-    expect(createButton).toBeDisabled();
-    await user.selectOptions(screen.getByLabelText("Media kind"), "movie");
+    expect(screen.queryByLabelText("Media kind")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Choose source" }));
+    await user.click(screen.getByRole("button", { name: "选择目录并整理" }));
     await user.click(await screen.findByRole("button", { name: "Media" }));
     await user.click(screen.getByRole("button", { name: "Incoming" }));
     await user.click(
       screen.getByRole("button", { name: "Select this folder" }),
     );
 
+    const createButton = await screen.findByRole("button", {
+      name: "开始识别",
+    });
+    expect(createButton).toBeDisabled();
+    await user.selectOptions(screen.getByLabelText("Media kind"), "movie");
     await user.click(
       screen.getByRole("button", { name: "Choose destination" }),
     );
@@ -257,13 +467,15 @@ describe("jobs workflow", () => {
       screen.getByLabelText("Organization method"),
       "hardlink",
     );
-    await user.click(screen.getByLabelText("Allow approved writes"));
+    await user.click(screen.getByRole("checkbox"));
     await user.click(createButton);
 
     await waitFor(() => {
-      const create = fetchMock.mock.calls.find(
-        ([, init]) => init?.method === "POST",
-      );
+      const create = fetchMock.mock.calls.find(([, init]) => {
+        if (init?.method !== "POST") return false;
+        const body = JSON.parse(String(init.body)) as { media_kind?: string };
+        return body.media_kind === "movie";
+      });
       expect(create?.[0]).toBe("/api/v1/jobs");
       expect(JSON.parse(String(create?.[1]?.body))).toEqual({
         media_kind: "movie",

@@ -41,7 +41,7 @@ function NotFound() {
         Page not found
       </h1>
       <Link class={`${buttonStyles()} mt-8`} to="/">
-        Return to Overview
+        返回整理
       </Link>
     </section>
   );

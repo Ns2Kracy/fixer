@@ -83,8 +83,8 @@ describe("administrator authentication", () => {
             expires_at_ms: 4_102_444_800_000,
           });
         }
-        if (url === "/api/v1/health") {
-          return json({ schema_version: 1, status: "ok", version: "0.1.0" });
+        if (url === "/api/v1/jobs?limit=50") {
+          return json({ schema_version: 1, jobs: [], has_more: false });
         }
         throw new Error(`Unexpected request: ${url}`);
       },
@@ -119,7 +119,7 @@ describe("administrator authentication", () => {
     );
     expect(
       await screen.findByRole("heading", {
-        name: "Overview",
+        name: "整理",
       }),
     ).toBeVisible();
   });
@@ -165,8 +165,8 @@ describe("administrator authentication", () => {
           expires_at_ms: 4_102_444_800_000,
         });
       }
-      if (url === "/api/v1/health") {
-        return json({ schema_version: 1, status: "ok", version: "0.1.0" });
+      if (url === "/api/v1/jobs?limit=50") {
+        return json({ schema_version: 1, jobs: [], has_more: false });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -206,7 +206,7 @@ describe("administrator authentication", () => {
     );
     expect(
       await screen.findByRole("heading", {
-        name: "Overview",
+        name: "整理",
       }),
     ).toBeVisible();
   });

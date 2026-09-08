@@ -21,7 +21,7 @@ pub(crate) fn router() -> Router {
 }
 
 pub(crate) fn job_router(runtime: crate::jobs::JobRuntime) -> Router {
-    router().merge(jobs::router(runtime, None))
+    router().merge(jobs::router(runtime, None, None))
 }
 
 pub(crate) fn workspace_router(state: crate::WorkspaceState) -> Router {
@@ -66,7 +66,11 @@ fn secure_router(
             "/providers",
             get(providers::get).fallback(crate::api::error::method_not_allowed),
         )
-        .merge(jobs::router(runtime, workspace_state.clone()))
+        .merge(jobs::router(
+            runtime,
+            workspace_state.clone(),
+            ingestion_runtime.clone(),
+        ))
         .merge(auth::protected_router(auth_state.clone()));
     if let Some(workspace_state) = workspace_state {
         protected = protected.merge(workspace::router(workspace_state));

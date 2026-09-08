@@ -16,8 +16,12 @@ export const Route = createFileRoute("/jobs/$jobId/plan")({
 
 function PlanPage() {
   const params = Route.useParams();
+  return <PlanPanel jobId={Number(params().jobId)} embedded={false} />;
+}
+
+export function PlanPanel(props: { jobId: number; embedded: boolean }) {
   const queryClient = useQueryClient();
-  const jobId = () => Number(params().jobId);
+  const jobId = () => props.jobId;
   const [approved, setApproved] = createSignal(false);
   const executionNonce = crypto.randomUUID();
 
@@ -39,14 +43,24 @@ function PlanPage() {
 
   return (
     <div class="mx-auto max-w-[1180px]">
-      <Link
-        class="mb-8 inline-block text-xs font-bold uppercase tracking-[0.06em] text-muted underline decoration-1 underline-offset-4 hover:text-moss"
-        to="/jobs/$jobId/review"
-        params={{ jobId: params().jobId }}
+      <Show
+        when={!props.embedded}
+        fallback={
+          <h2 class="mt-8 text-xl font-semibold">整理预览 · 确认文件去向</h2>
+        }
       >
-        ← Metadata review
-      </Link>
-      <PageHeader eyebrow={<>Job / #{params().jobId}</>} title="Output plan" />
+        <Link
+          class="mb-8 inline-block text-xs font-bold uppercase tracking-[0.06em] text-muted underline decoration-1 underline-offset-4 hover:text-moss"
+          to="/jobs/$jobId/review"
+          params={{ jobId: String(jobId()) }}
+        >
+          ← Metadata review
+        </Link>
+        <PageHeader
+          eyebrow={<>Job / #{String(jobId())}</>}
+          title="Output plan"
+        />
+      </Show>
       <Show when={plan.isPending || job.isPending}>
         <LoadingState>Loading output operations…</LoadingState>
       </Show>

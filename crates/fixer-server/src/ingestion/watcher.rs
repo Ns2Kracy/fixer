@@ -525,7 +525,10 @@ fn resolve_rule(
     })
 }
 
-fn fingerprint(source: &Path, item: &Path) -> Result<SourceFingerprint, SupervisorError> {
+pub(crate) fn fingerprint(
+    source: &Path,
+    item: &Path,
+) -> Result<SourceFingerprint, SupervisorError> {
     let relative = item
         .strip_prefix(source)
         .map_err(|_| SupervisorError::EscapedSourceRoot)?;
@@ -586,7 +589,7 @@ fn is_temporary_path(path: &Path) -> bool {
 }
 
 #[derive(Debug, Error)]
-enum SupervisorError {
+pub(crate) enum SupervisorError {
     #[error(transparent)]
     Discovery(#[from] DiscoveryError),
     #[error(transparent)]

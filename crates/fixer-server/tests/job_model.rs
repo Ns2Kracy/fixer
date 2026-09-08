@@ -221,3 +221,21 @@ fn job_state_transitions_follow_the_persistent_worker_lifecycle() {
         }
     }
 }
+
+#[test]
+fn provider_enrichment_auto_review_reasons_round_trip() {
+    use fixer_server::jobs::model::AutoReviewReason;
+    for (reason, text) in [
+        (
+            AutoReviewReason::ProviderEnrichmentFailed,
+            "provider_enrichment_failed",
+        ),
+        (
+            AutoReviewReason::DiagnosticsTruncated,
+            "diagnostics_truncated",
+        ),
+    ] {
+        assert_eq!(serde_json::to_value(reason).unwrap(), json!(text));
+        assert_round_trip(&reason);
+    }
+}

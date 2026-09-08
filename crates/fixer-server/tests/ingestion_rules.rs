@@ -159,6 +159,100 @@ async fn one_off_jobs_resolve_directory_references_and_require_safe_pairs() {
 }
 
 #[tokio::test]
+async fn rule_based_jobs_use_the_closest_rule_and_are_race_idempotent() {
+    let app = TestApp::new().await;
+    std::fs::write(
+        PathBuf::from(&app.root_path).join("incoming/nested/movie.mkv"),
+        b"nested movie",
+    )
+    .unwrap();
+
+    let parent = app
+        .request("POST", "/api/v1/ingestion-rules", Some(app.rule_request()))
+        .await;
+    assert_eq!(parent.status(), StatusCode::CREATED);
+
+    let mut nested_rule = app.rule_request();
+    nested_rule["name"] = json!("Nested movies");
+    nested_rule["source"]["path"] = json!("incoming/nested");
+    nested_rule["placement"] = json!("hardlink");
+    nested_rule["path_template_override"] = json!("{{ title | sanitize }}");
+    let nested = app
+        .request("POST", "/api/v1/ingestion-rules", Some(nested_rule))
+        .await;
+    assert_eq!(nested.status(), StatusCode::CREATED);
+    let rule_id = response_json(nested).await["rule"]["id"].as_i64().unwrap();
+
+    let request = json!({
+        "rule": "matching",
+        "source": {"root_id": app.root_id, "path": "incoming/nested"}
+    });
+    let (first, second) = tokio::join!(
+        app.request("POST", "/api/v1/jobs", Some(request.clone())),
+        app.request("POST", "/api/v1/jobs", Some(request)),
+    );
+    assert_eq!(first.status(), StatusCode::ACCEPTED);
+    assert_eq!(second.status(), StatusCode::ACCEPTED);
+    let created = response_json(first).await;
+    let duplicate = response_json(second).await;
+    app.assert_safe(&created);
+    assert_eq!(duplicate["job"]["id"], created["job"]["id"]);
+    assert_eq!(created["job"]["input"]["media_kind"], "movie");
+    assert!(
+        created["job"]["input"]["input_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("incoming/nested/movie.mkv")
+    );
+    assert_eq!(created["job"]["input"]["apply"], true);
+    assert_eq!(
+        created["job"]["input"]["organization"]["placement"],
+        "hardlink"
+    );
+    assert_eq!(
+        created["job"]["input"]["organization"]["path_template"],
+        "{{ title | sanitize }}"
+    );
+    assert_eq!(
+        created["job"]["input"]["organization"]["origin_rule_id"],
+        rule_id
+    );
+    assert_eq!(
+        created["job"]["input"]["organization"]["auto_execute"],
+        false
+    );
+
+    let override_request = app
+        .request(
+            "POST",
+            "/api/v1/jobs",
+            Some(json!({
+                "rule": "matching",
+                "source": {"root_id": app.root_id, "path": "incoming/nested"},
+                "media_kind": "movie"
+            })),
+        )
+        .await;
+    assert_eq!(override_request.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        response_json(override_request).await["job"]["id"],
+        created["job"]["id"]
+    );
+
+    let unmatched = app
+        .request(
+            "POST",
+            "/api/v1/jobs",
+            Some(json!({
+                "rule": "matching",
+                "source": {"root_id": app.root_id, "path": "library"}
+            })),
+        )
+        .await;
+    assert_eq!(unmatched.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn authenticated_rule_crud_and_scan_use_opaque_directory_references() {
     let app = TestApp::new().await;
     let mut notifications = app.notifications.subscribe();

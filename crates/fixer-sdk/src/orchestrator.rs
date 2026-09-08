@@ -352,11 +352,7 @@ async fn fetch_metadata(
     mut warnings: Vec<ResolutionWarning>,
     identity_ids: &[ExternalId],
 ) -> Result<(Vec<SourcedMetadata>, Vec<ResolutionWarning>), SdkError> {
-    let candidates = if matches!(media_kind, MediaKind::Television | MediaKind::Anime) {
-        candidate_group(candidates, identity_ids)
-    } else {
-        candidates.iter().collect()
-    };
+    let candidates = candidate_group(candidates, identity_ids);
     let futures = candidates.into_iter().map(|candidate| async move {
         let provider = fixer
             .providers
@@ -401,6 +397,20 @@ async fn fetch_metadata(
     Ok((documents, warnings))
 }
 
+/// Retains the search set, anchored on the user's explicit choice rather than rank zero.
+pub fn select_candidates(
+    mut candidates: Vec<Candidate>,
+    index: usize,
+) -> Result<Vec<Candidate>, SdkError> {
+    let length = candidates.len();
+    if index >= length {
+        return Err(SdkError::CandidateOutOfBounds { index, length });
+    }
+    let selected = candidates.remove(index);
+    candidates.insert(0, selected);
+    Ok(candidates)
+}
+
 fn candidate_group<'a>(
     candidates: &'a [Candidate],
     identity_ids: &[ExternalId],
@@ -408,16 +418,52 @@ fn candidate_group<'a>(
     let Some(primary) = candidates.first() else {
         return Vec::new();
     };
+    if identity_ids
+        .iter()
+        .any(|id| id.namespace == primary.external_id().namespace && id != primary.external_id())
+    {
+        return vec![primary];
+    }
+    // Query IDs describe the local source, not an unrelated explicit remote selection.
+    let anchored_ids =
+        if primary.provider().as_str() == "local" || identity_ids.contains(primary.external_id()) {
+            identity_ids
+        } else {
+            &[]
+        };
+    let same_local_movie = |candidate: &&Candidate| {
+        primary.media_kind() == MediaKind::Movie
+            && primary.provider().as_str() == "local"
+            && candidate.provider() == primary.provider()
+            && same_candidate_facts(primary, candidate)
+    };
+    let compatible = |candidate: &&Candidate| {
+        let local_movie = same_local_movie(candidate);
+        (local_movie || candidate.provider() != primary.provider())
+            && candidate.media_kind() == primary.media_kind()
+            && !anchored_ids.iter().any(|id| {
+                id.namespace == candidate.external_id().namespace && id != candidate.external_id()
+            })
+            && (local_movie
+                || anchored_ids.contains(candidate.external_id())
+                || same_work(primary, candidate))
+    };
+    let matches = candidates
+        .iter()
+        .skip(1)
+        .filter(compatible)
+        .collect::<Vec<_>>();
     let mut selected = vec![primary];
-    for candidate in candidates.iter().skip(1) {
-        if selected
-            .iter()
-            .any(|item| item.provider() == candidate.provider())
+    for candidate in &matches {
+        // Never choose an arbitrary remake or alternate work from the same provider.
+        if same_local_movie(candidate)
+            || matches
+                .iter()
+                .filter(|other| other.provider() == candidate.provider())
+                .count()
+                == 1
         {
-            continue;
-        }
-        if identity_ids.contains(candidate.external_id()) || same_work(primary, candidate) {
-            selected.push(candidate);
+            selected.push(*candidate);
         }
     }
     selected
@@ -427,9 +473,18 @@ fn same_work(left: &Candidate, right: &Candidate) -> bool {
     if left.external_id() == right.external_id() {
         return true;
     }
+    if left.external_id().namespace == right.external_id().namespace {
+        return false;
+    }
+    same_candidate_facts(left, right)
+}
+
+fn same_candidate_facts(left: &Candidate, right: &Candidate) -> bool {
     let (left_title, left_year, left_sequence) = candidate_match_fields(left);
     let (right_title, right_year, right_sequence) = candidate_match_fields(right);
-    normalize_title(left_title) == normalize_title(right_title)
+    let title = normalize_title(left_title);
+    !title.is_empty()
+        && title == normalize_title(right_title)
         && (left_year.is_none() || right_year.is_none() || left_year == right_year)
         && (left_sequence.is_none() || right_sequence.is_none() || left_sequence == right_sequence)
 }
@@ -459,4 +514,87 @@ fn merge_policy(fixer: &Fixer) -> MergePolicy {
             .iter()
             .map(|provider| provider.descriptor().id().clone()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candidate(provider: &str, id: &str, title: &str, year: Option<u16>) -> Candidate {
+        fixer_core::TelevisionCandidate::new(
+            fixer_core::ProviderId::new(provider).unwrap(),
+            ExternalId::new(provider, id).unwrap(),
+            title,
+            year,
+        )
+        .map(Candidate::Television)
+        .unwrap()
+    }
+
+    #[test]
+    fn selected_group_enriches_only_unique_compatible_works() {
+        let local = candidate("local", "show", "Show", None);
+        let remote = candidate("tmdb", "1", "Show", Some(2020));
+        let unrelated = candidate("tmdb", "2", "Unrelated", Some(2020));
+        let candidates = vec![local.clone(), unrelated, remote.clone()];
+        assert_eq!(
+            candidate_group(&candidates, &[]),
+            vec![&candidates[0], &candidates[2]]
+        );
+        let candidates = vec![
+            local.clone(),
+            remote.clone(),
+            candidate("tmdb", "3", "Show", Some(1990)),
+        ];
+        assert_eq!(candidate_group(&candidates, &[]), vec![&candidates[0]]);
+        let candidates = vec![
+            candidate("local", "show", "Show", Some(1990)),
+            remote.clone(),
+        ];
+        assert_eq!(candidate_group(&candidates, &[]), vec![&candidates[0]]);
+        let candidates = vec![remote, local];
+        let ids = vec![ExternalId::new("tmdb", "3").unwrap()];
+        assert_eq!(candidate_group(&candidates, &ids), vec![&candidates[0]]);
+    }
+
+    fn local_movie(provider: &str, id: &str, title: &str, year: Option<u16>) -> Candidate {
+        fixer_core::MovieCandidate::new(
+            fixer_core::ProviderId::new(provider).unwrap(),
+            ExternalId::new(provider, id).unwrap(),
+            title,
+            year,
+        )
+        .map(Candidate::Movie)
+        .unwrap()
+    }
+
+    #[test]
+    fn selected_group_keeps_matching_local_movie_documents_for_conflict_detection() {
+        let candidates = vec![
+            local_movie("local", "one", "Conflicted Movie", Some(2020)),
+            local_movie("local", "two", "Conflicted Movie", Some(2020)),
+            local_movie("local", "remake", "Conflicted Movie", Some(1990)),
+        ];
+        assert_eq!(
+            candidate_group(&candidates, &[]),
+            vec![&candidates[0], &candidates[1]]
+        );
+    }
+
+    #[test]
+    fn selected_group_obeys_exact_ids_and_explicit_nonzero_choice() {
+        let candidates = vec![
+            candidate("local", "show", "Local title", None),
+            candidate("tmdb", "1", "Translated title", Some(2020)),
+            candidate("tmdb", "2", "Other", None),
+        ];
+        let ids = vec![ExternalId::new("tmdb", "1").unwrap()];
+        assert_eq!(
+            candidate_group(&candidates, &ids),
+            vec![&candidates[0], &candidates[1]]
+        );
+        let selected = select_candidates(candidates, 2).unwrap();
+        assert_eq!(candidate_group(&selected, &ids), vec![&selected[0]]);
+        assert!(select_candidates(selected, 3).is_err());
+    }
 }

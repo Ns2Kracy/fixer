@@ -310,16 +310,32 @@ export interface CreateDirectoryJobRequest {
   apply: boolean;
 }
 
+export interface CreateRuleJobRequest {
+  rule: "matching";
+  source: DirectoryRef;
+  media_kind?: MediaKind;
+}
+
 export interface CreatePathJobRequest {
   media_kind: MediaKind;
   input_path: string;
   apply: boolean;
 }
 
-export type CreateJobRequest = CreateDirectoryJobRequest | CreatePathJobRequest;
+export type CreateJobRequest =
+  | CreateDirectoryJobRequest
+  | CreateRuleJobRequest
+  | CreatePathJobRequest;
 
 export interface JobInputDto extends CreatePathJobRequest {
   schema_version: SchemaVersion;
+  organization?: {
+    destination_path: string;
+    placement: IngestionPlacement;
+    origin_rule_id?: number;
+    auto_execute: boolean;
+    path_template?: string;
+  };
 }
 
 export interface ProgressSummary {
@@ -340,6 +356,8 @@ export interface ReviewSummary {
     | "confidence_below_threshold"
     | "tied_top_candidates"
     | "metadata_conflicts"
+    | "provider_enrichment_failed"
+    | "diagnostics_truncated"
     | "invalid_plan"
     | "destination_collision";
 }

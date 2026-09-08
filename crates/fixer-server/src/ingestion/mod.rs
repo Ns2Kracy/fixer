@@ -8,11 +8,18 @@ use tokio::sync::broadcast;
 
 use crate::{
     FsPolicy, FsPolicyError, JobRuntime, SqliteJobStore, WorkspaceState, WorkspaceStateError,
-    ingestion::model::{
-        IngestionRule, IngestionRuleId, IngestionRuleInput, IngestionSourceId,
-        IngestionSourceReview, RuleDirectory, RuleStatus,
+    ingestion::{
+        discovery::{DiscoveryError, DiscoveryOutcome, discover},
+        model::{
+            IngestionRule, IngestionRuleId, IngestionRuleInput, IngestionSourceId,
+            IngestionSourceReview, MediaKindMode, RuleDirectory, RuleStatus,
+        },
+        watcher::{SupervisorError, fingerprint},
     },
-    jobs::model::{JobInputDto, JobMediaKind, JobOrganizationDto},
+    jobs::{
+        RuntimeError,
+        model::{JobInputDto, JobMediaKind, JobOrganizationDto},
+    },
     store::{JobRecord, StoreError},
     workspace::DirectoryRef,
 };
@@ -232,6 +239,97 @@ impl IngestionRuntime {
             .map_err(|_| IngestionRuntimeError::Jobs)
     }
 
+    pub(crate) async fn create_rule_job(
+        &self,
+        selected: &DirectoryRef,
+        requested_kind: Option<JobMediaKind>,
+    ) -> Result<JobRecord, RuleJobError> {
+        let selected = self.workspace.resolve_directory(selected)?;
+        let mut matching_rule = None::<(IngestionRule, std::path::PathBuf)>;
+        for rule in self.store.list_ingestion_rules(RULE_LIST_LIMIT).await? {
+            if !rule.enabled() {
+                continue;
+            }
+            let Ok(configured_source) = self.workspace.resolve_directory(&DirectoryRef {
+                root_id: rule.source().root_id().to_owned(),
+                path: rule.source().relative_path().to_owned(),
+            }) else {
+                continue;
+            };
+            if !selected
+                .canonical_path
+                .starts_with(&configured_source.canonical_path)
+            {
+                continue;
+            }
+            let depth = configured_source.canonical_path.components().count();
+            let is_deeper = matching_rule
+                .as_ref()
+                .is_none_or(|(_, path)| depth > path.components().count());
+            if is_deeper {
+                matching_rule = Some((rule, configured_source.canonical_path));
+            }
+        }
+        let (rule, configured_source) = matching_rule.ok_or(RuleJobError::NoMatchingRule)?;
+
+        let mode = match (rule.media_kind_mode(), requested_kind) {
+            (MediaKindMode::Auto, Some(kind)) => MediaKindMode::Fixed(kind),
+            (mode, None) => mode,
+            (MediaKindMode::Fixed(configured), Some(requested)) if configured == requested => {
+                MediaKindMode::Fixed(configured)
+            }
+            (MediaKindMode::Fixed(_), Some(_)) => {
+                return Err(RuleJobError::InvalidMediaKindOverride);
+            }
+        };
+        let destination = self.workspace.resolve_directory(&DirectoryRef {
+            root_id: rule.destination().root_id().to_owned(),
+            path: rule.destination().relative_path().to_owned(),
+        })?;
+        let policy = FsPolicy::new([&selected.canonical_path, &destination.canonical_path])?;
+        let (selected_path, destination_path) = policy
+            .validate_directory_pair(&selected.canonical_path, &destination.canonical_path)?;
+
+        let scan_path = selected_path.clone();
+        let mut items = tokio::task::spawn_blocking(move || discover(scan_path, mode)).await??;
+        items.retain(|item| !matches!(item.outcome(), DiscoveryOutcome::Ignored));
+        match items.len() {
+            0 => return Err(RuleJobError::NoWork),
+            1 => {}
+            _ => return Err(RuleJobError::MultipleWorks),
+        }
+        let item = items.pop().ok_or(RuleJobError::NoWork)?;
+        let media_kind = item.media_kind().ok_or(RuleJobError::AmbiguousMedia)?;
+        let input_path = item.source_root().to_path_buf();
+
+        let fingerprint_path = input_path.clone();
+        let source_fingerprint =
+            tokio::task::spawn_blocking(move || fingerprint(&configured_source, &fingerprint_path))
+                .await??;
+        let reservation = self
+            .store
+            .reserve_source(rule.id(), source_fingerprint)
+            .await?;
+        let source = reservation.source();
+        if let Some(job_id) = source.job_id() {
+            return self.jobs.get(job_id).await.map_err(Into::into);
+        }
+
+        let organization = JobOrganizationDto {
+            destination_path: destination_path.to_string_lossy().into_owned(),
+            placement: rule.placement(),
+            path_template: rule.path_template_override().map(str::to_owned),
+            origin_rule_id: Some(rule.id().get()),
+            auto_execute: false,
+        };
+        let input = JobInputDto::new(media_kind, input_path.to_string_lossy().into_owned(), true)
+            .with_organization(organization);
+        self.jobs
+            .create_for_source(source.id(), input)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn request_rescan(&self, id: IngestionRuleId) -> Result<bool, IngestionRuntimeError> {
         let exists = self
             .store
@@ -269,6 +367,34 @@ impl IngestionRuntime {
             .map_err(IngestionRuntimeError::Model)?;
         Ok((source, destination))
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RuleJobError {
+    #[error("no enabled folder rule contains the selected directory")]
+    NoMatchingRule,
+    #[error("selected directory contains no recognizable media work")]
+    NoWork,
+    #[error("selected directory contains more than one media work")]
+    MultipleWorks,
+    #[error("selected media work matches more than one media kind")]
+    AmbiguousMedia,
+    #[error("media kind cannot override a fixed folder rule")]
+    InvalidMediaKindOverride,
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error(transparent)]
+    Workspace(#[from] WorkspaceStateError),
+    #[error(transparent)]
+    FilesystemPolicy(#[from] FsPolicyError),
+    #[error(transparent)]
+    Discovery(#[from] DiscoveryError),
+    #[error(transparent)]
+    Fingerprint(#[from] SupervisorError),
+    #[error(transparent)]
+    Join(#[from] tokio::task::JoinError),
+    #[error(transparent)]
+    Runtime(#[from] RuntimeError),
 }
 
 #[derive(Debug, thiserror::Error)]

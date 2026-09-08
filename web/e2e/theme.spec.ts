@@ -74,7 +74,9 @@ test("theme follows the system, persists overrides, and stays responsive", async
     "rgb(243, 240, 232)",
   );
   await expect(page.locator("body")).toHaveCSS("color", "rgb(29, 33, 28)");
-  const manageFolders = page.getByRole("link", { name: "Manage folders" });
+  const manageFolders = page.getByRole("link", {
+    name: "配置自动整理目录 →",
+  });
   await expect(manageFolders).toHaveCSS("background-color", "rgb(29, 33, 28)");
   await expect(manageFolders).toHaveCSS("color", "rgb(243, 240, 232)");
   await page.reload();
@@ -91,7 +93,7 @@ test("theme follows the system, persists overrides, and stays responsive", async
     await page.setViewportSize({ width, height: 900 });
     await expect(
       page.getByRole("heading", {
-        name: "Overview",
+        name: "整理",
       }),
     ).toBeVisible();
     expect(

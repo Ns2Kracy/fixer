@@ -83,15 +83,10 @@ impl AnimeSearch {
 
     /// Selects one candidate explicitly.
     pub fn select(self, index: usize) -> Result<SelectedAnime, SdkError> {
-        let length = self.candidates.len();
-        let candidate = self
-            .candidates
-            .into_iter()
-            .nth(index)
-            .ok_or(SdkError::CandidateOutOfBounds { index, length })?;
+        let candidates = orchestrator::select_candidates(self.candidates, index)?;
         Ok(SelectedAnime {
             fixer: self.fixer,
-            candidate,
+            candidates,
             warnings: self.warnings,
             external_ids: self.external_ids,
         })
@@ -101,7 +96,7 @@ impl AnimeSearch {
 /// One explicit anime candidate ready to fetch.
 pub struct SelectedAnime {
     fixer: Fixer,
-    candidate: Candidate,
+    candidates: Vec<Candidate>,
     warnings: Vec<ResolutionWarning>,
     external_ids: Vec<ExternalId>,
 }
@@ -111,7 +106,7 @@ impl SelectedAnime {
     pub async fn fetch_selected(self) -> Result<Resolved<AnimeSeries>, SdkError> {
         orchestrator::fetch_anime(
             &self.fixer,
-            &[self.candidate],
+            &self.candidates,
             self.warnings,
             &self.external_ids,
         )

@@ -51,10 +51,7 @@ impl HttpClient for ReqwestHttpClient {
             if !request.body.is_empty() {
                 outgoing = outgoing.body(request.body);
             }
-            let response = outgoing
-                .send()
-                .await
-                .map_err(|error| map_reqwest_error(&error))?;
+            let response = outgoing.send().await.map_err(map_reqwest_error)?;
             let status = response.status().as_u16();
             if !(200..300).contains(&status) {
                 return Err(HttpError::Status { status });
@@ -64,11 +61,7 @@ impl HttpClient for ReqwestHttpClient {
                 .iter()
                 .filter_map(|(name, value)| Header::new(name.as_str(), value.to_str().ok()?).ok())
                 .collect();
-            let body = response
-                .bytes()
-                .await
-                .map_err(|error| map_reqwest_error(&error))?
-                .to_vec();
+            let body = response.bytes().await.map_err(map_reqwest_error)?.to_vec();
             Ok(HttpResponse {
                 status,
                 headers,
@@ -78,12 +71,35 @@ impl HttpClient for ReqwestHttpClient {
     }
 }
 
-fn map_reqwest_error(error: &reqwest::Error) -> HttpError {
+fn map_reqwest_error(error: reqwest::Error) -> HttpError {
+    let error = error.without_url();
     if error.is_timeout() {
         HttpError::Timeout
     } else if error.is_builder() {
         HttpError::InvalidMessage(error.to_string())
     } else {
         HttpError::Transport(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn transport_errors_do_not_expose_credential_urls() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let error = client
+            .get(format!(
+                "http://{address}/?api_key=credential-must-not-leak"
+            ))
+            .send()
+            .await
+            .unwrap_err();
+        let error = map_reqwest_error(error);
+        assert!(!format!("{error:?} {error}").contains("credential-must-not-leak"));
     }
 }

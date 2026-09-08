@@ -2,6 +2,7 @@
 mod config;
 mod error;
 mod movie;
+mod request;
 mod television;
 
 pub use config::TmdbConfig;

@@ -102,7 +102,18 @@ async fn local_episode_facts_merge_with_tmdb_series_and_episode_metadata() {
         .external_id(ExternalId::new("imdb", "tt0944947").unwrap())
         .external_id(ExternalId::new("tmdb", "1399").unwrap())
         .ordering(OrderingScheme::Aired)
-        .resolve()
+        .search()
+        .await
+        .unwrap();
+    let local_index = resolved
+        .candidates()
+        .iter()
+        .position(|candidate| candidate.provider().as_str() == "local")
+        .unwrap();
+    let resolved = resolved
+        .select(local_index)
+        .unwrap()
+        .fetch_selected()
         .await
         .unwrap();
 

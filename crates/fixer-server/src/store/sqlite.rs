@@ -577,6 +577,24 @@ impl SqliteJobStore {
         decode_ingestion_source(&row)
     }
 
+    pub async fn get_source_job(
+        &self,
+        source_id: IngestionSourceId,
+    ) -> Result<Option<JobRecord>, StoreError> {
+        let job_id = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT job_id FROM ingestion_sources WHERE id = ?",
+        )
+        .bind(source_id.get())
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten();
+        let Some(job_id) = job_id else {
+            return Ok(None);
+        };
+        let job_id = JobId::from_database(job_id)?;
+        self.get_job(job_id).await.map(Some)
+    }
+
     pub async fn create_job_for_source(
         &self,
         source_id: IngestionSourceId,

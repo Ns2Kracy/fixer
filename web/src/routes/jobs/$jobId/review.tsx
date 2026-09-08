@@ -19,9 +19,13 @@ export const Route = createFileRoute("/jobs/$jobId/review")({
 
 function ReviewPage() {
   const params = Route.useParams();
+  return <ReviewPanel jobId={Number(params().jobId)} embedded={false} />;
+}
+
+export function ReviewPanel(props: { jobId: number; embedded: boolean }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const jobId = () => Number(params().jobId);
+  const jobId = () => props.jobId;
   const [requestedIndex, setRequestedIndex] = createSignal<number>();
   const [acknowledged, setAcknowledged] = createSignal<Set<number>>(new Set());
 
@@ -34,9 +38,10 @@ function ReviewPage() {
     mutationFn: (request: ReviewJobRequest) => api.reviewJob(jobId(), request),
     onSuccess: (result) => {
       queryClient.setQueryData(["job", jobId()], result);
+      if (props.embedded) return;
       void navigate({
         to: "/jobs/$jobId/plan",
-        params: { jobId: params().jobId },
+        params: { jobId: String(jobId()) },
       });
     },
   }));
@@ -65,17 +70,24 @@ function ReviewPage() {
 
   return (
     <div class="mx-auto max-w-[1180px]">
-      <Link
-        class="mb-8 inline-block text-xs font-bold uppercase tracking-[0.06em] text-muted underline decoration-1 underline-offset-4 hover:text-moss"
-        to="/jobs/$jobId"
-        params={{ jobId: params().jobId }}
+      <Show
+        when={!props.embedded}
+        fallback={
+          <h2 class="mt-8 text-xl font-semibold">识别结果 · 选择匹配作品</h2>
+        }
       >
-        ← Job #{params().jobId}
-      </Link>
-      <PageHeader
-        eyebrow={<>Job / #{params().jobId}</>}
-        title="Review metadata"
-      />
+        <Link
+          class="mb-8 inline-block text-xs font-bold uppercase tracking-[0.06em] text-muted underline decoration-1 underline-offset-4 hover:text-moss"
+          to="/jobs/$jobId"
+          params={{ jobId: String(jobId()) }}
+        >
+          ← Job #{String(jobId())}
+        </Link>
+        <PageHeader
+          eyebrow={<>Job / #{String(jobId())}</>}
+          title="Review metadata"
+        />
+      </Show>
       <Show when={review.isPending}>
         <LoadingState>Loading candidate evidence…</LoadingState>
       </Show>
@@ -123,6 +135,11 @@ function ReviewPage() {
               selectedIndex={selectedIndex()}
               onSelect={selectCandidate}
             />
+            <Show when={data().candidates.length === 0}>
+              <Notice class="my-4" tone="danger" role="alert">
+                没有可确认的匹配作品。请检查文件名与数据源设置后重试。
+              </Notice>
+            </Show>
             <Show when={data().candidates_truncated}>
               <Notice class="my-4" tone="danger">
                 Additional candidates were omitted by the server. Compare and
@@ -171,6 +188,7 @@ function ReviewPage() {
                 type="button"
                 disabled={
                   accept.isPending ||
+                  data().candidates.length === 0 ||
                   !allConflictsAcknowledged() ||
                   data().conflicts_truncated
                 }

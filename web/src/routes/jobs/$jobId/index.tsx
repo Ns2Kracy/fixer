@@ -5,10 +5,12 @@ import { Show, createSignal, onSettled } from "solid-js";
 import { JobStatus } from "../../../components/job-status";
 import { ProgressTimeline } from "../../../components/progress-timeline";
 import { RequestError } from "../../../components/request-error";
-import { Button, buttonStyles } from "../../../components/ui/button";
+import { Button } from "../../../components/ui/button";
 import { LoadingState } from "../../../components/ui/loading-state";
-import { SectionHeader } from "../../../components/ui/section-header";
+import { ReviewPanel } from "./review";
+import { PlanPanel } from "./plan";
 import { api, type JobState } from "../../../lib/api";
+import { displayPathName } from "../../../lib/path";
 import {
   connectJobEvents,
   type JobEventConnectionState,
@@ -67,7 +69,7 @@ function JobDetailPage() {
         class="mb-8 inline-block text-xs font-bold uppercase tracking-[0.06em] text-muted underline decoration-1 underline-offset-4 hover:text-moss"
         to="/jobs"
       >
-        ← All jobs
+        ← 整理记录
       </Link>
       <Show when={job.isPending}>
         <LoadingState>Loading job…</LoadingState>
@@ -81,10 +83,10 @@ function JobDetailPage() {
             <header class="flex items-end justify-between gap-12 border-b border-line pt-4 pb-12 max-[900px]:flex-col max-[900px]:items-start max-[900px]:gap-6">
               <div>
                 <p class="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.15em] text-muted">
-                  Job / #{current().id}
+                  整理 #{current().id}
                 </p>
-                <h1 class="m-0 max-w-[900px] font-serif text-[clamp(2.6rem,5vw,4.8rem)] leading-[0.94] font-medium tracking-[-0.04em] wrap-anywhere">
-                  {current().input.input_path}
+                <h1 class="m-0 max-w-[900px] text-3xl leading-tight font-semibold wrap-anywhere">
+                  {displayPathName(current().input.input_path)}
                 </h1>
                 <p class="mt-6 mb-0 max-w-[680px] text-muted">
                   {current().input.media_kind} ·{" "}
@@ -104,20 +106,53 @@ function JobDetailPage() {
                 </small>
               </div>
             </header>
-            <section
-              class="mt-12 border-t-2 border-ink pt-8"
-              aria-labelledby="progress-title"
-            >
-              <SectionHeader
-                eyebrow="Pipeline"
-                title="Job progress"
-                titleId="progress-title"
-              />
+            <dl class="my-6 grid gap-4 text-sm">
+              <div>
+                <dt class="text-muted">源文件</dt>
+                <dd class="m-0 break-all">{current().input.input_path}</dd>
+              </div>
+              <Show when={current().input.organization}>
+                {(organization) => (
+                  <div>
+                    <dt class="text-muted">
+                      目标目录 · {organization().placement}
+                    </dt>
+                    <dd class="m-0 break-all">
+                      {organization().destination_path}
+                    </dd>
+                  </div>
+                )}
+              </Show>
+            </dl>
+            <Show when={current().state === "awaiting_confirmation"}>
+              <ReviewPanel jobId={jobId()} embedded />
+            </Show>
+            <Show when={current().state === "planning"}>
+              <PlanPanel jobId={jobId()} embedded />
+            </Show>
+            <Show when={current().execution}>
+              {(execution) => (
+                <section class="my-8 border-y border-line py-6">
+                  <h2 class="text-xl font-semibold">整理结果</h2>
+                  <p>
+                    已完成 {execution().completed_operations} 项操作 · 失败{" "}
+                    {execution().failed_operations} 项
+                  </p>
+                  <p class="text-sm text-muted">
+                    这是已保存的执行汇总。此版本尚未保存逐文件历史及完整元数据快照。
+                  </p>
+                </section>
+              )}
+            </Show>
+            <details class="my-8 border-y border-line py-4">
+              <summary class="cursor-pointer text-sm font-semibold">
+                技术详情 · 处理流水线
+              </summary>
               <ProgressTimeline
                 state={current().state}
                 progress={current().progress}
               />
-            </section>
+            </details>
             <Show when={current().execution?.failure}>
               {(failure) => (
                 <section
@@ -145,24 +180,6 @@ function JobDetailPage() {
               class="mt-12 flex items-start gap-4 border-t border-line pt-8 max-[640px]:flex-col"
               aria-label="Job actions"
             >
-              <Show when={current().state === "awaiting_confirmation"}>
-                <Link
-                  class={buttonStyles()}
-                  to="/jobs/$jobId/review"
-                  params={{ jobId: params().jobId }}
-                >
-                  Review metadata
-                </Link>
-              </Show>
-              <Show when={current().state === "planning"}>
-                <Link
-                  class={buttonStyles()}
-                  to="/jobs/$jobId/plan"
-                  params={{ jobId: params().jobId }}
-                >
-                  Review output plan
-                </Link>
-              </Show>
               <Show when={current().state === "interrupted"}>
                 <div class="grid max-w-[290px] gap-2">
                   <Button

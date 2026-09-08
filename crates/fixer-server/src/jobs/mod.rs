@@ -266,7 +266,16 @@ impl JobRuntime {
     ) -> Result<JobRecord, RuntimeError> {
         let input = self.validate_input(input)?;
         let _operation = self.operations.lock().await;
-        let job = self.store.create_job_for_source(source_id, input).await?;
+        let job = match self.store.create_job_for_source(source_id, input).await {
+            Ok(job) => job,
+            Err(error @ StoreError::IngestionSourceJobConflict { .. }) => {
+                let Some(job) = self.store.get_source_job(source_id).await? else {
+                    return Err(error.into());
+                };
+                return Ok(job);
+            }
+            Err(error) => return Err(error.into()),
+        };
         self.publish_created(&job)?;
         Ok(job)
     }
@@ -434,11 +443,22 @@ impl JobRuntime {
         id: JobId,
         decision: ReviewDecisionDto,
     ) -> Result<JobRecord, RuntimeError> {
+        self.review_with_auto_guard(id, decision, false).await
+    }
+
+    async fn review_with_auto_guard(
+        &self,
+        id: JobId,
+        decision: ReviewDecisionDto,
+        automatic: bool,
+    ) -> Result<JobRecord, RuntimeError> {
         let job = self.store.get_job(id).await?;
         if job.state() != JobState::AwaitingConfirmation {
             return Err(RuntimeError::ReviewConflict(job.state()));
         }
-        let (plan, fingerprint) = self.reconstruct_plan(id, job.input(), &decision).await?;
+        let (plan, fingerprint) = self
+            .reconstruct_plan(id, job.input(), &decision, automatic)
+            .await?;
         if let Some(policy) = &self.fs_policy {
             policy.validate_plan(&plan)?;
         }
@@ -488,7 +508,14 @@ impl JobRuntime {
         if !job.input().apply() {
             return Err(RuntimeError::ApprovalNotEnabled);
         }
-        let (plan, fingerprint) = self.reconstruct_plan(id, job.input(), &decision).await?;
+        let (plan, fingerprint) = self
+            .reconstruct_plan(
+                id,
+                job.input(),
+                &decision,
+                idempotency_key == AUTO_EXECUTION_KEY,
+            )
+            .await?;
         let reviewed_plan = job
             .plan()
             .ok_or(RuntimeError::ExecutionConflict(job.state()))?;
@@ -638,6 +665,7 @@ impl JobRuntime {
         id: JobId,
         input: &JobInputDto,
         decision: &ReviewDecisionDto,
+        automatic: bool,
     ) -> Result<(fixer_core::OutputPlan, String), RuntimeError> {
         let flow = self
             .request_flow
@@ -645,8 +673,26 @@ impl JobRuntime {
             .ok_or(RuntimeError::WorkerFlowUnavailable)?;
         let scanned = flow.scan(id, input).await?;
         let search = scanned.search().await?;
+        let (candidates, candidates_truncated) = search.candidate_artifacts()?;
         let resolved = search.resolve_selected(decision.candidate_index()).await?;
         let conflict_count = resolved.conflict_count()?;
+        if automatic {
+            let mut diagnostics = resolved.review_diagnostics();
+            diagnostics.candidates = candidates;
+            diagnostics.candidates_truncated = candidates_truncated;
+            let expected = worker::AutoDecision::Execute {
+                candidate_index: decision.candidate_index(),
+            };
+            if worker::auto_decision(
+                input,
+                &diagnostics,
+                conflict_count,
+                flow.auto_accept_confidence(id),
+            ) != expected
+            {
+                return Err(RuntimeError::StalePlan);
+            }
+        }
         let expected = (0..conflict_count).collect::<Vec<_>>();
         if decision.accepted_conflict_indexes() != expected {
             return Err(RuntimeError::ConflictAcknowledgementMismatch {
@@ -796,7 +842,11 @@ impl JobRuntime {
 
         if let worker::AutoDecision::Execute { candidate_index } = automatic {
             let decision = ReviewDecisionDto::new(candidate_index, Vec::new());
-            if self.review(id, decision).await.is_ok() {
+            if self
+                .review_with_auto_guard(id, decision, true)
+                .await
+                .is_ok()
+            {
                 let _ = self.execute(id, AUTO_EXECUTION_KEY).await;
             }
         }

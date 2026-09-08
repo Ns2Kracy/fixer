@@ -106,3 +106,61 @@ async fn fetches_series_specials_seasons_episodes_credits_and_artwork() {
             .supports(MediaKind::Television)
     );
 }
+
+#[tokio::test]
+async fn v3_api_key_authenticates_series_search_details_and_every_season() {
+    let server = MockServer::start().await;
+    let key = "ABCDEF0123456789ABCDEF0123456789";
+    for (route, fixture) in [
+        ("/3/search/tv", include_str!("fixtures/tv_search.json")),
+        ("/3/tv/1399", include_str!("fixtures/tv_details.json")),
+        (
+            "/3/tv/1399/season/0",
+            include_str!("fixtures/tv_season_0.json"),
+        ),
+        (
+            "/3/tv/1399/season/1",
+            include_str!("fixtures/tv_season_1.json"),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("api_key", key))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(fixture, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let provider = TmdbProvider::new(
+        TmdbConfig::new(key)
+            .unwrap()
+            .with_base_url(server.uri())
+            .unwrap(),
+    )
+    .unwrap();
+    let http = ReqwestHttpClient::new(HttpConfig::default()).unwrap();
+    provider
+        .search_television(SearchRequest::television("Show", None).unwrap(), &http)
+        .await
+        .unwrap();
+    let series = provider
+        .fetch_television(
+            FetchRequest::new(
+                MediaKind::Television,
+                fixer_core::ExternalId::new("tmdb", "1399").unwrap(),
+            ),
+            &http,
+        )
+        .await
+        .unwrap();
+    assert!(!series.summaries.entries().is_empty());
+    assert!(!series.artwork.is_empty());
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| !request.headers.contains_key("authorization"))
+    );
+}

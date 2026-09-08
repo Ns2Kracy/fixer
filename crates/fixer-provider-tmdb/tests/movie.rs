@@ -205,3 +205,53 @@ async fn live_tmdb_smoke() {
         .unwrap();
     assert!(!results.is_empty());
 }
+
+#[tokio::test]
+async fn v3_api_key_authenticates_search_and_fetch_without_bearer() {
+    let server = MockServer::start().await;
+    let key = "0123456789abcdef0123456789abcdef";
+    for (route, fixture) in [
+        (
+            "/3/search/movie",
+            include_str!("fixtures/search_movie.json"),
+        ),
+        ("/3/movie/843", include_str!("fixtures/movie_details.json")),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("api_key", key))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(fixture, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let provider = TmdbProvider::new(
+        TmdbConfig::new(key)
+            .unwrap()
+            .with_base_url(server.uri())
+            .unwrap(),
+    )
+    .unwrap();
+    provider
+        .search_movie(search_request(), &http())
+        .await
+        .unwrap();
+    provider
+        .fetch_movie(
+            FetchRequest::new(
+                MediaKind::Movie,
+                fixer_core::ExternalId::new("tmdb", "843").unwrap(),
+            ),
+            &http(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| !request.headers.contains_key("authorization"))
+    );
+}
