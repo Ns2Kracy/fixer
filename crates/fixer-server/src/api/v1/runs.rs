@@ -308,11 +308,18 @@ fn validated_selection(
     let Some(target) = target else {
         return Ok(ScrapeSelection::Automatic);
     };
-    let target = ProviderTarget::new(
-        target.media_kind(),
-        target.provider().clone(),
-        target.external_id().clone(),
-    )
+    let target = if target.provider().as_str() == "tmdb" {
+        if target.external_id().namespace != "tmdb" {
+            return Err(invalid("target", "TMDB IDs must use the tmdb namespace"));
+        }
+        ProviderTarget::tmdb(target.media_kind(), &target.external_id().value)
+    } else {
+        ProviderTarget::new(
+            target.media_kind(),
+            target.provider().clone(),
+            target.external_id().clone(),
+        )
+    }
     .map_err(|_| invalid("target", "must contain a valid provider and external ID"))?;
     if target.media_kind() != core_media_kind(media_kind) {
         return Err(invalid("target", "media kind must match the scrape"));
