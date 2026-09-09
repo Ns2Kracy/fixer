@@ -9,8 +9,8 @@ import { Button } from "./ui/button";
 import { ThemeSelect } from "./ui/theme-select";
 
 const navigation = [
-  { to: "/", label: "整理" },
-  { to: "/jobs", label: "整理记录" },
+  { to: "/", label: "刮削" },
+  { to: "/scrapes", label: "刮削审计" },
   { to: "/settings", label: "设置" },
 ] as const;
 const settingsNavigation = [
@@ -30,7 +30,7 @@ export function AppShell(): JSX.Element {
     const path = location().pathname;
     if (path === "/") return "/";
     if (settingsNavigation.some((item) => item.to === path)) return "/settings";
-    if (path === "/jobs" || path.startsWith("/jobs/")) return "/jobs";
+    if (path === "/scrapes" || path.startsWith("/scrapes/")) return "/scrapes";
     return null;
   });
   const [themePreference, setThemePreference] = createSignal<ThemePreference>(
