@@ -37,4 +37,7 @@ pub use provider::{
     TelevisionCandidate,
 };
 pub use resolved::{MergeConflict, ResolutionWarning, Resolved};
-pub use scrape::{ProviderTarget, ScrapeSelection};
+pub use scrape::{
+    OperationOutcome, OperationReport, OutputFingerprint, OutputOperationKind, ProviderTarget,
+    ReplacementManifest, ScrapeSelection,
+};

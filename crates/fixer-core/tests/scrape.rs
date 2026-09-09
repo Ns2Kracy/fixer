@@ -17,9 +17,20 @@ fn tmdb_targets_accept_movies_and_television() {
 fn tmdb_targets_reject_unsupported_media_and_invalid_ids() {
     assert!(fixer_core::ProviderTarget::tmdb(MediaKind::Anime, "329865").is_err());
 
-    for id in ["", "0", "-1", "12.5", "tt329865"] {
+    for id in ["", "0", "00", "-1", "12.5", "tt329865"] {
         assert!(fixer_core::ProviderTarget::tmdb(MediaKind::Movie, id).is_err());
     }
+}
+
+#[test]
+fn generic_targets_require_the_provider_namespace() {
+    let target = fixer_core::ProviderTarget::new(
+        MediaKind::Movie,
+        fixer_core::ProviderId::new("tmdb").unwrap(),
+        fixer_core::ExternalId::new("imdb", "tt2543164").unwrap(),
+    );
+
+    assert!(target.is_err());
 }
 
 trait SelectionMode {

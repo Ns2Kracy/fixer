@@ -15,6 +15,13 @@ pub enum CoreError {
     /// An external identifier namespace or value was invalid.
     #[error("invalid external identifier {field}: `{input}`")]
     InvalidExternalId { field: &'static str, input: String },
+    /// An exact provider target has an invalid media kind, namespace, or identifier.
+    #[error("invalid exact target {provider}/{external_id} for media kind {media_kind:?}")]
+    InvalidProviderTarget {
+        provider: String,
+        media_kind: crate::MediaKind,
+        external_id: String,
+    },
     /// A domain value failed boundary validation.
     #[error("invalid {field}: `{value}`")]
     InvalidDomainValue { field: &'static str, value: String },

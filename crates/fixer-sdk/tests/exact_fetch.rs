@@ -92,7 +92,8 @@ async fn exact_fetch_rejects_an_unregistered_provider() {
         MediaKind::Movie,
         ProviderId::new("tmdb").unwrap(),
         ExternalId::new("tmdb", "329865").unwrap(),
-    );
+    )
+    .unwrap();
 
     let error = fixer.fetch_exact(&target).await.unwrap_err();
 
