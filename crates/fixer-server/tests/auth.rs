@@ -247,7 +247,7 @@ async fn authentication_errors_share_the_authoritative_request_id() {
     let (_root, _store, router) = unregistered_secure_app(false).await;
     let response = router
         .oneshot(
-            Request::get("/api/v1/jobs")
+            Request::get("/api/v1/scrape-runs")
                 .header("x-request-id", "upstream-auth-42")
                 .body(Body::empty())
                 .unwrap(),
@@ -674,12 +674,24 @@ async fn cookie_state_changes_require_csrf_but_bearer_tokens_do_not() {
     let media = root.path().join("movie.mkv");
     std::fs::write(&media, b"movie").unwrap();
     let (cookie, csrf) = login(&router).await;
-    let body = json!({"media_kind": "movie", "input_path": media, "apply": false}).to_string();
+    let retired = router
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/jobs")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retired.status(), StatusCode::NOT_FOUND);
+
+    let body = json!({"media_kind": "movie", "input_path": media}).to_string();
 
     let missing = router
         .clone()
         .oneshot(
-            Request::post("/api/v1/jobs")
+            Request::post("/api/v1/scrape-runs")
                 .header(header::COOKIE, &cookie)
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(body.clone()))
@@ -692,7 +704,7 @@ async fn cookie_state_changes_require_csrf_but_bearer_tokens_do_not() {
     let accepted = router
         .clone()
         .oneshot(
-            Request::post("/api/v1/jobs")
+            Request::post("/api/v1/scrape-runs")
                 .header(header::COOKIE, &cookie)
                 .header("x-csrf-token", &csrf)
                 .header(header::CONTENT_TYPE, "application/json")
@@ -706,7 +718,7 @@ async fn cookie_state_changes_require_csrf_but_bearer_tokens_do_not() {
     let issued = store.issue_api_token("test client").await.unwrap();
     let bearer = router
         .oneshot(
-            Request::post("/api/v1/jobs")
+            Request::post("/api/v1/scrape-runs")
                 .header(header::AUTHORIZATION, format!("Bearer {}", issued.token()))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(body))
@@ -714,7 +726,7 @@ async fn cookie_state_changes_require_csrf_but_bearer_tokens_do_not() {
         )
         .await
         .unwrap();
-    assert_eq!(bearer.status(), StatusCode::ACCEPTED);
+    assert_eq!(bearer.status(), StatusCode::OK);
 }
 
 #[tokio::test]

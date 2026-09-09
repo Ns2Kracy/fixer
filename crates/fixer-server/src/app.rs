@@ -38,7 +38,7 @@ pub fn secure_job_app(runtime: JobRuntime, auth_state: AuthState) -> Router {
     )
 }
 
-/// Builds the authenticated production router with jobs and workspace APIs enabled.
+/// Builds the authenticated production router with scrape audits and workspace APIs enabled.
 pub fn secure_workspace_app(
     runtime: JobRuntime,
     auth_state: AuthState,

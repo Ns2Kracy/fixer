@@ -24,7 +24,7 @@ pub(crate) fn router() -> Router {
 pub(crate) fn job_router(runtime: crate::jobs::JobRuntime) -> Router {
     router()
         .merge(jobs::router(runtime.clone(), None, None))
-        .merge(runs::router(runtime))
+        .merge(runs::router(runtime, None))
 }
 
 pub(crate) fn workspace_router(state: crate::WorkspaceState) -> Router {
@@ -42,6 +42,7 @@ pub(crate) fn secure_workspace_router(
         auth_state,
         Some(workspace_state),
         Some(ingestion_runtime),
+        false,
     )
 }
 
@@ -49,7 +50,7 @@ pub(crate) fn secure_job_router(
     runtime: crate::jobs::JobRuntime,
     auth_state: crate::auth::AuthState,
 ) -> Router {
-    secure_router(runtime, auth_state, None, None)
+    secure_router(runtime, auth_state, None, None, true)
 }
 
 fn secure_router(
@@ -57,6 +58,7 @@ fn secure_router(
     auth_state: crate::auth::AuthState,
     workspace_state: Option<crate::WorkspaceState>,
     ingestion_runtime: Option<crate::IngestionRuntime>,
+    expose_legacy_jobs: bool,
 ) -> Router {
     let public = Router::new()
         .route(
@@ -69,13 +71,15 @@ fn secure_router(
             "/providers",
             get(providers::get).fallback(crate::api::error::method_not_allowed),
         )
-        .merge(jobs::router(
-            runtime.clone(),
+        .merge(runs::router(runtime.clone(), workspace_state.clone()))
+        .merge(auth::protected_router(auth_state.clone()));
+    if expose_legacy_jobs {
+        protected = protected.merge(jobs::router(
+            runtime,
             workspace_state.clone(),
             ingestion_runtime.clone(),
-        ))
-        .merge(runs::router(runtime))
-        .merge(auth::protected_router(auth_state.clone()));
+        ));
+    }
     if let Some(workspace_state) = workspace_state {
         protected = protected.merge(workspace::router(workspace_state));
     }
