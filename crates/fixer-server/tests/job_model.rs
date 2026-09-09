@@ -200,6 +200,7 @@ fn job_state_transitions_follow_the_persistent_worker_lifecycle() {
         (Writing, Failed),
         (Scanning, Cancelled),
         (Searching, Cancelled),
+        (Scanning, Queued),
         (Resolving, Cancelled),
         (AwaitingConfirmation, Cancelled),
         (Planning, Cancelled),

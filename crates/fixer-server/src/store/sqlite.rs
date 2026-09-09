@@ -683,7 +683,16 @@ impl SqliteJobStore {
         self.get_job(id).await
     }
 
-    pub(crate) async fn claim_next_queued(
+    pub(crate) async fn queued_job_ids(&self) -> Result<Vec<JobId>, StoreError> {
+        sqlx::query_scalar("SELECT id FROM jobs WHERE state = 'queued' ORDER BY id")
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(JobId::from_database)
+            .collect()
+    }
+
+    pub(crate) async fn claim_oldest_queued(
         &self,
         progress: ProgressSummary,
     ) -> Result<Option<JobRecord>, StoreError> {

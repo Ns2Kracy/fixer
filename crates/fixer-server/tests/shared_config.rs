@@ -25,7 +25,7 @@ media_roots = ["media"]
 web_root = "public"
 allowed_origins = ["https://fixer.example"]
 https_termination = true
-worker_count = 3
+queue_capacity = 3
 
 [server.trusted_proxy]
 ranges = ["10.0.0.0/8"]
@@ -49,7 +49,7 @@ header = "x-fixer-client-ip"
         server.media_roots(),
         &[root.path().join("media").canonicalize().unwrap()]
     );
-    assert_eq!(server.worker_count().get(), 3);
+    assert_eq!(server.queue_capacity().get(), 3);
     assert!(server.https_termination());
     assert_eq!(server.allowed_origins(), &["https://fixer.example"]);
     assert!(server.trusted_proxy_policy().is_enabled());

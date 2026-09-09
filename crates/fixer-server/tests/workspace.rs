@@ -137,7 +137,7 @@ access_token = "direct-anilist-secret"
 [server]
 bind = "127.0.0.1:4100"
 media_roots = ["media"]
-worker_count = 3
+queue_capacity = 3
 "#,
     )
     .unwrap();
@@ -207,7 +207,7 @@ worker_count = 3
         "http://127.0.0.1:9"
     );
     assert_eq!(reloaded.config().server.bind.to_string(), "127.0.0.1:4100");
-    assert_eq!(reloaded.config().server.worker_count, 3);
+    assert_eq!(reloaded.config().server.queue_capacity, 3);
     assert_eq!(
         reloaded.config().server.media_roots,
         vec![media.canonicalize().unwrap()]
@@ -216,7 +216,7 @@ worker_count = 3
     let before_file = std::fs::read(root.path().join("fixer.toml")).unwrap();
     let before_memory = handle.snapshot();
     let mut forbidden = settings("http://127.0.0.1:9");
-    forbidden["server"] = json!({"bind": "0.0.0.0:9999", "worker_count": 99});
+    forbidden["server"] = json!({"bind": "0.0.0.0:9999", "queue_capacity": 99});
     let response = app
         .clone()
         .oneshot(put_json("/api/v1/settings", &forbidden))

@@ -609,6 +609,9 @@ fn display_input(input: &JobInputDto, workspace: Option<&WorkspaceState>) -> Job
     if let Some(run_id) = input.correction_of() {
         displayed = displayed.with_correction_of(run_id);
     }
+    if let Some(run_id) = input.retry_of() {
+        displayed = displayed.with_retry_of(run_id);
+    }
     if let Some(organization) = input.organization() {
         let mut organization = organization.clone();
         organization.destination_path = display_path(workspace, &organization.destination_path);
@@ -729,6 +732,12 @@ pub(super) fn map_runtime_error(error: RuntimeError) -> ApiError {
             crate::jobs::JobFlowError::Sdk(fixer_sdk::SdkError::CandidateOutOfBounds { .. })
             | crate::jobs::JobFlowError::IndexOverflow,
         ) => invalid_input("candidate_index", "must identify an available candidate"),
+        RuntimeError::QueueUnavailable => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "scrape_queue_unavailable",
+            "Scrape queue is unavailable",
+            None,
+        ),
         RuntimeError::WorkerFlowUnavailable
         | RuntimeError::ExecutionTaskClosed
         | RuntimeError::ExecutionShuttingDown

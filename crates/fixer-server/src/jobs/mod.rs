@@ -13,7 +13,7 @@ use fixer_core::{OperationOutcome, OutputOperation, OutputPlan, ReplacementManif
 use fixer_sdk::output::{ExecutionError, ExecutionFailure, ExecutionPolicy, OutputPlanExt};
 use futures_util::FutureExt;
 use thiserror::Error;
-use tokio::sync::{Mutex, Notify, oneshot, watch};
+use tokio::sync::{Mutex, Notify, mpsc, oneshot, watch};
 
 use crate::{
     FsPolicy, FsPolicyError,
@@ -206,7 +206,7 @@ pub struct JobRuntime {
     store: SqliteJobStore,
     events: JobEventHub,
     operations: Arc<Mutex<()>>,
-    wake_workers: Arc<Notify>,
+    dispatch: Arc<StdMutex<Option<mpsc::Sender<JobId>>>>,
     request_flow: Arc<OnceLock<SharedWorkerFlow>>,
     execution_tasks: Arc<ExecutionTaskRegistry>,
     fs_policy: Option<Arc<FsPolicy>>,
@@ -218,7 +218,7 @@ impl JobRuntime {
             store,
             events: JobEventHub::new(event_capacity.get()),
             operations: Arc::new(Mutex::new(())),
-            wake_workers: Arc::new(Notify::new()),
+            dispatch: Arc::new(StdMutex::new(None)),
             request_flow: Arc::new(OnceLock::new()),
             execution_tasks: Arc::new(ExecutionTaskRegistry::default()),
             fs_policy: None,
@@ -231,34 +231,50 @@ impl JobRuntime {
         self
     }
 
-    pub fn start_workers(&self, worker_count: NonZeroUsize, flow: SdkJobFlow) -> WorkerPool {
-        self.start_worker_flow(worker_count, WorkerFlow::Configured(flow))
+    pub fn start_workers(&self, queue_capacity: NonZeroUsize, flow: SdkJobFlow) -> WorkerPool {
+        self.start_worker_flow(queue_capacity, WorkerFlow::Configured(flow))
     }
 
-    pub(crate) fn start_local_workers(&self, worker_count: NonZeroUsize) -> WorkerPool {
-        self.start_worker_flow(worker_count, WorkerFlow::Local)
+    pub(crate) fn start_local_workers(&self, queue_capacity: NonZeroUsize) -> WorkerPool {
+        self.start_worker_flow(queue_capacity, WorkerFlow::Local)
     }
 
-    fn start_worker_flow(&self, worker_count: NonZeroUsize, flow: WorkerFlow) -> WorkerPool {
+    fn start_worker_flow(&self, queue_capacity: NonZeroUsize, flow: WorkerFlow) -> WorkerPool {
         let flow = Arc::clone(self.request_flow.get_or_init(|| Arc::new(flow)));
+        let (sender, queue) = mpsc::channel(queue_capacity.get());
+        *self
+            .dispatch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sender.clone());
         let (shutdown, receiver) = watch::channel(false);
-        let handles = (0..worker_count.get())
-            .map(|_| {
-                let runtime = self.clone();
-                let flow = Arc::clone(&flow);
-                let receiver = receiver.clone();
-                tokio::spawn(async move { runtime.worker_loop(flow, receiver).await })
-            })
-            .collect();
-        self.wake_workers.notify_waiters();
-        WorkerPool::new(shutdown, handles, Arc::clone(&self.execution_tasks))
+
+        let recovery_runtime = self.clone();
+        let recovery_receiver = receiver.clone();
+        let recovery = tokio::spawn(async move {
+            recovery_runtime
+                .recover_queued(sender, recovery_receiver)
+                .await;
+        });
+        let runtime = self.clone();
+        let worker = tokio::spawn(async move { runtime.worker_loop(flow, queue, receiver).await });
+        WorkerPool::new(
+            shutdown,
+            recovery,
+            vec![worker],
+            Arc::clone(&self.execution_tasks),
+        )
     }
 
     pub(crate) async fn create(&self, input: JobInputDto) -> Result<JobRecord, RuntimeError> {
         let input = self.validate_input(input)?;
-        let _operation = self.operations.lock().await;
+        let dispatch = self.reserve_dispatch().await?;
+        let operation = self.operations.lock().await;
         let job = self.store.create_job(input).await?;
-        self.publish_created(&job)?;
+        let published = self.publish_created(&job);
+        drop(operation);
+        let dispatched = self.dispatch(dispatch, job.id()).await;
+        published?;
+        dispatched?;
         Ok(job)
     }
 
@@ -267,7 +283,8 @@ impl JobRuntime {
         input: JobInputDto,
     ) -> Result<(JobRecord, bool), RuntimeError> {
         let input = self.validate_input(input)?;
-        let _operation = self.operations.lock().await;
+        let dispatch = self.reserve_dispatch().await?;
+        let operation = self.operations.lock().await;
         if let Some(existing) = self
             .store
             .list_jobs(10_000, None)
@@ -278,7 +295,11 @@ impl JobRuntime {
             return Ok((existing, false));
         }
         let job = self.store.create_job(input).await?;
-        self.publish_created(&job)?;
+        let published = self.publish_created(&job);
+        drop(operation);
+        let dispatched = self.dispatch(dispatch, job.id()).await;
+        published?;
+        dispatched?;
         Ok((job, true))
     }
 
@@ -288,7 +309,8 @@ impl JobRuntime {
         input: JobInputDto,
     ) -> Result<JobRecord, RuntimeError> {
         let input = self.validate_input(input)?;
-        let _operation = self.operations.lock().await;
+        let dispatch = self.reserve_dispatch().await?;
+        let operation = self.operations.lock().await;
         let job = match self.store.create_job_for_source(source_id, input).await {
             Ok(job) => job,
             Err(error @ StoreError::IngestionSourceJobConflict { .. }) => {
@@ -299,7 +321,11 @@ impl JobRuntime {
             }
             Err(error) => return Err(error.into()),
         };
-        self.publish_created(&job)?;
+        let published = self.publish_created(&job);
+        drop(operation);
+        let dispatched = self.dispatch(dispatch, job.id()).await;
+        published?;
+        dispatched?;
         Ok(job)
     }
 
@@ -340,13 +366,51 @@ impl JobRuntime {
 
     fn publish_created(&self, job: &JobRecord) -> Result<(), RuntimeError> {
         self.events.publish_state(job.id(), job.state())?;
-        self.wake_workers.notify_waiters();
         Ok(())
     }
 
     pub(crate) async fn get(&self, id: JobId) -> Result<JobRecord, RuntimeError> {
         self.store.get_job(id).await.map_err(Into::into)
     }
+    async fn reserve_dispatch(&self) -> Result<Option<mpsc::OwnedPermit<JobId>>, RuntimeError> {
+        let sender = self
+            .dispatch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(sender) = sender else {
+            return Ok(None);
+        };
+        sender
+            .reserve_owned()
+            .await
+            .map(Some)
+            .map_err(|_| RuntimeError::QueueUnavailable)
+    }
+
+    async fn dispatch(
+        &self,
+        permit: Option<mpsc::OwnedPermit<JobId>>,
+        id: JobId,
+    ) -> Result<(), RuntimeError> {
+        if let Some(permit) = permit {
+            let _sender = permit.send(id);
+            return Ok(());
+        }
+        let sender = self
+            .dispatch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(sender) = sender else {
+            return Ok(());
+        };
+        sender
+            .send(id)
+            .await
+            .map_err(|_| RuntimeError::QueueUnavailable)
+    }
+
 
     pub(crate) async fn list(
         &self,
@@ -357,7 +421,8 @@ impl JobRuntime {
     }
 
     pub(crate) async fn retry(&self, id: JobId) -> Result<JobRecord, RuntimeError> {
-        let _operation = self.operations.lock().await;
+        let dispatch = self.reserve_dispatch().await?;
+        let operation = self.operations.lock().await;
         let job = self
             .store
             .transition(
@@ -367,9 +432,12 @@ impl JobRuntime {
                 JobUpdate::default().with_progress(ProgressSummary::new("queued", 0, None)),
             )
             .await?;
-        self.publish_transition(&job)?;
+        let published = self.publish_transition(&job);
         self.release_job_config(id);
-        self.wake_workers.notify_waiters();
+        drop(operation);
+        let dispatched = self.dispatch(dispatch, id).await;
+        published?;
+        dispatched?;
         Ok(job)
     }
 
@@ -764,39 +832,66 @@ impl JobRuntime {
             .map_err(RuntimeError::from)
     }
 
-    async fn worker_loop(&self, flow: SharedWorkerFlow, mut shutdown: watch::Receiver<bool>) {
-        loop {
-            if *shutdown.borrow() {
-                return;
-            }
-            let notified = self.wake_workers.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            match self.claim_next_with_retry().await {
-                Ok(Some(job)) => {
-                    let id = job.id();
-                    let process =
-                        AssertUnwindSafe(self.process_claimed(job, flow.as_ref(), &shutdown))
-                            .catch_unwind()
-                            .await;
-                    if process.is_err() {
-                        // The per-job panic is contained so this fixed worker remains alive.
-                    }
-                    self.interrupt_active(id).await;
-                }
-                Ok(None) => {
-                    tokio::select! {
-                        () = &mut notified => {},
-                        changed = shutdown.changed() => {
-                            if changed.is_err() || *shutdown.borrow() { return; }
-                        }
-                    }
-                }
+    async fn recover_queued(
+        &self,
+        sender: mpsc::Sender<JobId>,
+        mut shutdown: watch::Receiver<bool>,
+    ) {
+        let queued = loop {
+            match self.store.queued_job_ids().await {
+                Ok(queued) => break queued,
                 Err(_) => {
                     tokio::select! {
                         () = tokio::time::sleep(RETRY_DELAYS[RETRY_DELAYS.len() - 1]) => {},
                         changed = shutdown.changed() => {
                             if changed.is_err() || *shutdown.borrow() { return; }
+                        }
+                    }
+                }
+            }
+        };
+        for id in queued {
+            tokio::select! {
+                result = sender.send(id) => {
+                    if result.is_err() { return; }
+                }
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() { return; }
+                }
+            }
+        }
+    }
+
+    async fn worker_loop(
+        &self,
+        flow: SharedWorkerFlow,
+        mut queue: mpsc::Receiver<JobId>,
+        mut shutdown: watch::Receiver<bool>,
+    ) {
+        loop {
+            let _dispatched_id = tokio::select! {
+                biased;
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() { return; }
+                    continue;
+                }
+                id = queue.recv() => {
+                    let Some(id) = id else { return; };
+                    id
+                }
+            };
+            if *shutdown.borrow() {
+                return;
+            }
+            let job = loop {
+                match self.claim_with_retry().await {
+                    Ok(job) => break job,
+                    Err(_) => {
+                        tokio::select! {
+                            () = tokio::time::sleep(RETRY_DELAYS[RETRY_DELAYS.len() - 1]) => {},
+                            changed = shutdown.changed() => {
+                                if changed.is_err() || *shutdown.borrow() { return; }
+                            }
                         }
                     }
                 }
@@ -807,7 +902,30 @@ impl JobRuntime {
     async fn process_claimed(
         &self,
         job: JobRecord,
+            };
+            let Some(job) = job else {
+                continue;
+            };
+            let id = job.id();
+            if *shutdown.borrow() {
+                let update =
+                    JobUpdate::default().with_progress(ProgressSummary::new("queued", 0, None));
+                if self
+                    .transition_with_retry(id, JobState::Scanning, JobState::Queued, update)
+                    .await
+                    .is_err()
+                {
+                    self.interrupt_active(id).await;
+                }
+                return;
+            }
+            let process = AssertUnwindSafe(self.process_claimed(job, flow.as_ref(), &shutdown))
+                .catch_unwind()
+                .await;
+            if process.is_err() {
+                // The per-job panic is contained so this fixed worker remains alive.
         flow: &WorkerFlow,
+            self.interrupt_active(id).await;
         shutdown: &watch::Receiver<bool>,
     ) {
         let id = job.id();
@@ -996,7 +1114,7 @@ impl JobRuntime {
         }
     }
 
-    async fn claim_next_with_retry(&self) -> Result<Option<JobRecord>, StoreError> {
+    async fn claim_with_retry(&self) -> Result<Option<JobRecord>, StoreError> {
         let mut last_error = None;
         for delay in std::iter::once(None).chain(RETRY_DELAYS.map(Some)) {
             if let Some(delay) = delay {
@@ -1005,7 +1123,7 @@ impl JobRuntime {
             let _operation = self.operations.lock().await;
             match self
                 .store
-                .claim_next_queued(ProgressSummary::new("scanning", 0, None))
+                .claim_oldest_queued(ProgressSummary::new("scanning", 0, None))
                 .await
             {
                 Ok(job) => {
@@ -1175,5 +1293,31 @@ impl From<SubscribeError> for RuntimeError {
             SubscribeError::Invalid => Self::InvalidEventCursor,
             SubscribeError::SequenceExhausted => Self::EventSequenceExhausted,
         }
+    }
+}
+    #[error("the scrape queue is unavailable")]
+    QueueUnavailable,
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn dispatch_rechecks_sender_after_unreserved_submission() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+            .await
+            .unwrap();
+        let runtime = JobRuntime::new(store, NonZeroUsize::new(8).unwrap());
+        let (sender, mut receiver) = mpsc::channel(1);
+        *runtime
+            .dispatch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sender);
+        let id = JobId::from_database(1).unwrap();
+
+        runtime.dispatch(None, id).await.unwrap();
+
+        assert_eq!(receiver.recv().await, Some(id));
     }
 }

@@ -1227,6 +1227,7 @@ mod tests {
                     code: code.to_owned(),
                     message: "remote unavailable".to_owned(),
                 });
+    recovery: Option<JoinHandle<()>>,
             assert!(matches!(
                 super::auto_decision(&automatic_input(true), &review, 0),
                 super::AutoDecision::NeedsReview { .. }
@@ -1234,11 +1235,13 @@ mod tests {
         }
         let mut review = review(1);
         review.warnings_truncated = true;
+        recovery: JoinHandle<()>,
         assert!(matches!(
             super::auto_decision(&automatic_input(true), &review, 0),
             super::AutoDecision::NeedsReview { .. }
         ));
     }
+            recovery: Some(recovery),
 
     #[test]
     fn auto_decision_uses_first_deterministic_candidate_without_conflicts() {
@@ -1248,6 +1251,9 @@ mod tests {
             super::auto_decision(&automatic_input(true), &review(2), 0),
             AutoDecision::Execute { candidate_index: 0 }
         );
+        if let Some(recovery) = self.recovery.take() {
+            let _ = recovery.await;
+        }
         assert_eq!(
             super::auto_decision(&automatic_input(true), &review(1), 1),
             AutoDecision::NeedsReview {

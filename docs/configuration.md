@@ -90,7 +90,7 @@ media_roots = ["/srv/media"]
 web_root = "web/dist"
 allowed_origins = ["http://127.0.0.1:3000"]
 https_termination = false
-worker_count = 2
+queue_capacity = 2
 
 [server.trusted_proxy]
 ranges = []
@@ -133,11 +133,14 @@ comma-separated values.
 | `server.web_root` | `FIXER_SERVER__WEB_ROOT` | `web/dist` |
 | `server.allowed_origins` | `FIXER_SERVER__ALLOWED_ORIGINS` | empty |
 | `server.https_termination` | `FIXER_SERVER__HTTPS_TERMINATION` | `false` |
-| `server.worker_count` | `FIXER_SERVER__WORKER_COUNT` | `2` |
+| `server.queue_capacity` | `FIXER_SERVER__QUEUE_CAPACITY` | `2` |
 | `server.trusted_proxy.ranges` | `FIXER_SERVER__TRUSTED_PROXY__RANGES` | empty |
 | `server.trusted_proxy.header` | `FIXER_SERVER__TRUSTED_PROXY__HEADER` | `x-forwarded-for` |
 | `logging.filter` | `FIXER_LOGGING__FILTER`, overridden by `RUST_LOG` | `fixer_server=info,tower_http=info` |
 | `logging.format` | `FIXER_LOGGING__FORMAT` | `pretty` |
+
+The former `server.worker_count` TOML key remains a read-only compatibility alias for
+`server.queue_capacity`; newly persisted configuration uses the canonical name.
 
 For example:
 

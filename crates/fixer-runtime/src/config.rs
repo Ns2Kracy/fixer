@@ -154,7 +154,8 @@ pub struct ServerConfig {
     pub web_root: PathBuf,
     pub allowed_origins: Vec<String>,
     pub https_termination: bool,
-    pub worker_count: usize,
+    #[serde(alias = "worker_count")]
+    pub queue_capacity: usize,
     pub trusted_proxy: TrustedProxyConfig,
 }
 impl Default for ServerConfig {
@@ -166,7 +167,7 @@ impl Default for ServerConfig {
             web_root: "web/dist".into(),
             allowed_origins: Vec::new(),
             https_termination: false,
-            worker_count: 2,
+            queue_capacity: 2,
             trusted_proxy: TrustedProxyConfig::default(),
         }
     }
@@ -376,9 +377,9 @@ impl FixerConfig {
                 )));
             }
         }
-        if self.server.worker_count == 0 {
+        if self.server.queue_capacity == 0 {
             return Err(ConfigLoadError::Validation(
-                "server.worker_count must be greater than zero".to_owned(),
+                "server.queue_capacity must be greater than zero".to_owned(),
             ));
         }
         validate_secret_reference(
@@ -777,6 +778,11 @@ impl Source for CompatibleFile {
 
 fn normalize_legacy_file(values: &mut Map<String, Value>) -> Result<(), config::ConfigError> {
     values.remove("placement");
+    if let Some(server) = values.get_mut("server")
+        && let ValueKind::Table(server) = &mut server.kind
+    {
+        move_legacy_value(server, &["worker_count"], &["queue_capacity"]);
+    }
     let removed = ["auto_accept_confidence", "review_confidence"]
         .into_iter()
         .filter(|field| values.contains_key(*field))
@@ -1046,7 +1052,7 @@ fn filtered_environment(
         "FIXER_SERVER__WEB_ROOT",
         "FIXER_SERVER__ALLOWED_ORIGINS",
         "FIXER_SERVER__HTTPS_TERMINATION",
-        "FIXER_SERVER__WORKER_COUNT",
+        "FIXER_SERVER__QUEUE_CAPACITY",
         "FIXER_SERVER__TRUSTED_PROXY__RANGES",
         "FIXER_SERVER__TRUSTED_PROXY__HEADER",
         "FIXER_LOGGING__FILTER",

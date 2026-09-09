@@ -40,7 +40,7 @@ database = "state/fixer.sqlite3"
 media_roots = ["media"]
 web_root = "public"
 allowed_origins = ["http://127.0.0.1:4312"]
-worker_count = 3
+queue_capacity = 3
 
 [logging]
 filter = "fixer_server=debug"
@@ -273,6 +273,28 @@ fn explicit_json_config_remains_readable_but_is_not_auto_discovered() {
         .unwrap();
     assert!(explicit.config().offline);
     assert_eq!(explicit.config().timeout_seconds, 41);
+}
+
+#[test]
+fn legacy_worker_count_deserializes_as_queue_capacity() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("fixer.toml"),
+        "[server]\nworker_count = 7\n",
+    )
+    .unwrap();
+
+    let loaded = ConfigLoader::new(root.path())
+        .with_environment(env(&[]))
+        .load()
+        .unwrap();
+    assert_eq!(loaded.config().server.queue_capacity, 7);
+
+    let overridden = ConfigLoader::new(root.path())
+        .with_environment(env(&[("FIXER_SERVER__QUEUE_CAPACITY", "9")]))
+        .load()
+        .unwrap();
+    assert_eq!(overridden.config().server.queue_capacity, 9);
 }
 
 #[test]

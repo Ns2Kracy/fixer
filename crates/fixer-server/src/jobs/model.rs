@@ -418,7 +418,10 @@ impl JobState {
         matches!(
             (self, next),
             (Queued, Scanning | Cancelled)
-                | (Scanning, Searching | Failed | Cancelled | Interrupted)
+                | (
+                    Scanning,
+                    Queued | Searching | Failed | Cancelled | Interrupted
+                )
                 | (Searching, Resolving | Failed | Cancelled | Interrupted)
                 | (
                     Resolving,

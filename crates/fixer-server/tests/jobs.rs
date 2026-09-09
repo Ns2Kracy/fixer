@@ -152,6 +152,40 @@ async fn scrape_run_creation_is_deduplicated_and_job_details_stay_hidden() {
 #[tokio::test]
 async fn exact_scrape_run_persists_requested_provider_identity() {
     let app = TestApp::new(16).await;
+#[tokio::test]
+async fn closed_scrape_queue_rejects_submission_before_persisting() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store.clone(), capacity(16));
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+    workers.shutdown().await;
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/scrape-runs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "media_kind": "movie",
+                    "input_path": "/media/Unavailable Queue.mkv"
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        response_json(response).await["error"]["code"],
+        "scrape_queue_unavailable"
+    );
+    assert!(store.list_jobs(10, None).await.unwrap().is_empty());
+}
+
     let response = app
         .request(
             Request::post("/api/v1/scrape-runs")
@@ -585,7 +619,7 @@ async fn one_worker_calls_the_sdk_and_processes_persistent_jobs_serially() {
         )],
     )
     .unwrap()
-    .with_search_delay(Duration::from_millis(150));
+    .with_search_delay(Duration::from_millis(500));
     let fixer = Fixer::builder()
         .provider(provider)
         .offline()
@@ -626,27 +660,26 @@ async fn one_worker_calls_the_sdk_and_processes_persistent_jobs_serially() {
 }
 
 #[tokio::test]
-async fn two_workers_atomically_claim_distinct_queued_jobs() {
+async fn bounded_dispatch_serializes_jobs_when_capacity_exceeds_one() {
     let directory = tempfile::tempdir().unwrap();
     let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
         .await
         .unwrap();
     let runtime = JobRuntime::new(store, capacity(32));
-    let _workers = runtime.start_workers(
+    let workers = runtime.start_workers(
         capacity(2),
-        SdkJobFlow::new(fixture_fixer(Duration::from_millis(200))),
+        SdkJobFlow::new(fixture_fixer(Duration::from_millis(500))),
     );
     let router = job_app(runtime);
 
     create_job(&router, "/media/First Movie.mkv").await;
+    assert_eq!(workers.worker_count(), 1);
     create_job(&router, "/media/Second Movie.mkv").await;
 
-    let (first, second) = tokio::join!(
-        wait_for_state(&router, 1, "searching"),
-        wait_for_state(&router, 2, "searching")
-    );
-    assert_eq!(first["job"]["state"], "searching");
-    assert_eq!(second["job"]["state"], "searching");
+    wait_for_state(&router, 1, "searching").await;
+    assert_eq!(get_job(&router, 2).await["job"]["state"], "queued");
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+    wait_for_state(&router, 2, "awaiting_confirmation").await;
 }
 
 #[tokio::test]

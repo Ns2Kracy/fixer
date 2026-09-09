@@ -41,7 +41,7 @@ const DEFAULT_BIND_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 3000);
 const DEFAULT_DATABASE_PATH: &str = "fixer.sqlite3";
 const DEFAULT_EVENT_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).unwrap();
-const DEFAULT_WORKER_COUNT: NonZeroUsize = NonZeroUsize::new(2).unwrap();
+const DEFAULT_QUEUE_CAPACITY: NonZeroUsize = NonZeroUsize::new(2).unwrap();
 
 /// Validated network, authentication, filesystem, and persistence configuration.
 #[derive(Clone, PartialEq, Eq)]
@@ -52,7 +52,7 @@ pub struct ServerConfig {
     https_termination: bool,
     allowed_origins: Vec<String>,
     trusted_proxy_policy: TrustedProxyPolicy,
-    worker_count: NonZeroUsize,
+    queue_capacity: NonZeroUsize,
 }
 
 impl fmt::Debug for ServerConfig {
@@ -65,7 +65,7 @@ impl fmt::Debug for ServerConfig {
             .field("https_termination", &self.https_termination)
             .field("allowed_origins", &self.allowed_origins)
             .field("trusted_proxy_policy", &self.trusted_proxy_policy)
-            .field("worker_count", &self.worker_count)
+            .field("queue_capacity", &self.queue_capacity)
             .finish()
     }
 }
@@ -83,8 +83,8 @@ impl ServerConfig {
 
     /// Adapts the validated shared `fixer.toml` server subsection.
     pub fn from_shared(shared: &fixer_runtime::ServerConfig) -> Result<Self, ServerConfigError> {
-        let worker_count =
-            NonZeroUsize::new(shared.worker_count).ok_or(ServerConfigError::InvalidWorkerCount)?;
+        let queue_capacity = NonZeroUsize::new(shared.queue_capacity)
+            .ok_or(ServerConfigError::InvalidQueueCapacity)?;
         let mut config = Self::new(shared.bind)?
             .with_database_path(shared.database.clone())?
             .with_https_termination(shared.https_termination)
@@ -98,7 +98,7 @@ impl ServerConfig {
                 &shared.trusted_proxy.header,
             )?;
         }
-        config.worker_count = worker_count;
+        config.queue_capacity = queue_capacity;
         Ok(config)
     }
 
@@ -110,7 +110,7 @@ impl ServerConfig {
             https_termination: false,
             allowed_origins: Vec::new(),
             trusted_proxy_policy: TrustedProxyPolicy::disabled(),
-            worker_count: DEFAULT_WORKER_COUNT,
+            queue_capacity: DEFAULT_QUEUE_CAPACITY,
         }
     }
 
@@ -228,8 +228,8 @@ impl ServerConfig {
         &self.trusted_proxy_policy
     }
 
-    pub const fn worker_count(&self) -> NonZeroUsize {
-        self.worker_count
+    pub const fn queue_capacity(&self) -> NonZeroUsize {
+        self.queue_capacity
     }
 }
 
@@ -263,8 +263,8 @@ pub enum ServerConfigError {
     EmptyDatabasePath,
     #[error("trusted proxy ranges and header must be configured together")]
     IncompleteTrustedProxy,
-    #[error("server worker_count must be greater than zero")]
-    InvalidWorkerCount,
+    #[error("server queue_capacity must be greater than zero")]
+    InvalidQueueCapacity,
     #[error(transparent)]
     Authentication(#[from] AuthConfigError),
     #[error(transparent)]
@@ -350,19 +350,19 @@ async fn serve_inner(
     tracing::info!(
         bind = %listener.local_addr()?,
         database = %config.database_path().display(),
-        worker_count = config.worker_count().get(),
+        queue_capacity = config.queue_capacity().get(),
         "server listening"
     );
     let workers = match runtime_config {
         Some(RuntimeConfiguration::Static(runtime_config)) => runtime.start_workers(
-            config.worker_count(),
+            config.queue_capacity(),
             SdkJobFlow::from_config(*runtime_config),
         ),
         Some(RuntimeConfiguration::Shared(runtime_config)) => runtime.start_workers(
-            config.worker_count(),
+            config.queue_capacity(),
             SdkJobFlow::from_handle(runtime_config),
         ),
-        None => runtime.start_local_workers(config.worker_count()),
+        None => runtime.start_local_workers(config.queue_capacity()),
     };
     let ingestion_notifications = IngestionNotifications::default();
     let ingestion_supervisor = IngestionSupervisor::start(IngestionRuntime::new(
