@@ -72,7 +72,6 @@ struct ListRunsQuery {
 enum RunStatus {
     Queued,
     Running,
-    ReviewRequired,
     Succeeded,
     Failed,
     Cancelled,
@@ -102,9 +101,9 @@ struct RunDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_target: Option<ProviderTarget>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    correction_of: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     retry_of: Option<i64>,
-    correction_of: Option<i64>,
     candidate_count: u64,
     conflict_count: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -143,8 +142,8 @@ async fn create(
 
 async fn resolve_input(
     runtime: &JobRuntime,
-    request: &CreateRunRequest,
     workspace: Option<&WorkspaceState>,
+    request: &CreateRunRequest,
 ) -> Result<(JobMediaKind, String), ApiError> {
     let Some(parent_id) = request.correction_of else {
         let media_kind = request
@@ -168,10 +167,10 @@ async fn resolve_input(
         };
         return Ok((media_kind, input_path));
     };
-    if request.target.is_none() {
     if request.source.is_some() {
         return Err(invalid("source", "must be omitted for a correction"));
     }
+    if request.target.is_none() {
         return Err(invalid(
             "target",
             "is required when correcting an earlier scrape",
@@ -367,8 +366,8 @@ fn run_dto(run: &JobRecord) -> RunDto {
         selected_target: run
             .review()
             .and_then(|review| review.selected_target().cloned()),
-        retry_of: run.input().retry_of(),
         correction_of: run.input().correction_of(),
+        retry_of: run.input().retry_of(),
         candidate_count: run
             .review()
             .map_or(0, crate::jobs::model::ReviewSummary::candidate_count),
@@ -389,9 +388,10 @@ const fn run_status(state: JobState) -> RunStatus {
         | JobState::Resolving
         | JobState::Planning
         | JobState::Writing => RunStatus::Running,
-        JobState::AwaitingConfirmation => RunStatus::ReviewRequired,
+        JobState::AwaitingConfirmation | JobState::Failed | JobState::Interrupted => {
+            RunStatus::Failed
+        }
         JobState::Completed => RunStatus::Succeeded,
-        JobState::Failed | JobState::Interrupted => RunStatus::Failed,
         JobState::Cancelled => RunStatus::Cancelled,
     }
 }

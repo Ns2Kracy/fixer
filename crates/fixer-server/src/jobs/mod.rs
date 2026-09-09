@@ -372,9 +372,6 @@ impl JobRuntime {
         Ok(())
     }
 
-    pub(crate) async fn get(&self, id: JobId) -> Result<JobRecord, RuntimeError> {
-        self.store.get_job(id).await.map_err(Into::into)
-    }
     async fn reserve_dispatch(&self) -> Result<Option<mpsc::OwnedPermit<JobId>>, RuntimeError> {
         let sender = self
             .dispatch
@@ -414,6 +411,9 @@ impl JobRuntime {
             .map_err(|_| RuntimeError::QueueUnavailable)
     }
 
+    pub(crate) async fn get(&self, id: JobId) -> Result<JobRecord, RuntimeError> {
+        self.store.get_job(id).await.map_err(Into::into)
+    }
 
     pub(crate) async fn list(
         &self,
@@ -902,13 +902,6 @@ impl JobRuntime {
                         }
                     }
                 }
-            }
-        }
-    }
-
-    async fn process_claimed(
-        &self,
-        job: JobRecord,
             };
             let Some(job) = job else {
                 continue;
@@ -931,8 +924,15 @@ impl JobRuntime {
                 .await;
             if process.is_err() {
                 // The per-job panic is contained so this fixed worker remains alive.
-        flow: &WorkerFlow,
+            }
             self.interrupt_active(id).await;
+        }
+    }
+
+    async fn process_claimed(
+        &self,
+        job: JobRecord,
+        flow: &WorkerFlow,
         shutdown: &watch::Receiver<bool>,
     ) {
         let id = job.id();
@@ -940,8 +940,14 @@ impl JobRuntime {
             return;
         }
         let Ok(scanned) = flow.scan(id, job.input()).await else {
-            self.finish_active(id, JobState::Scanning, JobState::Failed, "failed")
-                .await;
+            self.fail_active(
+                id,
+                "scanning",
+                "scan_failed",
+                "Fixer could not read local media metadata",
+                None,
+            )
+            .await;
             return;
         };
         if self.stop_requested(shutdown, id).await {
@@ -957,8 +963,14 @@ impl JobRuntime {
         }
 
         let Ok(search) = scanned.search().await else {
-            self.finish_active(id, JobState::Searching, JobState::Failed, "failed")
-                .await;
+            self.fail_active(
+                id,
+                "searching",
+                "search_failed",
+                "Fixer could not retrieve metadata from the selected provider",
+                None,
+            )
+            .await;
             return;
         };
         if self.stop_requested(shutdown, id).await {
@@ -974,26 +986,54 @@ impl JobRuntime {
         }
 
         let Ok(prepared) = self.prepare_review(job.input(), search).await else {
-            self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
-                .await;
+            self.fail_active(
+                id,
+                "resolving",
+                "resolution_failed",
+                "Fixer could not resolve metadata or build a safe output plan",
+                None,
+            )
+            .await;
             return;
         };
+        if self.stop_requested(shutdown, id).await {
+            return;
+        }
+        self.process_prepared(id, job.input(), prepared, flow).await;
+    }
+
+    async fn process_prepared(
+        &self,
+        id: JobId,
+        input: &JobInputDto,
+        prepared: PreparedReview,
+        flow: &WorkerFlow,
+    ) {
         let PreparedReview {
             candidate_count,
             conflict_count,
             selected_target,
             automatic,
         } = prepared;
-
-        if self.stop_requested(shutdown, id).await {
-            return;
-        }
         let mut summary = ReviewSummary::new(candidate_count, conflict_count);
         if let Some(target) = selected_target {
             summary = summary.with_selected_target(target);
         }
         if let worker::AutoDecision::NeedsReview { reason } = automatic {
             summary = summary.with_automation_reason(reason);
+        }
+        if worker::automatic_execution(input)
+            && matches!(automatic, worker::AutoDecision::NeedsReview { .. })
+        {
+            self.fail_active(
+                id,
+                "resolving",
+                "automatic_scrape_blocked",
+                "The scrape could not produce a safe automatic output plan",
+                Some(summary),
+            )
+            .await;
+            return;
         }
         let update = JobUpdate::default()
             .with_progress(ProgressSummary::new("awaiting_confirmation", 1, Some(1)))
@@ -1015,15 +1055,34 @@ impl JobRuntime {
             .events
             .publish_review(id, candidate_count, conflict_count);
 
-        if let worker::AutoDecision::Execute { candidate_index } = automatic {
-            let decision = ReviewDecisionDto::new(candidate_index, Vec::new());
-            if self
-                .review_with_auto_guard(id, decision, true)
-                .await
-                .is_ok()
-            {
-                let _ = self.execute(id, AUTO_EXECUTION_KEY).await;
-            }
+        let worker::AutoDecision::Execute { candidate_index } = automatic else {
+            return;
+        };
+        let decision = ReviewDecisionDto::new(candidate_index, (0..conflict_count).collect());
+        if self
+            .review_with_auto_guard(id, decision, true)
+            .await
+            .is_err()
+        {
+            self.fail_active(
+                id,
+                "planning",
+                "planning_failed",
+                "Fixer could not prepare the automatic output plan",
+                None,
+            )
+            .await;
+            return;
+        }
+        if self.execute(id, AUTO_EXECUTION_KEY).await.is_err() {
+            self.fail_active(
+                id,
+                "writing",
+                "execution_failed",
+                "Fixer could not execute the automatic output plan",
+                None,
+            )
+            .await;
         }
     }
 
@@ -1088,6 +1147,7 @@ impl JobRuntime {
             };
         }
         if input.correction_of().is_none()
+            && input.retry_of().is_none()
             && plan.operations().iter().any(|operation| {
                 let target = operation.target().map_or_else(
                     || plan.output_root.clone(),
@@ -1147,7 +1207,6 @@ impl JobRuntime {
 
     async fn transition_stage_with_retry(
         &self,
-            && input.retry_of().is_none()
         id: JobId,
         expected: JobState,
         next: JobState,
@@ -1196,15 +1255,31 @@ impl JobRuntime {
         Err(last_error.expect("at least one transition attempt is made"))
     }
 
-    async fn finish_active(
+    async fn fail_active(
         &self,
         id: JobId,
-        expected: JobState,
-        next: JobState,
-        stage: &'static str,
+        phase: &'static str,
+        code: &'static str,
+        message: &'static str,
+        review: Option<ReviewSummary>,
     ) {
+        let Ok(job) = self.store.get_job(id).await else {
+            self.interrupt_active(id).await;
+            return;
+        };
+        let expected = job.state();
+        if !expected.can_transition_to(JobState::Failed) {
+            return;
+        }
+        let failure = ExecutionFailureSummary::new(None, code, message).with_phase(phase);
+        let mut update = JobUpdate::default()
+            .with_progress(ProgressSummary::new("failed", 0, None))
+            .with_execution(ExecutionSummary::new(0, 0).with_failure(failure));
+        if let Some(review) = review {
+            update = update.with_review(review);
+        }
         if self
-            .transition_stage_with_retry(id, expected, next, stage)
+            .transition_with_retry(id, expected, JobState::Failed, update)
             .await
             .is_err()
         {
@@ -1280,6 +1355,8 @@ pub(crate) enum RuntimeError {
     StalePlan,
     #[error("supervised execution task closed before returning its durable result")]
     ExecutionTaskClosed,
+    #[error("the scrape queue is unavailable")]
+    QueueUnavailable,
     #[error("job execution is shutting down")]
     ExecutionShuttingDown,
     #[error("job count exceeds the persistent summary range")]
@@ -1303,8 +1380,6 @@ impl From<SubscribeError> for RuntimeError {
         }
     }
 }
-    #[error("the scrape queue is unavailable")]
-    QueueUnavailable,
 
 #[cfg(test)]
 mod queue_tests {

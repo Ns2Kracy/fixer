@@ -324,6 +324,8 @@ pub struct ExecutionFailureSummary {
     operation_index: Option<u64>,
     code: String,
     message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    phase: Option<String>,
 }
 
 impl ExecutionFailureSummary {
@@ -337,7 +339,13 @@ impl ExecutionFailureSummary {
             operation_index,
             code: code.into(),
             message: message.into(),
+            phase: None,
         }
+    }
+
+    pub fn with_phase(mut self, phase: impl Into<String>) -> Self {
+        self.phase = Some(phase.into());
+        self
     }
 }
 

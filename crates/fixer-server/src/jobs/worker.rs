@@ -66,11 +66,7 @@ pub fn auto_decision(
     review: &artifacts::ReviewArtifacts,
     conflicts: u64,
 ) -> AutoDecision {
-    let automatic = input.unattended()
-        || input.apply()
-            && input.organization().is_some_and(|organization| {
-                organization.auto_execute && organization.origin_rule_id.is_some()
-            });
+    let automatic = automatic_execution(input);
     if !automatic {
         return AutoDecision::NeedsReview {
             reason: AutoReviewReason::ManualJob,
@@ -101,7 +97,7 @@ pub fn auto_decision(
             reason: AutoReviewReason::NoCandidates,
         };
     };
-    if conflicts != 0 {
+    if conflicts != 0 && !input.unattended() {
         return AutoDecision::NeedsReview {
             reason: AutoReviewReason::MetadataConflicts,
         };
@@ -109,6 +105,14 @@ pub fn auto_decision(
     AutoDecision::Execute {
         candidate_index: candidate.index,
     }
+}
+
+pub(super) fn automatic_execution(input: &JobInputDto) -> bool {
+    input.unattended()
+        || input.apply()
+            && input.organization().is_some_and(|organization| {
+                organization.auto_execute && organization.origin_rule_id.is_some()
+            })
 }
 
 /// Reusable configured SDK flow, including deterministic fixture or shared providers.
@@ -158,11 +162,11 @@ pub enum WorkerFlow {
 
 pub struct ScannedJob {
     fixer: Fixer,
+    scanned: Option<MetadataDocument>,
     media_kind: JobMediaKind,
     title: String,
     isbn: Option<Isbn13>,
     output_root: PathBuf,
-    scanned: Option<MetadataDocument>,
     input: JobInputDto,
 }
 
@@ -329,11 +333,11 @@ impl ScannedJob {
     pub async fn search(self) -> Result<SearchArtifact, JobFlowError> {
         let Self {
             fixer,
+            scanned,
             media_kind,
             title,
             isbn,
             output_root,
-            scanned,
             input,
         } = self;
         if let fixer_core::ScrapeSelection::Exact(target) = input.selection().clone() {
@@ -397,11 +401,11 @@ impl ScannedJob {
 
 async fn exact_search(
     fixer: Fixer,
+    scanned: Option<MetadataDocument>,
     target: fixer_core::ProviderTarget,
     title: String,
     isbn: Option<Isbn13>,
     output_root: PathBuf,
-    scanned: Option<MetadataDocument>,
     input: JobInputDto,
 ) -> Result<SearchArtifact, JobFlowError> {
     if target.media_kind() != media_kind(input.media_kind()) {
@@ -892,57 +896,57 @@ fn scan_with_config(
             let (document, output_root) =
                 select_rooted(result.documents, result.roots, &input_path)?;
             let title = title_of(&document.titles)?;
+            let scanned = MetadataDocument::Anime(document.clone());
             (
                 LocalProvider::from_anime_documents([document]).map_err(local_error)?,
                 title,
                 None,
-            let scanned = MetadataDocument::Anime(document.clone());
                 output_root,
+                scanned,
             )
         }
         JobMediaKind::Book => select_book(&input_path, &root)?,
         JobMediaKind::Movie => select_movie(&input_path, &root)?,
-                scanned,
         JobMediaKind::Music => {
             let result = scan_music(&root).map_err(local_error)?;
             let (document, output_root) =
                 select_rooted(result.documents, result.roots, &input_path)?;
             let title = title_of(&document.titles)?;
+            let scanned = MetadataDocument::Music(document.clone());
             (
                 LocalProvider::from_music_documents([document]).map_err(local_error)?,
                 title,
                 None,
-            let scanned = MetadataDocument::Music(document.clone());
                 output_root,
+                scanned,
             )
         }
         JobMediaKind::Television => {
             let result = scan_television(&root).map_err(local_error)?;
-                scanned,
             let (document, output_root) =
                 select_rooted(result.documents, result.roots, &input_path)?;
             let title = title_of(&document.titles)?;
+            let scanned = MetadataDocument::Television(document.clone());
             (
                 LocalProvider::from_television_documents([document]).map_err(local_error)?,
                 title,
                 None,
-            let scanned = MetadataDocument::Television(document.clone());
                 output_root,
+                scanned,
             )
         }
     };
     let fixer = match config {
-                scanned,
         Some(config) => fixer_runtime::build_fixer(config, provider)?,
         None => Fixer::builder().provider(provider).offline().build()?,
     };
     Ok(ScannedJob {
         fixer,
+        scanned: Some(scanned),
         media_kind: input.media_kind(),
         title,
         isbn,
         output_root,
-        scanned: Some(scanned),
         input: input.clone(),
     })
 }
@@ -1006,17 +1010,17 @@ fn select_book(
         (work, isbn, output_root)
     };
     let title = title_of(&work.titles)?;
+    let scanned = MetadataDocument::Book(work.clone());
     Ok((
         LocalProvider::from_book_documents([work]).map_err(local_error)?,
         title,
         Some(isbn),
-    let scanned = MetadataDocument::Book(work.clone());
         output_root,
+        scanned,
     ))
 }
 
 fn select_movie(
-        scanned,
     input_path: &Path,
     root: &Path,
 ) -> Result<
@@ -1057,11 +1061,11 @@ fn select_movie(
         title,
         None,
         root.to_owned(),
+        scanned,
     ))
 }
 
 fn movie_from_hint(hint: fixer_provider_local::MediaHint) -> Result<Movie, JobFlowError> {
-        scanned,
     let slug = hint
         .title
         .chars()
@@ -1223,6 +1227,7 @@ pub enum JobFlowError {
 #[must_use = "retain the worker pool while jobs should run"]
 pub struct WorkerPool {
     shutdown: watch::Sender<bool>,
+    recovery: Option<JoinHandle<()>>,
     handles: Vec<JoinHandle<()>>,
     execution_tasks: Arc<ExecutionTaskRegistry>,
 }
@@ -1230,11 +1235,13 @@ pub struct WorkerPool {
 impl WorkerPool {
     pub(super) const fn new(
         shutdown: watch::Sender<bool>,
+        recovery: JoinHandle<()>,
         handles: Vec<JoinHandle<()>>,
         execution_tasks: Arc<ExecutionTaskRegistry>,
     ) -> Self {
         Self {
             shutdown,
+            recovery: Some(recovery),
             handles,
             execution_tasks,
         }
@@ -1244,6 +1251,9 @@ impl WorkerPool {
     }
     pub async fn shutdown(mut self) {
         let _ = self.shutdown.send(true);
+        if let Some(recovery) = self.recovery.take() {
+            let _ = recovery.await;
+        }
         for handle in self.handles.drain(..) {
             let _ = handle.await;
         }
@@ -1285,6 +1295,10 @@ mod tests {
         })
     }
 
+    fn unattended_input() -> crate::jobs::model::JobInputDto {
+        automatic_input(false).with_unattended()
+    }
+
     fn review(candidate_count: usize) -> crate::jobs::artifacts::ReviewArtifacts {
         crate::jobs::artifacts::ReviewArtifacts {
             candidates: (0..candidate_count)
@@ -1319,7 +1333,6 @@ mod tests {
                     code: code.to_owned(),
                     message: "remote unavailable".to_owned(),
                 });
-    recovery: Option<JoinHandle<()>>,
             assert!(matches!(
                 super::auto_decision(&automatic_input(true), &review, 0),
                 super::AutoDecision::NeedsReview { .. }
@@ -1327,29 +1340,49 @@ mod tests {
         }
         let mut review = review(1);
         review.warnings_truncated = true;
-        recovery: JoinHandle<()>,
         assert!(matches!(
             super::auto_decision(&automatic_input(true), &review, 0),
             super::AutoDecision::NeedsReview { .. }
         ));
     }
-            recovery: Some(recovery),
 
     #[test]
-    fn auto_decision_uses_first_deterministic_candidate_without_conflicts() {
+    fn unattended_auto_decision_bypasses_only_metadata_conflicts() {
         use crate::jobs::{model::AutoReviewReason, worker::AutoDecision};
 
         assert_eq!(
             super::auto_decision(&automatic_input(true), &review(2), 0),
             AutoDecision::Execute { candidate_index: 0 }
         );
-        if let Some(recovery) = self.recovery.take() {
-            let _ = recovery.await;
-        }
         assert_eq!(
             super::auto_decision(&automatic_input(true), &review(1), 1),
             AutoDecision::NeedsReview {
                 reason: AutoReviewReason::MetadataConflicts
+            }
+        );
+        assert_eq!(
+            super::auto_decision(&unattended_input(), &review(1), 1),
+            AutoDecision::Execute { candidate_index: 0 }
+        );
+        let mut failed_enrichment = review(1);
+        failed_enrichment
+            .warnings
+            .push(crate::jobs::artifacts::WarningArtifact {
+                code: "provider_fetch_failed".to_owned(),
+                message: "remote unavailable".to_owned(),
+            });
+        assert_eq!(
+            super::auto_decision(&unattended_input(), &failed_enrichment, 1),
+            AutoDecision::NeedsReview {
+                reason: AutoReviewReason::ProviderEnrichmentFailed
+            }
+        );
+        let mut truncated = review(1);
+        truncated.candidates_truncated = true;
+        assert_eq!(
+            super::auto_decision(&unattended_input(), &truncated, 0),
+            AutoDecision::NeedsReview {
+                reason: AutoReviewReason::CandidateListTruncated
             }
         );
         assert_eq!(
