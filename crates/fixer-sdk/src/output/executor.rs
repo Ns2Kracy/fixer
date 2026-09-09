@@ -1,12 +1,16 @@
 //! Prepared output-plan execution with stale-state and overwrite protection.
 
 use super::fingerprint::PathFingerprint;
-use fixer_core::{CoreError, OutputOperation, OutputPlan};
+use fixer_core::{
+    CoreError, OperationOutcome, OperationReport, OutputFingerprint, OutputOperation,
+    OutputOperationKind, OutputPlan,
+};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     ffi::OsString,
     fs::{self, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -61,18 +65,10 @@ impl ExecutionPolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OperationStatus {
-    DryRun,
+enum OperationStatus {
     Completed,
     Reflinked,
     CopiedFallback,
-    Failed,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OperationReport {
-    pub index: usize,
-    pub target: PathBuf,
-    pub status: OperationStatus,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExecutionReport {
@@ -153,43 +149,86 @@ impl PreparedOutputPlan {
         if !policy.dry_run
             && let Err((index, target, error)) = self.preflight(policy)
         {
-            report.operations.push(OperationReport {
+            if let Err(report_error) = push_operation_report(
+                &mut report,
+                &self.root,
+                &self.plan.operations()[index],
                 index,
+                OperationOutcome::Failed,
+                None,
+            ) {
+                return Err(ExecutionFailure {
+                    error: report_error,
+                    report,
+                });
+            }
+            debug_assert_eq!(
                 target,
-                status: OperationStatus::Failed,
-            });
+                absolute_target(&self.root, &self.plan.operations()[index])
+            );
             return Err(ExecutionFailure { error, report });
         }
         for (index, operation) in self.plan.operations().iter().enumerate() {
             let target = absolute_target(&self.root, operation);
             if policy.dry_run {
-                report.operations.push(OperationReport {
+                if let Err(error) = push_operation_report(
+                    &mut report,
+                    &self.root,
+                    operation,
                     index,
-                    target,
-                    status: OperationStatus::DryRun,
-                });
+                    OperationOutcome::DryRun,
+                    None,
+                ) {
+                    return Err(ExecutionFailure { error, report });
+                }
                 continue;
             }
             if let Err(error) = ensure_safe_ancestors(&self.root, relative_target(operation)) {
-                report.operations.push(OperationReport {
+                let _ = push_operation_report(
+                    &mut report,
+                    &self.root,
+                    operation,
                     index,
-                    target,
-                    status: OperationStatus::Failed,
-                });
+                    OperationOutcome::Failed,
+                    None,
+                );
                 return Err(ExecutionFailure { error, report });
             }
             match execute_operation(operation, &self.root, policy) {
-                Ok(status) => report.operations.push(OperationReport {
-                    index,
-                    target,
-                    status,
-                }),
+                Ok(_) => match output_fingerprint(&target) {
+                    Ok(fingerprint) => {
+                        if let Err(error) = push_operation_report(
+                            &mut report,
+                            &self.root,
+                            operation,
+                            index,
+                            OperationOutcome::Succeeded,
+                            fingerprint,
+                        ) {
+                            return Err(ExecutionFailure { error, report });
+                        }
+                    }
+                    Err(error) => {
+                        let _ = push_operation_report(
+                            &mut report,
+                            &self.root,
+                            operation,
+                            index,
+                            OperationOutcome::Failed,
+                            None,
+                        );
+                        return Err(ExecutionFailure { error, report });
+                    }
+                },
                 Err(error) => {
-                    report.operations.push(OperationReport {
+                    let _ = push_operation_report(
+                        &mut report,
+                        &self.root,
+                        operation,
                         index,
-                        target,
-                        status: OperationStatus::Failed,
-                    });
+                        OperationOutcome::Failed,
+                        None,
+                    );
                     return Err(ExecutionFailure { error, report });
                 }
             }
@@ -348,6 +387,70 @@ pub fn plan_media_placement(
     .map_err(|error| core_error(&error))?;
     plan.push(operation);
     Ok(plan)
+}
+
+fn push_operation_report(
+    report: &mut ExecutionReport,
+    root: &Path,
+    operation: &OutputOperation,
+    index: usize,
+    outcome: OperationOutcome,
+    fingerprint: Option<OutputFingerprint>,
+) -> Result<(), ExecutionError> {
+    let index = u64::try_from(index)
+        .map_err(|_| ExecutionError::InvalidPlan("operation index exceeds u64".to_owned()))?;
+    let source = resolved_source(operation, root).map(|path| path.to_string_lossy().into_owned());
+    let destination = absolute_target(root, operation)
+        .to_string_lossy()
+        .into_owned();
+    report.operations.push(
+        OperationReport::new(
+            index,
+            operation_kind(operation),
+            source,
+            destination,
+            outcome,
+            fingerprint,
+        )
+        .map_err(|error| core_error(&error))?,
+    );
+    Ok(())
+}
+
+const fn operation_kind(operation: &OutputOperation) -> OutputOperationKind {
+    match operation {
+        OutputOperation::CreateDirectory { .. } => OutputOperationKind::CreateDirectory,
+        OutputOperation::WriteBytes { .. } => OutputOperationKind::WriteBytes,
+        OutputOperation::Copy { .. } => OutputOperationKind::Copy,
+        OutputOperation::Move { .. } => OutputOperationKind::Move,
+        OutputOperation::Symlink { .. } => OutputOperationKind::Symlink,
+        OutputOperation::Hardlink { .. } => OutputOperationKind::Hardlink,
+        OutputOperation::Reflink { .. } => OutputOperationKind::Reflink,
+    }
+}
+
+fn output_fingerprint(target: &Path) -> Result<Option<OutputFingerprint>, ExecutionError> {
+    let metadata = fs::metadata(target)
+        .map_err(|error| io_error("inspect completed output", target, error))?;
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    let mut file =
+        fs::File::open(target).map_err(|error| io_error("open completed output", target, error))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| io_error("fingerprint completed output", target, error))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    OutputFingerprint::new(format!("{:x}", hasher.finalize()))
+        .map(Some)
+        .map_err(|error| core_error(&error))
 }
 
 fn execute_operation(

@@ -1,7 +1,9 @@
-use fixer_core::{OutputOperation, OutputPlan, PlannedContent};
+use fixer_core::{
+    OperationOutcome, OutputOperation, OutputOperationKind, OutputPlan, PlannedContent,
+};
 use fixer_sdk::output::{
-    ExecutionError, ExecutionPolicy, OperationStatus, OutputPlanExt, OverwritePolicy,
-    PlacementMode, ReflinkPolicy, plan_media_placement,
+    ExecutionError, ExecutionPolicy, OutputPlanExt, OverwritePolicy, PlacementMode, ReflinkPolicy,
+    plan_media_placement,
 };
 use std::{fs, path::Path};
 
@@ -18,7 +20,7 @@ fn dry_run_previews_without_touching_the_filesystem() {
     let plan = write_plan(root.path(), "movie/movie.json", b"metadata");
     assert_eq!(plan.preview().unwrap().operations().len(), 1);
     let report = plan.execute(ExecutionPolicy::dry_run()).unwrap();
-    assert_eq!(report.operations()[0].status, OperationStatus::DryRun);
+    assert_eq!(report.operations()[0].outcome(), OperationOutcome::DryRun);
     assert!(!target.exists());
 }
 
@@ -111,7 +113,19 @@ fn move_publishes_destination_then_removes_source() {
 
     let report = plan.execute(ExecutionPolicy::default()).unwrap();
 
-    assert_eq!(report.operations()[0].status, OperationStatus::Completed);
+    let operation = &report.operations()[0];
+    assert_eq!(operation.outcome(), OperationOutcome::Succeeded);
+    assert_eq!(operation.kind(), OutputOperationKind::Move);
+    assert_eq!(operation.source(), Some(source.to_string_lossy().as_ref()));
+    assert_eq!(
+        operation.destination(),
+        output
+            .join("Movie/movie.mkv")
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+    );
+    assert!(operation.fingerprint().is_some());
     assert_eq!(
         fs::read(output.join("Movie/movie.mkv")).unwrap(),
         [0, 1, 2, 255]
@@ -167,7 +181,7 @@ fn later_collision_is_detected_before_an_earlier_move() {
         failure.error(),
         ExecutionError::TargetExists { .. }
     ));
-    assert_eq!(failure.report().operations()[0].index, 1);
+    assert_eq!(failure.report().operations()[0].operation_index(), 1);
     assert_eq!(fs::read(&source).unwrap(), b"incoming");
     assert!(!output.join("movie.mkv").exists());
     assert_eq!(fs::read(output.join("movie.nfo")).unwrap(), b"existing");
@@ -378,7 +392,10 @@ fn reflink_required_reports_support_precisely_or_succeeds() {
         .unwrap()
         .execute(ExecutionPolicy::default().with_reflink(ReflinkPolicy::Required));
     match result {
-        Ok(report) => assert_eq!(report.operations()[0].status, OperationStatus::Reflinked),
+        Ok(report) => assert_eq!(
+            report.operations()[0].outcome(),
+            OperationOutcome::Succeeded
+        ),
         Err(failure) => assert!(matches!(
             failure.error(),
             ExecutionError::ReflinkUnsupported { .. }
@@ -395,10 +412,10 @@ fn preflight_failure_reports_operation_without_partial_output() {
     plan.push(OutputOperation::copy(&missing, "movie.mkv").unwrap());
     let prepared = plan.prepare().unwrap();
     let failure = prepared.execute(ExecutionPolicy::default()).unwrap_err();
-    assert_eq!(failure.report().operations()[0].index, 1);
+    assert_eq!(failure.report().operations()[0].operation_index(), 1);
     assert_eq!(
-        failure.report().operations()[0].status,
-        OperationStatus::Failed
+        failure.report().operations()[0].outcome(),
+        OperationOutcome::Failed
     );
     assert!(!output.join("movie.json").exists());
     assert!(walkdir(&output).iter().all(|path| {

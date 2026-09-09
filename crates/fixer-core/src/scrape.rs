@@ -224,9 +224,7 @@ impl ReplacementManifest {
 }
 
 fn validated_audit_path(value: String, field: &'static str) -> Result<String, CoreError> {
-    if value.is_empty()
-        || value.len() > MAX_AUDIT_PATH_BYTES
-        || value.chars().any(char::is_control)
+    if value.is_empty() || value.len() > MAX_AUDIT_PATH_BYTES || value.chars().any(char::is_control)
     {
         return Err(CoreError::InvalidDomainValue { field, value });
     }

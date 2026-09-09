@@ -9,10 +9,8 @@ use std::{
     sync::{Arc, Mutex as StdMutex, OnceLock},
 };
 
-use fixer_core::{OutputOperation, OutputPlan};
-use fixer_sdk::output::{
-    ExecutionError, ExecutionFailure, ExecutionPolicy, OperationStatus, OutputPlanExt,
-};
+use fixer_core::{OperationOutcome, OutputOperation, OutputPlan};
+use fixer_sdk::output::{ExecutionError, ExecutionFailure, ExecutionPolicy, OutputPlanExt};
 use futures_util::FutureExt;
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify, oneshot, watch};
@@ -54,8 +52,8 @@ fn execution_failure_summary(failure: &ExecutionFailure) -> ExecutionFailureSumm
         .report()
         .operations()
         .iter()
-        .find(|operation| operation.status == OperationStatus::Failed)
-        .and_then(|operation| u64::try_from(operation.index).ok());
+        .find(|operation| operation.outcome() == OperationOutcome::Failed)
+        .map(fixer_core::OperationReport::operation_index);
     let (code, message) = match failure.error() {
         ExecutionError::UnsafeTarget { .. } => (
             "unsafe_target",
@@ -586,13 +584,13 @@ impl JobRuntime {
                     .report()
                     .operations()
                     .iter()
-                    .filter(|operation| operation.status != OperationStatus::Failed)
+                    .filter(|operation| operation.outcome() != OperationOutcome::Failed)
                     .count();
                 let failed = failure
                     .report()
                     .operations()
                     .iter()
-                    .filter(|operation| operation.status == OperationStatus::Failed)
+                    .filter(|operation| operation.outcome() == OperationOutcome::Failed)
                     .count();
                 (
                     JobState::Failed,

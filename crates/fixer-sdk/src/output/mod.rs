@@ -4,7 +4,6 @@ mod executor;
 mod fingerprint;
 
 pub use executor::{
-    ExecutionError, ExecutionFailure, ExecutionPolicy, ExecutionReport, OperationReport,
-    OperationStatus, OutputPlanExt, OverwritePolicy, PlacementMode, PreparedOutputPlan,
-    ReflinkPolicy, plan_media_placement,
+    ExecutionError, ExecutionFailure, ExecutionPolicy, ExecutionReport, OutputPlanExt,
+    OverwritePolicy, PlacementMode, PreparedOutputPlan, ReflinkPolicy, plan_media_placement,
 };
