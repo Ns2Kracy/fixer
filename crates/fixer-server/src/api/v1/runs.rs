@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, path::Path};
 
 use axum::{
     Json, Router,
-    extract::{Path as AxumPath, Query, State, rejection::JsonRejection},
+    extract::{FromRef, Path as AxumPath, Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -17,11 +17,24 @@ use crate::{
         model::{ExecutionSummary, JobInputDto, JobMediaKind, JobState},
     },
     store::{JobId, JobRecord},
+    workspace::{DirectoryRef, WorkspaceState},
 };
 
 const SCHEMA_VERSION: u8 = 1;
 
-pub fn router(runtime: JobRuntime) -> Router {
+#[derive(Clone)]
+struct RunApiState {
+    runtime: JobRuntime,
+    workspace: Option<WorkspaceState>,
+}
+
+impl FromRef<RunApiState> for JobRuntime {
+    fn from_ref(state: &RunApiState) -> Self {
+        state.runtime.clone()
+    }
+}
+
+pub fn router(runtime: JobRuntime, workspace: Option<WorkspaceState>) -> Router {
     Router::new()
         .route(
             "/scrape-runs",
@@ -30,7 +43,7 @@ pub fn router(runtime: JobRuntime) -> Router {
         .route("/scrape-runs/{id}", get(get_run).fallback(get_only))
         .route("/scrape-runs/{id}/retry", post(retry).fallback(post_only))
         .route("/scrape-runs/{id}/cancel", post(cancel).fallback(post_only))
-        .with_state(runtime)
+        .with_state(RunApiState { runtime, workspace })
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +53,8 @@ struct CreateRunRequest {
     media_kind: Option<JobMediaKind>,
     #[serde(default)]
     input_path: Option<String>,
+    #[serde(default)]
+    source: Option<DirectoryRef>,
     #[serde(default)]
     target: Option<ProviderTarget>,
     #[serde(default)]
@@ -97,11 +112,12 @@ struct RunDto {
 }
 
 async fn create(
-    State(runtime): State<JobRuntime>,
+    State(state): State<RunApiState>,
     request: Result<Json<CreateRunRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
     let Json(request) = request.map_err(|_| invalid("body", "must match the scrape run schema"))?;
-    let (media_kind, input_path) = resolve_input(&runtime, &request).await?;
+    let (media_kind, input_path) =
+        resolve_input(&state.runtime, state.workspace.as_ref(), &request).await?;
     validate_input_path(&input_path)?;
     let selection = validated_selection(media_kind, request.target)?;
     let mut input = JobInputDto::new(media_kind, input_path, true)
@@ -110,7 +126,8 @@ async fn create(
     if let Some(parent) = request.correction_of {
         input = input.with_correction_of(parent);
     }
-    let (run, created) = runtime
+    let (run, created) = state
+        .runtime
         .create_run(input)
         .await
         .map_err(super::jobs::map_runtime_error)?;
@@ -125,19 +142,34 @@ async fn create(
 async fn resolve_input(
     runtime: &JobRuntime,
     request: &CreateRunRequest,
+    workspace: Option<&WorkspaceState>,
 ) -> Result<(JobMediaKind, String), ApiError> {
     let Some(parent_id) = request.correction_of else {
-        return Ok((
-            request
-                .media_kind
-                .ok_or_else(|| invalid("media_kind", "is required for a new scrape"))?,
-            request
-                .input_path
-                .clone()
-                .ok_or_else(|| invalid("input_path", "is required for a new scrape"))?,
-        ));
+        let media_kind = request
+            .media_kind
+            .ok_or_else(|| invalid("media_kind", "is required for a new scrape"))?;
+        let input_path = match (&request.source, &request.input_path) {
+            (Some(_), Some(_)) => {
+                return Err(invalid("source", "cannot be combined with input_path"));
+            }
+            (Some(source), None) => workspace
+                .ok_or_else(|| invalid("source", "workspace browsing is unavailable"))?
+                .resolve_directory(source)
+                .map_err(|_| invalid("source", "must identify an available media directory"))?
+                .canonical_path
+                .to_string_lossy()
+                .into_owned(),
+            (None, Some(path)) => path.clone(),
+            (None, None) => {
+                return Err(invalid("source", "is required for a new scrape"));
+            }
+        };
+        return Ok((media_kind, input_path));
     };
     if request.target.is_none() {
+    if request.source.is_some() {
+        return Err(invalid("source", "must be omitted for a correction"));
+    }
         return Err(invalid(
             "target",
             "is required when correcting an earlier scrape",
