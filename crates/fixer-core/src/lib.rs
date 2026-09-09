@@ -4,7 +4,6 @@
 
 #![forbid(unsafe_code)]
 
-mod confidence;
 mod error;
 pub mod http;
 mod identity;
@@ -17,15 +16,11 @@ mod provenance;
 pub mod provider;
 mod resolved;
 
-pub use confidence::Confidence;
 pub use error::CoreError;
 pub use http::{Header, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse};
 pub use identity::{ExternalId, ProviderId};
 pub use locale::{LanguageTag, LocalePolicy, LocalizedEntry, LocalizedValue};
-pub use matching::{
-    MatchEvidence, MatchEvidenceKind, MatchQuery, MatchScore, MatchSelection, Matcher,
-    MatchingError, RankedCandidate,
-};
+pub use matching::{MatchQuery, MatchSelection, Matcher, MatchingError, RankedCandidate};
 pub use media::*;
 pub use merge::{
     AnimeDocument, AnimeMerger, FieldPath, MergeError, MergePolicy, MovieDocument, MovieMerger,

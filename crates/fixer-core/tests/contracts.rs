@@ -254,7 +254,7 @@ fn book_exact_isbn_identity_outranks_an_exact_title_without_identity() {
     let ranked = Matcher.rank(&query, vec![exact_title, exact_isbn]).unwrap();
 
     assert_eq!(ranked[0].candidate.external_id().namespace, "isbn");
-    assert!(ranked[0].score.total > ranked[1].score.total);
+    assert_eq!(ranked[1].candidate.external_id().namespace, "fixture");
 }
 
 #[test]

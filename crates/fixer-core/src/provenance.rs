@@ -1,6 +1,6 @@
 //! Source references and field-level provenance.
 
-use crate::{Confidence, CoreError, ExternalId, LanguageTag, ProviderId};
+use crate::{CoreError, ExternalId, LanguageTag, ProviderId};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -46,15 +46,13 @@ impl SourceRef {
     }
 }
 
-/// A metadata value together with its source and confidence.
+/// A metadata value together with its source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Sourced<T> {
     /// Observed value.
     pub value: T,
     /// Source that supplied the value.
     pub source: SourceRef,
-    /// Confidence assigned to the observation.
-    pub confidence: Confidence,
 }
 
 /// Field path to one or more contributing sources.

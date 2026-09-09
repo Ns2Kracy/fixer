@@ -9,9 +9,6 @@ pub enum CoreError {
     /// A language tag was not well-formed or valid BCP 47.
     #[error("invalid BCP 47 language tag `{input}`: {reason}")]
     InvalidLanguageTag { input: String, reason: String },
-    /// A confidence value was not finite or outside the unit interval.
-    #[error("confidence must be finite and between 0.0 and 1.0, got {value}")]
-    InvalidConfidence { value: f32 },
     /// A provider identifier was empty or contained unsupported characters.
     #[error("invalid provider identifier `{input}`")]
     InvalidProviderId { input: String },

@@ -1,18 +1,7 @@
 use fixer_core::{
-    Confidence, ExternalId, LanguageTag, LocalePolicy, LocalizedValue, ProvenanceMap, ProviderId,
-    SourceRef,
+    ExternalId, LanguageTag, LocalePolicy, LocalizedValue, ProvenanceMap, ProviderId, SourceRef,
 };
 use std::time::{Duration, UNIX_EPOCH};
-
-#[test]
-fn confidence_accepts_only_finite_unit_interval_values() {
-    assert!(Confidence::new(0.0).unwrap().get().abs() < f32::EPSILON);
-    assert!((Confidence::new(1.0).unwrap().get() - 1.0).abs() < f32::EPSILON);
-    assert!(Confidence::new(-0.01).is_err());
-    assert!(Confidence::new(1.01).is_err());
-    assert!(Confidence::new(f32::NAN).is_err());
-    assert!(serde_json::from_str::<Confidence>("2.0").is_err());
-}
 
 #[test]
 fn language_tags_are_validated_and_preserve_the_input() {
