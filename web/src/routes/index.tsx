@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/solid-router";
-import { JobsPage } from "./jobs/index";
+
+import { ScrapeRunsPage } from "../components/scrape-runs-page";
 
 export const Route = createFileRoute("/")({ component: OrganizePage });
 function OrganizePage() {
-  return <JobsPage inbox />;
+  return <ScrapeRunsPage create />;
 }

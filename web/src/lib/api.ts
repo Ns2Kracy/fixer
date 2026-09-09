@@ -376,6 +376,31 @@ export interface ExecutionFailureSummary {
   operation_index?: number;
   code: string;
   message: string;
+  phase?: string;
+}
+
+export interface ProviderTarget {
+  media_kind: MediaKind;
+  provider: string;
+  external_id: ExternalIdArtifact;
+}
+
+export type OperationOutcome = "dry_run" | "succeeded" | "failed";
+
+export interface OperationReport {
+  operation_index: number;
+  kind:
+    | "create_directory"
+    | "write_bytes"
+    | "copy"
+    | "move"
+    | "symlink"
+    | "hardlink"
+    | "reflink";
+  source?: string;
+  destination: string;
+  outcome: OperationOutcome;
+  fingerprint?: string;
 }
 
 export interface ExecutionSummary {
@@ -383,6 +408,49 @@ export interface ExecutionSummary {
   completed_operations: number;
   failed_operations: number;
   failure?: ExecutionFailureSummary;
+  operations?: OperationReport[];
+}
+
+export type ScrapeRunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export interface ScrapeRunDto {
+  id: number;
+  item_name: string;
+  media_kind: MediaKind;
+  status: ScrapeRunStatus;
+  requested_target?: ProviderTarget;
+  selected_target?: ProviderTarget;
+  correction_of?: number;
+  retry_of?: number;
+  candidate_count: number;
+  conflict_count: number;
+  execution?: ExecutionSummary;
+  created_at_ms: number;
+  updated_at_ms: number;
+}
+
+export interface ScrapeRunEnvelope {
+  schema_version: SchemaVersion;
+  run: ScrapeRunDto;
+}
+
+export interface ScrapeRunListEnvelope {
+  schema_version: SchemaVersion;
+  runs: ScrapeRunDto[];
+  has_more: boolean;
+}
+
+export interface CreateScrapeRunRequest {
+  media_kind?: MediaKind;
+  input_path?: string;
+  source?: DirectoryRef;
+  target?: ProviderTarget;
+  correction_of?: number;
 }
 
 export interface JobDto {
@@ -661,6 +729,26 @@ export class ApiClient {
     await this.#request("/auth/logout", { method: "POST" });
     this.#issuedCsrfToken = undefined;
     this.#csrfTokenChanged(this.#issuedCsrfToken);
+  }
+
+  createScrapeRun(request: CreateScrapeRunRequest): Promise<ScrapeRunEnvelope> {
+    return this.#request("/scrape-runs", { method: "POST", body: request });
+  }
+
+  getScrapeRun(id: number): Promise<ScrapeRunEnvelope> {
+    return this.#request(`/scrape-runs/${id}`);
+  }
+
+  listScrapeRuns(limit = 50): Promise<ScrapeRunListEnvelope> {
+    return this.#request(`/scrape-runs?limit=${limit}`);
+  }
+
+  retryScrapeRun(id: number): Promise<ScrapeRunEnvelope> {
+    return this.#request(`/scrape-runs/${id}/retry`, { method: "POST" });
+  }
+
+  cancelScrapeRun(id: number): Promise<ScrapeRunEnvelope> {
+    return this.#request(`/scrape-runs/${id}/cancel`, { method: "POST" });
   }
 
   createJob(request: CreateJobRequest): Promise<JobEnvelope> {

@@ -18,9 +18,11 @@ import { Route as SearchRouteImport } from './routes/search'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
+import { Route as ScrapesIndexRouteImport } from './routes/scrapes/index'
 import { Route as JobsJobIdIndexRouteImport } from './routes/jobs/$jobId/index'
 import { Route as JobsJobIdPlanRouteImport } from './routes/jobs/$jobId/plan'
 import { Route as JobsJobIdReviewRouteImport } from './routes/jobs/$jobId/review'
+import { Route as ScrapesRunIdIndexRouteImport } from './routes/scrapes/$runId/index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -67,6 +69,11 @@ const JobsIndexRoute = JobsIndexRouteImport.update({
   path: '/jobs/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ScrapesIndexRoute = ScrapesIndexRouteImport.update({
+  id: '/scrapes/',
+  path: '/scrapes/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const JobsJobIdIndexRoute = JobsJobIdIndexRouteImport.update({
   id: '/jobs/$jobId/',
   path: '/jobs/$jobId/',
@@ -82,6 +89,11 @@ const JobsJobIdReviewRoute = JobsJobIdReviewRouteImport.update({
   path: '/jobs/$jobId/review',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ScrapesRunIdIndexRoute = ScrapesRunIdIndexRouteImport.update({
+  id: '/scrapes/$runId/',
+  path: '/scrapes/$runId/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -93,9 +105,11 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/templates': typeof TemplatesRoute
   '/jobs/': typeof JobsIndexRoute
+  '/scrapes/': typeof ScrapesIndexRoute
   '/jobs/$jobId/plan': typeof JobsJobIdPlanRoute
   '/jobs/$jobId/review': typeof JobsJobIdReviewRoute
   '/jobs/$jobId/': typeof JobsJobIdIndexRoute
+  '/scrapes/$runId/': typeof ScrapesRunIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -107,9 +121,11 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/templates': typeof TemplatesRoute
   '/jobs': typeof JobsIndexRoute
+  '/scrapes': typeof ScrapesIndexRoute
   '/jobs/$jobId/plan': typeof JobsJobIdPlanRoute
   '/jobs/$jobId/review': typeof JobsJobIdReviewRoute
   '/jobs/$jobId': typeof JobsJobIdIndexRoute
+  '/scrapes/$runId': typeof ScrapesRunIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -122,9 +138,11 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/templates': typeof TemplatesRoute
   '/jobs/': typeof JobsIndexRoute
+  '/scrapes/': typeof ScrapesIndexRoute
   '/jobs/$jobId/plan': typeof JobsJobIdPlanRoute
   '/jobs/$jobId/review': typeof JobsJobIdReviewRoute
   '/jobs/$jobId/': typeof JobsJobIdIndexRoute
+  '/scrapes/$runId/': typeof ScrapesRunIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -138,9 +156,11 @@ export interface FileRouteTypes {
     | '/settings'
     | '/templates'
     | '/jobs/'
+    | '/scrapes/'
     | '/jobs/$jobId/plan'
     | '/jobs/$jobId/review'
     | '/jobs/$jobId/'
+    | '/scrapes/$runId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -152,9 +172,11 @@ export interface FileRouteTypes {
     | '/settings'
     | '/templates'
     | '/jobs'
+    | '/scrapes'
     | '/jobs/$jobId/plan'
     | '/jobs/$jobId/review'
     | '/jobs/$jobId'
+    | '/scrapes/$runId'
   id:
     | '__root__'
     | '/'
@@ -166,9 +188,11 @@ export interface FileRouteTypes {
     | '/settings'
     | '/templates'
     | '/jobs/'
+    | '/scrapes/'
     | '/jobs/$jobId/plan'
     | '/jobs/$jobId/review'
     | '/jobs/$jobId/'
+    | '/scrapes/$runId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -181,9 +205,11 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   TemplatesRoute: typeof TemplatesRoute
   JobsIndexRoute: typeof JobsIndexRoute
+  ScrapesIndexRoute: typeof ScrapesIndexRoute
   JobsJobIdPlanRoute: typeof JobsJobIdPlanRoute
   JobsJobIdReviewRoute: typeof JobsJobIdReviewRoute
   JobsJobIdIndexRoute: typeof JobsJobIdIndexRoute
+  ScrapesRunIdIndexRoute: typeof ScrapesRunIdIndexRoute
 }
 
 declare module '@tanstack/solid-router' {
@@ -251,6 +277,13 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof JobsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/scrapes/': {
+      id: '/scrapes/'
+      path: '/scrapes'
+      fullPath: '/scrapes/'
+      preLoaderRoute: typeof ScrapesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/jobs/$jobId/': {
       id: '/jobs/$jobId/'
       path: '/jobs/$jobId'
@@ -272,6 +305,13 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof JobsJobIdReviewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/scrapes/$runId/': {
+      id: '/scrapes/$runId/'
+      path: '/scrapes/$runId'
+      fullPath: '/scrapes/$runId/'
+      preLoaderRoute: typeof ScrapesRunIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -285,9 +325,11 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   TemplatesRoute: TemplatesRoute,
   JobsIndexRoute: JobsIndexRoute,
+  ScrapesIndexRoute: ScrapesIndexRoute,
   JobsJobIdPlanRoute: JobsJobIdPlanRoute,
   JobsJobIdReviewRoute: JobsJobIdReviewRoute,
   JobsJobIdIndexRoute: JobsJobIdIndexRoute,
+  ScrapesRunIdIndexRoute: ScrapesRunIdIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
