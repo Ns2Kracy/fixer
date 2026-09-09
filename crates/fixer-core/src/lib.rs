@@ -15,6 +15,7 @@ pub mod output;
 mod provenance;
 pub mod provider;
 mod resolved;
+mod scrape;
 
 pub use error::CoreError;
 pub use http::{Header, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse};
@@ -36,3 +37,4 @@ pub use provider::{
     TelevisionCandidate,
 };
 pub use resolved::{MergeConflict, ResolutionWarning, Resolved};
+pub use scrape::{ProviderTarget, ScrapeSelection};

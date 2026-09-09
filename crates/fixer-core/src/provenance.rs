@@ -47,7 +47,7 @@ impl SourceRef {
 }
 
 /// A metadata value together with its source.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sourced<T> {
     /// Observed value.
     pub value: T,
