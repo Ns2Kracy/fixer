@@ -7,18 +7,21 @@ pub mod fixture;
 mod orchestrator;
 pub mod output;
 pub mod query;
+mod scrape;
 
 pub use builder::FixerBuilder;
+pub use fixer_core::Resolved;
 pub use fixture::{FixtureDocument, FixtureProvider};
 pub use query::anime::{AnimeQuery, AnimeSearch, SelectedAnime};
 pub use query::book::{BookQuery, BookSearch, SelectedBook};
 pub use query::movie::{MovieQuery, MovieSearch, SelectedMovie};
 pub use query::music::{MusicQuery, MusicSearch, SelectedMusic};
 pub use query::television::{SelectedTelevision, TelevisionQuery, TelevisionSearch};
+pub use scrape::{Scrape, ScrapeResult, ScrapedMedia};
 
 use fixer_core::{
-    CoreError, HttpClient, HttpError, HttpRequest, HttpResponse, LanguageTag, MetadataDocument,
-    OrderingScheme, Provider, ProviderError, ProviderId, ProviderTarget,
+    CoreError, HttpClient, HttpError, HttpRequest, HttpResponse, LanguageTag, MediaKind,
+    MetadataDocument, OrderingScheme, Provider, ProviderError, ProviderId, ProviderTarget,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -51,6 +54,15 @@ pub enum SdkError {
     Merge(String),
     #[error("invalid HTTP configuration: {0}")]
     HttpConfig(String),
+    #[error("scanned metadata has no title")]
+    MissingScrapeTitle,
+    #[error("exact scraping is not supported for {0:?} metadata")]
+    ExactScrapeUnsupported(MediaKind),
+    #[error("scrape target media {selected:?} does not match scanned media {scanned:?}")]
+    ScrapeTargetMediaMismatch {
+        scanned: MediaKind,
+        selected: MediaKind,
+    },
 }
 
 struct DisabledHttpClient;
@@ -116,6 +128,11 @@ impl Fixer {
     /// Fetches one exact provider record without running a search.
     pub async fn fetch_exact(&self, target: &ProviderTarget) -> Result<MetadataDocument, SdkError> {
         orchestrator::fetch_exact(self, target).await
+    }
+
+    /// Starts one high-level scrape from already scanned local metadata.
+    pub fn scrape(&self, scanned: MetadataDocument) -> Scrape {
+        Scrape::new(self.clone(), scanned)
     }
 
     /// Starts an ergonomic typed movie query.
