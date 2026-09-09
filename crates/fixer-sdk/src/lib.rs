@@ -17,8 +17,8 @@ pub use query::music::{MusicQuery, MusicSearch, SelectedMusic};
 pub use query::television::{SelectedTelevision, TelevisionQuery, TelevisionSearch};
 
 use fixer_core::{
-    CoreError, HttpClient, HttpError, HttpRequest, HttpResponse, LanguageTag, OrderingScheme,
-    Provider, ProviderError, ProviderId,
+    CoreError, HttpClient, HttpError, HttpRequest, HttpResponse, LanguageTag, MetadataDocument,
+    OrderingScheme, Provider, ProviderError, ProviderId, ProviderTarget,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -111,6 +111,11 @@ impl Fixer {
             http,
             offline,
         })
+    }
+
+    /// Fetches one exact provider record without running a search.
+    pub async fn fetch_exact(&self, target: &ProviderTarget) -> Result<MetadataDocument, SdkError> {
+        orchestrator::fetch_exact(self, target).await
     }
 
     /// Starts an ergonomic typed movie query.

@@ -83,7 +83,7 @@ async fn resolves_a_movie_through_the_ergonomic_api() {
         outcome
             .warnings
             .iter()
-            .any(|warning| warning.code == "ambiguous_candidates")
+            .all(|warning| warning.code != "ambiguous_candidates")
     );
 }
 

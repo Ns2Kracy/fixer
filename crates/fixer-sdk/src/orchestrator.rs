@@ -4,8 +4,8 @@ use crate::{Fixer, SdkError};
 use fixer_core::{
     AnimeDocument, AnimeMerger, AnimeSeries, BookWork, Candidate, ExternalId, FetchRequest,
     MatchQuery, Matcher, MediaKind, MergePolicy, MetadataDocument, MovieDocument, MovieMerger,
-    OrderingScheme, ProvenanceMap, ResolutionWarning, Resolved, SearchRequest, SeriesDocument,
-    SeriesMerger, SourceRef,
+    OrderingScheme, ProvenanceMap, ProviderTarget, ResolutionWarning, Resolved, SearchRequest,
+    SeriesDocument, SeriesMerger, SourceRef,
 };
 use futures_util::future::join_all;
 use std::time::SystemTime;
@@ -154,14 +154,6 @@ async fn search_candidates(
     let selection = Matcher
         .select(&query, candidates)
         .map_err(|error| SdkError::Merge(error.to_string()))?;
-    if selection.is_ambiguous() {
-        warnings.push(ResolutionWarning {
-            code: "ambiguous_candidates".to_owned(),
-            message:
-                "multiple candidates share the top score; provider order was used deterministically"
-                    .to_owned(),
-        });
-    }
     Ok(SearchOutcome {
         candidates: selection
             .ranked()
@@ -170,6 +162,25 @@ async fn search_candidates(
             .collect(),
         warnings,
     })
+}
+
+pub async fn fetch_exact(
+    fixer: &Fixer,
+    target: &ProviderTarget,
+) -> Result<MetadataDocument, SdkError> {
+    let provider = fixer
+        .providers
+        .iter()
+        .find(|provider| provider.descriptor().id() == target.provider())
+        .ok_or_else(|| SdkError::ProviderNotFound(target.provider().clone()))?;
+    provider.descriptor().ensure_support(target.media_kind())?;
+    let request = FetchRequest::new(target.media_kind(), target.external_id().clone())
+        .with_locales(fixer.preferred_languages.to_vec());
+    let document = provider.fetch(request, fixer.http.as_ref()).await?;
+    if document.media_kind() != target.media_kind() {
+        return Err(SdkError::UnexpectedDocument);
+    }
+    Ok(document)
 }
 
 pub async fn fetch_movies(
