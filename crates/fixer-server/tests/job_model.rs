@@ -40,6 +40,20 @@ fn job_input_and_summaries_are_stable_server_owned_dtos() {
     );
     assert_round_trip(&input);
 
+    let retry = input.with_retry_of(7);
+    assert_eq!(retry.retry_of(), Some(7));
+    assert_eq!(
+        serde_json::to_value(&retry).unwrap(),
+        json!({
+            "schema_version": 1,
+            "media_kind": "movie",
+            "input_path": "/media/Arrival.mkv",
+            "apply": false,
+            "retry_of": 7
+        })
+    );
+    assert_round_trip(&retry);
+
     let progress = ProgressSummary::new("searching", 2, Some(6));
     assert_eq!(
         serde_json::to_value(&progress).unwrap(),

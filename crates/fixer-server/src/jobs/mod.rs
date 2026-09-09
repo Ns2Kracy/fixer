@@ -346,6 +346,9 @@ impl JobRuntime {
         if let Some(run_id) = input.correction_of() {
             validated = validated.with_correction_of(run_id);
         }
+        if let Some(run_id) = input.retry_of() {
+            validated = validated.with_retry_of(run_id);
+        }
         if let Some(organization) = input.organization() {
             let mut organization = organization.clone();
             let destination = policy
@@ -745,7 +748,11 @@ impl JobRuntime {
         id: JobId,
     ) -> Result<Option<ReplacementManifest>, RuntimeError> {
         let run = self.store.get_job(id).await?;
-        let Some(parent_id) = run.input().correction_of() else {
+        let Some(parent_id) = run
+            .input()
+            .retry_of()
+            .or_else(|| run.input().correction_of())
+        else {
             return Ok(None);
         };
         let parent = self.store.get_job(JobId::from_database(parent_id)?).await?;
@@ -1140,6 +1147,7 @@ impl JobRuntime {
 
     async fn transition_stage_with_retry(
         &self,
+            && input.retry_of().is_none()
         id: JobId,
         expected: JobState,
         next: JobState,

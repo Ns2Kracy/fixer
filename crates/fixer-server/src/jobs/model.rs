@@ -85,6 +85,8 @@ pub struct JobInputDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     correction_of: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    retry_of: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     organization: Option<JobOrganizationDto>,
 }
 
@@ -98,6 +100,7 @@ impl JobInputDto {
             selection: fixer_core::ScrapeSelection::Automatic,
             unattended: false,
             correction_of: None,
+            retry_of: None,
             organization: None,
         }
     }
@@ -143,6 +146,15 @@ impl JobInputDto {
 
     pub const fn with_correction_of(mut self, run_id: i64) -> Self {
         self.correction_of = Some(run_id);
+        self
+    }
+
+    pub const fn retry_of(&self) -> Option<i64> {
+        self.retry_of
+    }
+
+    pub const fn with_retry_of(mut self, run_id: i64) -> Self {
+        self.retry_of = Some(run_id);
         self
     }
 

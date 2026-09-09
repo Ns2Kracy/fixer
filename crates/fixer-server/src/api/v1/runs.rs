@@ -102,6 +102,8 @@ struct RunDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_target: Option<ProviderTarget>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_of: Option<i64>,
     correction_of: Option<i64>,
     candidate_count: u64,
     conflict_count: u64,
@@ -257,7 +259,10 @@ async fn retry(
     ensure_run(&original)?;
     if !matches!(
         original.state(),
-        JobState::Failed | JobState::Interrupted | JobState::Cancelled
+        JobState::AwaitingConfirmation
+            | JobState::Failed
+            | JobState::Interrupted
+            | JobState::Cancelled
     ) {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -266,11 +271,15 @@ async fn retry(
             None,
         ));
     }
-    let input = original
-        .input()
-        .clone()
-        .with_correction_of(id)
-        .with_unattended();
+    let mut input = original.input().clone().with_unattended();
+    if original.execution().is_some_and(|execution| {
+        execution
+            .operations()
+            .iter()
+            .any(|operation| operation.outcome() == fixer_core::OperationOutcome::Succeeded)
+    }) {
+        input = input.with_retry_of(id);
+    }
     let (run, created) = runtime
         .create_run(input)
         .await
@@ -358,6 +367,7 @@ fn run_dto(run: &JobRecord) -> RunDto {
         selected_target: run
             .review()
             .and_then(|review| review.selected_target().cloned()),
+        retry_of: run.input().retry_of(),
         correction_of: run.input().correction_of(),
         candidate_count: run
             .review()
