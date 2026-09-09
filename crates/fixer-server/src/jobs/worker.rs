@@ -165,14 +165,12 @@ pub struct ScannedJob {
 pub enum SearchArtifact {
     Anime {
         search: AnimeSearch,
-        title: String,
         count: u64,
         output_root: PathBuf,
         input: JobInputDto,
     },
     Book {
         search: BookSearch,
-        title: String,
         count: u64,
         isbn: Option<Isbn13>,
         output_root: PathBuf,
@@ -180,21 +178,18 @@ pub enum SearchArtifact {
     },
     Movie {
         search: MovieSearch,
-        title: String,
         count: u64,
         output_root: PathBuf,
         input: JobInputDto,
     },
     Music {
         search: MusicSearch,
-        title: String,
         count: u64,
         output_root: PathBuf,
         input: JobInputDto,
     },
     Television {
         search: TelevisionSearch,
-        title: String,
         count: u64,
         output_root: PathBuf,
         input: JobInputDto,
@@ -319,9 +314,8 @@ impl ScannedJob {
         } = self;
         let artifact = match media_kind {
             JobMediaKind::Anime => {
-                let search = fixer.anime(title.clone()).search().await?;
+                let search = fixer.anime(title).search().await?;
                 SearchArtifact::Anime {
-                    title,
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
@@ -329,13 +323,12 @@ impl ScannedJob {
                 }
             }
             JobMediaKind::Book => {
-                let mut query = fixer.book(title.clone());
+                let mut query = fixer.book(title);
                 if let Some(isbn) = isbn.clone() {
                     query = query.isbn(isbn);
                 }
                 let search = query.search().await?;
                 SearchArtifact::Book {
-                    title,
                     count: count(search.candidates().len())?,
                     search,
                     isbn,
@@ -344,9 +337,8 @@ impl ScannedJob {
                 }
             }
             JobMediaKind::Movie => {
-                let search = fixer.movie(title.clone()).search().await?;
+                let search = fixer.movie(title).search().await?;
                 SearchArtifact::Movie {
-                    title,
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
@@ -354,9 +346,8 @@ impl ScannedJob {
                 }
             }
             JobMediaKind::Music => {
-                let search = fixer.music(title.clone()).search().await?;
+                let search = fixer.music(title).search().await?;
                 SearchArtifact::Music {
-                    title,
                     count: count(search.candidates().len())?,
                     search,
                     output_root,
@@ -364,9 +355,8 @@ impl ScannedJob {
                 }
             }
             JobMediaKind::Television => {
-                let search = fixer.television(title.clone()).search().await?;
+                let search = fixer.television(title).search().await?;
                 SearchArtifact::Television {
-                    title,
                     count: count(search.candidates().len())?,
                     search,
                     output_root,

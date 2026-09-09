@@ -82,7 +82,7 @@ fn offline_movie_nfo_produces_a_dry_run_plan_without_writes() {
 }
 
 #[test]
-fn ambiguous_anime_candidates_are_visible_and_cannot_trigger_a_broad_write() {
+fn multiple_anime_candidates_are_visible_and_cannot_trigger_a_broad_write() {
     let directory = tempfile::tempdir().unwrap();
     let library = directory.path().join("anime");
     copy_tree(&fixture("anime"), &library);
@@ -104,7 +104,6 @@ fn ambiguous_anime_candidates_are_visible_and_cannot_trigger_a_broad_write() {
             .count(),
         2
     );
-    assert!(String::from_utf8_lossy(&search.stderr).contains("ambiguous_candidates"));
 
     let scrape = fixer()
         .arg("--offline")

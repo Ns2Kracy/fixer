@@ -25,8 +25,6 @@ fn config_validates_and_reports_the_cross_media_policy_schema() {
         r#"{
           "preferred_locales": ["ja", "en", "und"],
           "timeout_seconds": 17,
-          "auto_accept_confidence": 0.9,
-          "review_confidence": 0.6,
           "output_preset": "full",
           "conflict_policy": "review",
           "enabled_providers": ["local", "openlibrary"],
@@ -46,8 +44,6 @@ fn config_validates_and_reports_the_cross_media_policy_schema() {
     for line in [
         "preferred_locales: ja,en,und",
         "timeout_seconds: 17",
-        "auto_accept_confidence: 0.9",
-        "review_confidence: 0.6",
         "output_preset: full",
         "conflict_policy: review",
         "enabled_providers: local,openlibrary",
@@ -72,10 +68,6 @@ fn invalid_cross_media_policy_values_fail_during_config_validation() {
         ),
         (r#"{"proxy":"not a proxy URL"}"#, "proxy"),
         (r#"{"timeout_seconds":0}"#, "timeout_seconds"),
-        (
-            r#"{"auto_accept_confidence":0.5,"review_confidence":0.8}"#,
-            "review_confidence",
-        ),
         (r#"{"enabled_providers":["unknown"]}"#, "unknown provider"),
     ] {
         let output = validate(config);

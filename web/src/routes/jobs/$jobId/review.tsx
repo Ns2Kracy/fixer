@@ -89,7 +89,7 @@ export function ReviewPanel(props: { jobId: number; embedded: boolean }) {
         />
       </Show>
       <Show when={review.isPending}>
-        <LoadingState>Loading candidate evidence…</LoadingState>
+        <LoadingState>Loading candidates…</LoadingState>
       </Show>
       <Show when={review.isError}>
         <RequestError error={review.error} />

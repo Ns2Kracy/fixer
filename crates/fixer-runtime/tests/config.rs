@@ -26,8 +26,6 @@ offline = true
 local_root = "media"
 preferred_locales = ["zh-Hans", "ja"]
 timeout_seconds = 17
-auto_accept_confidence = 0.8
-review_confidence = 0.5
 output_preset = "metadata"
 conflict_policy = "prefer_first"
 enabled_providers = ["local", "anilist"]
@@ -98,6 +96,26 @@ fn obsolete_global_placement_config_is_ignored_and_not_serialized() {
             .lines()
             .any(|line| line.starts_with("placement ="))
     );
+}
+
+#[test]
+fn removed_confidence_settings_report_an_actionable_migration_error() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("fixer.toml"),
+        "auto_accept_confidence = 0.9\nreview_confidence = 0.6\n",
+    )
+    .unwrap();
+
+    let error = ConfigLoader::new(root.path())
+        .with_environment(env(&[]))
+        .load()
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("auto_accept_confidence"));
+    assert!(error.contains("review_confidence"));
+    assert!(error.contains("delete them"));
 }
 
 #[test]

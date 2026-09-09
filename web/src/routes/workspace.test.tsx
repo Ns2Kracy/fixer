@@ -36,8 +36,6 @@ const settings = {
   proxy: null,
   preferred_locales: ["zh-Hans", "ja", "en"],
   timeout_seconds: 30,
-  auto_accept_confidence: 0.9,
-  review_confidence: 0.6,
   output_preset: "full",
   conflict_policy: "review",
   enabled_providers: ["local", "tmdb", "bangumi"],

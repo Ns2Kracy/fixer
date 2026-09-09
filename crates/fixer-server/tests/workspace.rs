@@ -36,8 +36,6 @@ fn settings(endpoint: &str) -> Value {
         "proxy": null,
         "preferred_locales": ["zh-Hans", "ja", "en", "und"],
         "timeout_seconds": 5,
-        "auto_accept_confidence": 0.9,
-        "review_confidence": 0.6,
         "output_preset": "metadata",
         "conflict_policy": "review",
         "enabled_providers": ["local", "tmdb", "bangumi"],
@@ -100,21 +98,6 @@ async fn settings_are_validated_and_secrets_are_write_only() {
     let fetched = response_json(fetched).await;
     assert_eq!(fetched, updated);
     assert!(!fetched.to_string().contains("write-only"));
-
-    let mut invalid = settings("http://127.0.0.1:9");
-    invalid["review_confidence"] = json!(0.95);
-    let response = app
-        .clone()
-        .oneshot(put_json("/api/v1/settings", &invalid))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let error = response_json(response).await;
-    assert_eq!(error["error"]["code"], "invalid_input");
-    assert_eq!(
-        error["error"]["details"]["review_confidence"],
-        "must not exceed auto_accept_confidence"
-    );
 
     let mut credentialed_proxy = settings("http://127.0.0.1:9");
     credentialed_proxy["proxy"] = json!("socks5://user:password@127.0.0.1:1080");
@@ -237,19 +220,6 @@ worker_count = 3
     let response = app
         .clone()
         .oneshot(put_json("/api/v1/settings", &forbidden))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(
-        std::fs::read(root.path().join("fixer.toml")).unwrap(),
-        before_file
-    );
-    assert_eq!(handle.snapshot(), before_memory);
-
-    let mut invalid = settings("http://127.0.0.1:9");
-    invalid["review_confidence"] = json!(0.95);
-    let response = app
-        .oneshot(put_json("/api/v1/settings", &invalid))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);

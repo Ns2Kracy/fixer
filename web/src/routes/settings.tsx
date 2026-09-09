@@ -199,38 +199,6 @@ function SettingsPage() {
                       }}
                     />
                   </FormField>
-                  <FormField label="Auto-accept confidence">
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      required
-                      value={form().auto_accept_confidence}
-                      onInput={(event) => {
-                        patch(
-                          "auto_accept_confidence",
-                          Number(event.currentTarget.value),
-                        );
-                      }}
-                    />
-                  </FormField>
-                  <FormField label="Review confidence">
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      required
-                      value={form().review_confidence}
-                      onInput={(event) => {
-                        patch(
-                          "review_confidence",
-                          Number(event.currentTarget.value),
-                        );
-                      }}
-                    />
-                  </FormField>
                   <label
                     class="flex items-start gap-3 pt-6 text-sm text-muted"
                     aria-label="Offline mode"
@@ -512,8 +480,6 @@ function editableSettings(
     proxy: settings.proxy,
     preferred_locales: [...settings.preferred_locales],
     timeout_seconds: settings.timeout_seconds,
-    auto_accept_confidence: settings.auto_accept_confidence,
-    review_confidence: settings.review_confidence,
     output_preset: settings.output_preset,
     conflict_policy: settings.conflict_policy,
     enabled_providers: [...settings.enabled_providers],

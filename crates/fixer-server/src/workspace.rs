@@ -54,8 +54,6 @@ pub(super) struct WorkspaceSettingsInput {
     pub(super) proxy: Option<String>,
     pub(super) preferred_locales: Vec<String>,
     pub(super) timeout_seconds: u64,
-    pub(super) auto_accept_confidence: f32,
-    pub(super) review_confidence: f32,
     pub(super) output_preset: OutputPreset,
     pub(super) conflict_policy: ConflictPolicy,
     pub(super) enabled_providers: Vec<String>,
@@ -74,8 +72,6 @@ pub(super) struct WorkspaceSettingsSnapshot {
     pub(super) proxy: Option<String>,
     pub(super) preferred_locales: Vec<String>,
     pub(super) timeout_seconds: u64,
-    pub(super) auto_accept_confidence: f32,
-    pub(super) review_confidence: f32,
     pub(super) output_preset: OutputPreset,
     pub(super) conflict_policy: ConflictPolicy,
     pub(super) enabled_providers: Vec<String>,
@@ -100,8 +96,6 @@ impl WorkspaceSettingsSnapshot {
             proxy: config.proxy.clone(),
             preferred_locales: config.preferred_locales.clone(),
             timeout_seconds: config.timeout_seconds,
-            auto_accept_confidence: config.auto_accept_confidence,
-            review_confidence: config.review_confidence,
             output_preset: config.output_preset,
             conflict_policy: config.conflict_policy,
             enabled_providers: config.enabled_providers.clone(),
@@ -635,8 +629,6 @@ fn apply_settings_input(config: &mut FixerConfig, input: WorkspaceSettingsInput)
     config.proxy = input.proxy;
     config.preferred_locales = input.preferred_locales;
     config.timeout_seconds = input.timeout_seconds;
-    config.auto_accept_confidence = input.auto_accept_confidence;
-    config.review_confidence = input.review_confidence;
     config.output_preset = input.output_preset;
     config.conflict_policy = input.conflict_policy;
     config.enabled_providers = deduplicate(input.enabled_providers);
@@ -671,18 +663,6 @@ fn validate_settings(input: &WorkspaceSettingsInput) -> Result<(), WorkspaceStat
     }
     if input.timeout_seconds == 0 || input.timeout_seconds > 300 {
         return Err(invalid("timeout_seconds", "must be between 1 and 300"));
-    }
-    if !valid_confidence(input.auto_accept_confidence) {
-        return Err(invalid("auto_accept_confidence", "must be between 0 and 1"));
-    }
-    if !valid_confidence(input.review_confidence) {
-        return Err(invalid("review_confidence", "must be between 0 and 1"));
-    }
-    if input.review_confidence > input.auto_accept_confidence {
-        return Err(invalid(
-            "review_confidence",
-            "must not exceed auto_accept_confidence",
-        ));
     }
     if let Some(proxy) = &input.proxy {
         let url = Url::parse(proxy)
@@ -805,10 +785,6 @@ fn update_secret(
         *current = Some(SecretString::new(value));
         *reference = None;
     }
-}
-
-fn valid_confidence(value: f32) -> bool {
-    value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
 fn deduplicate(values: Vec<String>) -> Vec<String> {

@@ -285,7 +285,7 @@ There is no global placement setting. Use **Pause** before changing mounts or pe
 
 At startup, each enabled rule recursively discovers logical media items. A recursive filesystem watcher handles later create, modify, and rename activity; periodic reconciliation recovers events missed during downtime, watcher overflow, or unreliable network mounts. An item must retain the same aggregate size and modification time across the debounce window before Fixer reserves its persisted fingerprint.
 
-Only rule-origin jobs can execute automatically. The top candidate must be unique, untruncated, at or above `auto_accept_confidence`, conflict-free, and produce a safe collision-free plan. Automatic media-kind ambiguity, tied or low-confidence candidates, metadata conflicts, unavailable links, stale sources, and existing destinations stop before writing. Rules summarize current activity as **Watching**, **Processing**, **Needs review**, **Paused**, or **Error**.
+Only rule-origin work can execute automatically. Fixer uses the first deterministically ordered candidate, requires complete diagnostics with no provider failures or metadata conflicts, and validates a safe collision-free plan. Automatic media-kind ambiguity, incomplete diagnostics, metadata conflicts, unavailable links, stale sources, and existing destinations stop before writing. Rules summarize current activity as **Watching**, **Processing**, **Needs review**, **Paused**, or **Error**.
 
 ## Web and API routes
 

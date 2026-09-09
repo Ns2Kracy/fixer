@@ -313,8 +313,6 @@ pub struct FixerConfig {
     pub local_root: Option<PathBuf>,
     pub preferred_locales: Vec<String>,
     pub timeout_seconds: u64,
-    pub auto_accept_confidence: f32,
-    pub review_confidence: f32,
     pub output_preset: OutputPreset,
     pub conflict_policy: ConflictPolicy,
     pub enabled_providers: Vec<String>,
@@ -330,8 +328,6 @@ impl Default for FixerConfig {
             local_root: None,
             preferred_locales: DEFAULT_LOCALES.iter().map(|v| (*v).to_owned()).collect(),
             timeout_seconds: 30,
-            auto_accept_confidence: 0.9,
-            review_confidence: 0.6,
             output_preset: OutputPreset::Full,
             conflict_policy: ConflictPolicy::Review,
             enabled_providers: DEFAULT_PROVIDERS.iter().map(|v| (*v).to_owned()).collect(),
@@ -364,21 +360,6 @@ impl FixerConfig {
         if self.timeout_seconds == 0 {
             return Err(ConfigLoadError::Validation(
                 "timeout_seconds must be greater than zero".to_owned(),
-            ));
-        }
-        for (name, value) in [
-            ("auto_accept_confidence", self.auto_accept_confidence),
-            ("review_confidence", self.review_confidence),
-        ] {
-            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-                return Err(ConfigLoadError::Validation(format!(
-                    "{name} must be finite and between 0 and 1"
-                )));
-            }
-        }
-        if self.review_confidence > self.auto_accept_confidence {
-            return Err(ConfigLoadError::Validation(
-                "review_confidence must not exceed auto_accept_confidence".to_owned(),
             ));
         }
         if self.enabled_providers.is_empty() {
@@ -796,6 +777,16 @@ impl Source for CompatibleFile {
 
 fn normalize_legacy_file(values: &mut Map<String, Value>) -> Result<(), config::ConfigError> {
     values.remove("placement");
+    let removed = ["auto_accept_confidence", "review_confidence"]
+        .into_iter()
+        .filter(|field| values.contains_key(*field))
+        .collect::<Vec<_>>();
+    if !removed.is_empty() {
+        return Err(config::ConfigError::Message(format!(
+            "removed confidence settings {}; delete them because scrape selection is now deterministic",
+            removed.join(", ")
+        )));
+    }
     move_legacy_value(
         values,
         &["api_key", "tmdb_api_token"],

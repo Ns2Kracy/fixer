@@ -101,7 +101,7 @@ username and password.
 
 Set `server.media_roots` to the narrowest directories Fixer may access, then use **Folders** to choose a source and a separate destination. Each rule requires its own organization method (`move`, `copy`, `hardlink`, `symlink`, or `reflink`); placement is never a global setting.
 
-An enabled rule recursively scans existing content, monitors later filesystem changes, and periodically reconciles missed events. Stable, uniquely matched items above `auto_accept_confidence` are organized automatically. Ambiguous media kinds, tied or low-confidence matches, metadata conflicts, unsafe plans, and destination collisions stop at **Needs review** instead of writing. Unchanged source fingerprints remain deduplicated across restarts.
+An enabled rule recursively scans existing content, monitors later filesystem changes, and periodically reconciles missed events. Deterministically selected items without provider failures or metadata conflicts can be organized automatically. Ambiguous media kinds, incomplete diagnostics, metadata conflicts, unsafe plans, and destination collisions stop at **Needs review** instead of writing. Unchanged source fingerprints remain deduplicated across restarts.
 
 `latest` is the stable channel and `edge` tracks `main`. Set `FIXER_IMAGE=ghcr.io/ns2kracy/fixer:0.1.0` to pin a release, or use `FIXER_IMAGE=ghcr.io/ns2kracy/fixer@sha256:<manifest-digest>` for an immutable deployment. See [Docker deployment](docs/server.md#docker-deployment) for image channels, permissions, persistence, source builds, upgrades, reverse proxies, and recovery.
 

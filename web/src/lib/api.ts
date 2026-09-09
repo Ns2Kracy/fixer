@@ -103,8 +103,6 @@ export interface WorkspaceSettingsBase {
   proxy: string | null;
   preferred_locales: string[];
   timeout_seconds: number;
-  auto_accept_confidence: number;
-  review_confidence: number;
   output_preset: OutputPreset;
   conflict_policy: ConflictPolicy;
   enabled_providers: ProviderId[];
@@ -353,8 +351,6 @@ export interface ReviewSummary {
     | "manual_job"
     | "candidate_list_truncated"
     | "no_candidates"
-    | "confidence_below_threshold"
-    | "tied_top_candidates"
     | "metadata_conflicts"
     | "provider_enrichment_failed"
     | "diagnostics_truncated"
@@ -418,22 +414,9 @@ export interface ListJobsRequest {
   state?: JobState;
 }
 
-export type MatchEvidenceKind =
-  | "external_id"
-  | "title"
-  | "alias"
-  | "year"
-  | "sequence";
-
 export interface ExternalIdArtifact {
   namespace: string;
   value: string;
-}
-
-export interface EvidenceArtifact {
-  kind: MatchEvidenceKind;
-  points: number;
-  detail: string;
 }
 
 export interface CandidateArtifact {
@@ -444,10 +427,6 @@ export interface CandidateArtifact {
   title: string;
   year?: number;
   sequence?: string;
-  score: number;
-  confidence: number;
-  evidence: EvidenceArtifact[];
-  evidence_truncated: boolean;
 }
 
 export interface WarningArtifact {

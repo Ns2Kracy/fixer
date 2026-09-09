@@ -61,8 +61,6 @@ offline = false
 local_root = "/srv/media"
 preferred_locales = ["zh-Hans", "zh-Hant", "ja", "en", "und"]
 timeout_seconds = 30
-auto_accept_confidence = 0.9
-review_confidence = 0.6
 output_preset = "full"
 conflict_policy = "review"
 enabled_providers = ["local", "tmdb", "bangumi", "musicbrainz", "openlibrary"]
@@ -120,8 +118,6 @@ comma-separated values.
 | `local_root` | `FIXER_LOCAL_ROOT` | unset |
 | `preferred_locales` | `FIXER_PREFERRED_LOCALES` | `zh-Hans,zh-Hant,ja,en,und` |
 | `timeout_seconds` | `FIXER_TIMEOUT_SECONDS` | `30` |
-| `auto_accept_confidence` | `FIXER_AUTO_ACCEPT_CONFIDENCE` | `0.9` |
-| `review_confidence` | `FIXER_REVIEW_CONFIDENCE` | `0.6` |
 | `output_preset` | `FIXER_OUTPUT_PRESET` | `full` |
 | `conflict_policy` | `FIXER_CONFLICT_POLICY` | `review` |
 | `enabled_providers` | `FIXER_ENABLED_PROVIDERS` | default provider set |
@@ -166,13 +162,11 @@ Boolean environment values accept `1`, `true`, `yes`, `on`, `0`, `false`,
 | `local_root` | Required by the current CLI `search` and `resolve` commands. |
 | `preferred_locales` | Ordered, non-empty BCP 47 tags. |
 | `timeout_seconds` | Positive integer passed to the default HTTP transport. |
-| `auto_accept_confidence` | Finite `0.0..=1.0`, at least `review_confidence`. |
-| `review_confidence` | Finite `0.0..=1.0`. |
 | `output_preset` | `full` or `metadata`. |
 | `conflict_policy` | `prefer_first`, `review`, or `error`. |
 | `enabled_providers` | Non-empty provider allowlist; duplicates are removed. |
 
-`auto_accept_confidence` gates automatic execution only for trusted folder-rule jobs; one-off jobs still require review. The top candidate must also be unique and conflict-free. `review_confidence` is currently validated and reported but is not yet used as a separate candidate cutoff. `metadata` drops writer-planned local-asset placement while retaining metadata writes. Media placement is selected explicitly for each `plan` or `scrape` invocation and for each folder rule rather than through shared configuration.
+Trusted folder-rule work can execute automatically only when deterministic candidate selection completes with full diagnostics, no provider failures or metadata conflicts, and a safe collision-free plan. One-off scrapes still require review. `metadata` drops writer-planned local-asset placement while retaining metadata writes. Media placement is selected explicitly for each `plan` or `scrape` invocation and for each folder rule rather than through shared configuration.
 
 Conflict behavior is:
 
@@ -261,7 +255,9 @@ writing TOML into a `.json` path.
 For one compatibility window, Fixer still accepts historical flat file fields,
 provider endpoint variables, and single-underscore server variables. New
 deployments should use the nested TOML schema and canonical double-underscore
-environment names.
+environment names. The removed `auto_accept_confidence` and
+`review_confidence` fields now produce an actionable load error; delete them
+because candidate selection is deterministic.
 
 | Legacy file field | Canonical TOML field |
 | --- | --- |
@@ -309,7 +305,7 @@ Configuration load failures return CLI exit code `2`. Common causes include:
 - missing, non-directory, or inaccessible roots;
 - malformed BCP 47 locale tags;
 - zero timeout or worker count;
-- confidence thresholds outside `0.0..=1.0`;
+- removed confidence settings that must be deleted;
 - invalid conflict, output, or logging values;
 - malformed or unset secret references;
 - malformed provider endpoints, origins, CIDRs, or proxy URLs;

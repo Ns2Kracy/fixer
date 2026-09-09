@@ -351,8 +351,6 @@ describe("ApiClient", () => {
       proxy: null,
       preferred_locales: ["ja", "en"],
       timeout_seconds: 20,
-      auto_accept_confidence: 0.9,
-      review_confidence: 0.6,
       output_preset: "full" as const,
       conflict_policy: "review" as const,
       enabled_providers: ["local", "tmdb"],

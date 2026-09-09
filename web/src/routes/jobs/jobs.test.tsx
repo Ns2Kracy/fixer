@@ -170,9 +170,6 @@ describe("jobs workflow", () => {
                 provider: "tmdb",
                 external_id: { namespace: "tmdb", value: "1" },
                 title: "Fixture Movie",
-                score: 100,
-                evidence: [],
-                evidence_truncated: false,
               },
             ],
             candidates_truncated: false,
@@ -501,9 +498,6 @@ describe("jobs workflow", () => {
           external_id: { namespace: "local", value: "one" },
           title: "Candidate One",
           year: 2000,
-          score: 100,
-          evidence: [{ kind: "title", points: 100, detail: "exact title" }],
-          evidence_truncated: false,
         },
         {
           index: 1,
@@ -512,9 +506,6 @@ describe("jobs workflow", () => {
           external_id: { namespace: "tmdb", value: "843" },
           title: "Candidate Two",
           year: 2000,
-          score: 90,
-          evidence: [{ kind: "year", points: 20, detail: "year matched" }],
-          evidence_truncated: true,
         },
       ],
       candidates_truncated: true,
@@ -573,7 +564,6 @@ describe("jobs workflow", () => {
     expect(
       await screen.findByText("TMDB timed out; local metadata remains usable."),
     ).toBeVisible();
-    expect(screen.getByText("exact title")).toBeVisible();
     expect(
       screen.getByRole("radio", {
         name: "Select Candidate Two from fixture.remote",
@@ -585,9 +575,6 @@ describe("jobs workflow", () => {
     );
     expect(
       screen.getByText(/^Additional candidates were omitted by the server./u),
-    ).toBeVisible();
-    expect(
-      screen.getByText("Additional matching evidence was omitted."),
     ).toBeVisible();
 
     await user.click(
@@ -810,9 +797,6 @@ describe("jobs workflow", () => {
           provider: "fixture.local",
           external_id: { namespace: "local", value: "one" },
           title: "Candidate One",
-          score: 100,
-          evidence: [],
-          evidence_truncated: false,
         },
       ],
       candidates_truncated: false,
