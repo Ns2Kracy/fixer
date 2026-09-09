@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex as StdMutex, OnceLock},
 };
 
-use fixer_core::{OperationOutcome, OutputOperation, OutputPlan};
+use fixer_core::{OperationOutcome, OutputOperation, OutputPlan, ReplacementManifest};
 use fixer_sdk::output::{ExecutionError, ExecutionFailure, ExecutionPolicy, OutputPlanExt};
 use futures_util::FutureExt;
 use thiserror::Error;
@@ -37,6 +37,7 @@ const AUTO_EXECUTION_KEY: &str = "ingestion-auto-v1";
 struct PreparedReview {
     candidate_count: u64,
     conflict_count: u64,
+    selected_target: Option<fixer_core::ProviderTarget>,
     automatic: worker::AutoDecision,
 }
 
@@ -66,6 +67,10 @@ fn execution_failure_summary(failure: &ExecutionFailure) -> ExecutionFailureSumm
         ExecutionError::StalePlan { .. } => (
             "stale_plan",
             "Files changed after planning; rebuild the output plan before retrying",
+        ),
+        ExecutionError::ReplacementNotAllowed { .. } => (
+            "replacement_not_allowed",
+            "A correction target changed after the prior scrape and was left untouched",
         ),
         ExecutionError::SourceUnavailable { .. } => (
             "source_unavailable",
@@ -257,6 +262,26 @@ impl JobRuntime {
         Ok(job)
     }
 
+    pub(crate) async fn create_run(
+        &self,
+        input: JobInputDto,
+    ) -> Result<(JobRecord, bool), RuntimeError> {
+        let input = self.validate_input(input)?;
+        let _operation = self.operations.lock().await;
+        if let Some(existing) = self
+            .store
+            .list_jobs(10_000, None)
+            .await?
+            .into_iter()
+            .find(|job| !is_terminal(job.state()) && job.input() == &input)
+        {
+            return Ok((existing, false));
+        }
+        let job = self.store.create_job(input).await?;
+        self.publish_created(&job)?;
+        Ok((job, true))
+    }
+
     pub(crate) async fn create_for_source(
         &self,
         source_id: IngestionSourceId,
@@ -287,7 +312,14 @@ impl JobRuntime {
             input.media_kind(),
             canonical.to_string_lossy().into_owned(),
             input.apply(),
-        );
+        )
+        .with_selection(input.selection().clone());
+        if input.unattended() {
+            validated = validated.with_unattended();
+        }
+        if let Some(run_id) = input.correction_of() {
+            validated = validated.with_correction_of(run_id);
+        }
         if let Some(organization) = input.organization() {
             let mut organization = organization.clone();
             let destination = policy
@@ -568,8 +600,12 @@ impl JobRuntime {
         plan: fixer_core::OutputPlan,
         actual_operations: u64,
     ) -> Result<JobRecord, RuntimeError> {
-        let execution =
-            tokio::task::spawn_blocking(move || plan.execute(ExecutionPolicy::default())).await;
+        let replacement = self.replacement_manifest(id).await?;
+        let execution = tokio::task::spawn_blocking(move || match replacement {
+            Some(manifest) => plan.execute_replacing(&manifest),
+            None => plan.execute(ExecutionPolicy::default()),
+        })
+        .await;
         let (next, summary) = match execution {
             Ok(Ok(report)) => (
                 JobState::Completed,
@@ -577,7 +613,8 @@ impl JobRuntime {
                     u64::try_from(report.operations().len())
                         .map_err(|_| RuntimeError::CountOverflow)?,
                     0,
-                ),
+                )
+                .with_operations(report.operations().to_vec()),
             ),
             Ok(Err(failure)) => {
                 let completed = failure
@@ -598,7 +635,8 @@ impl JobRuntime {
                         u64::try_from(completed).map_err(|_| RuntimeError::CountOverflow)?,
                         u64::try_from(failed).map_err(|_| RuntimeError::CountOverflow)?,
                     )
-                    .with_failure(execution_failure_summary(&failure)),
+                    .with_failure(execution_failure_summary(&failure))
+                    .with_operations(failure.report().operations().to_vec()),
                 )
             }
             Err(_) => (
@@ -632,6 +670,23 @@ impl JobRuntime {
             .await?;
         self.events.publish_completion(id, &summary)?;
         Ok(job)
+    }
+
+    async fn replacement_manifest(
+        &self,
+        id: JobId,
+    ) -> Result<Option<ReplacementManifest>, RuntimeError> {
+        let run = self.store.get_job(id).await?;
+        let Some(parent_id) = run.input().correction_of() else {
+            return Ok(None);
+        };
+        let parent = self.store.get_job(JobId::from_database(parent_id)?).await?;
+        let execution = parent
+            .execution()
+            .ok_or(RuntimeError::ArtifactConflict(parent.state()))?;
+        ReplacementManifest::from_reports(execution.operations())
+            .map(Some)
+            .map_err(|error| RuntimeError::Flow(JobFlowError::InvalidInput(error.to_string())))
     }
 
     async fn finish_reserved_panic(
@@ -801,6 +856,7 @@ impl JobRuntime {
         let PreparedReview {
             candidate_count,
             conflict_count,
+            selected_target,
             automatic,
         } = prepared;
 
@@ -808,6 +864,9 @@ impl JobRuntime {
             return;
         }
         let mut summary = ReviewSummary::new(candidate_count, conflict_count);
+        if let Some(target) = selected_target {
+            summary = summary.with_selected_target(target);
+        }
         if let worker::AutoDecision::NeedsReview { reason } = automatic {
             summary = summary.with_automation_reason(reason);
         }
@@ -858,6 +917,11 @@ impl JobRuntime {
             conflicts: Vec::new(),
             conflicts_truncated: false,
         };
+        let selected_target = review
+            .candidates
+            .first()
+            .map(artifacts::CandidateArtifact::target)
+            .transpose()?;
         let resolved = search.resolve_selected(0).await?;
         let conflict_count = resolved.conflict_count()?;
         let diagnostics = resolved.review_diagnostics();
@@ -871,18 +935,20 @@ impl JobRuntime {
                 |_| worker::AutoDecision::NeedsReview {
                     reason: AutoReviewReason::InvalidPlan,
                 },
-                |plan| self.auto_plan_decision(&plan, automatic),
+                |plan| self.auto_plan_decision(input, &plan, automatic),
             );
         }
         Ok(PreparedReview {
             candidate_count,
             conflict_count,
+            selected_target,
             automatic,
         })
     }
 
     fn auto_plan_decision(
         &self,
+        input: &JobInputDto,
         plan: &OutputPlan,
         approved: worker::AutoDecision,
     ) -> worker::AutoDecision {
@@ -896,22 +962,24 @@ impl JobRuntime {
                 reason: AutoReviewReason::InvalidPlan,
             };
         }
-        if plan.operations().iter().any(|operation| {
-            let target = operation.target().map_or_else(
-                || plan.output_root.clone(),
-                |target| {
-                    if target.is_absolute() {
-                        target.to_path_buf()
-                    } else {
-                        plan.output_root.join(target)
-                    }
-                },
-            );
-            match operation {
-                OutputOperation::CreateDirectory { .. } => target.exists() && !target.is_dir(),
-                _ => target.exists(),
-            }
-        }) {
+        if input.correction_of().is_none()
+            && plan.operations().iter().any(|operation| {
+                let target = operation.target().map_or_else(
+                    || plan.output_root.clone(),
+                    |target| {
+                        if target.is_absolute() {
+                            target.to_path_buf()
+                        } else {
+                            plan.output_root.join(target)
+                        }
+                    },
+                );
+                match operation {
+                    OutputOperation::CreateDirectory { .. } => target.exists() && !target.is_dir(),
+                    _ => target.exists(),
+                }
+            })
+        {
             return worker::AutoDecision::NeedsReview {
                 reason: AutoReviewReason::DestinationCollision,
             };

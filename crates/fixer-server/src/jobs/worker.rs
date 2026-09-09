@@ -64,10 +64,11 @@ pub fn auto_decision(
     review: &artifacts::ReviewArtifacts,
     conflicts: u64,
 ) -> AutoDecision {
-    let automatic = input.apply()
-        && input.organization().is_some_and(|organization| {
-            organization.auto_execute && organization.origin_rule_id.is_some()
-        });
+    let automatic = input.unattended()
+        || input.apply()
+            && input.organization().is_some_and(|organization| {
+                organization.auto_execute && organization.origin_rule_id.is_some()
+            });
     if !automatic {
         return AutoDecision::NeedsReview {
             reason: AutoReviewReason::ManualJob,
@@ -194,6 +195,10 @@ pub enum SearchArtifact {
         output_root: PathBuf,
         input: JobInputDto,
     },
+    Exact {
+        resolved: Box<ResolvedArtifact>,
+        candidate: artifacts::CandidateArtifact,
+    },
 }
 
 pub enum ResolvedArtifact {
@@ -312,6 +317,9 @@ impl ScannedJob {
             output_root,
             input,
         } = self;
+        if let fixer_core::ScrapeSelection::Exact(target) = input.selection().clone() {
+            return exact_search(fixer, target, title, isbn, output_root, input).await;
+        }
         let artifact = match media_kind {
             JobMediaKind::Anime => {
                 let search = fixer.anime(title).search().await?;
@@ -368,6 +376,100 @@ impl ScannedJob {
     }
 }
 
+async fn exact_search(
+    fixer: Fixer,
+    target: fixer_core::ProviderTarget,
+    title: String,
+    isbn: Option<Isbn13>,
+    output_root: PathBuf,
+    input: JobInputDto,
+) -> Result<SearchArtifact, JobFlowError> {
+    if target.media_kind() != media_kind(input.media_kind()) {
+        return Err(JobFlowError::InvalidInput(
+            "exact target media kind does not match the run".to_owned(),
+        ));
+    }
+    let document = fixer.fetch_exact(&target).await?;
+    let source = fixer_core::SourceRef::new(
+        target.provider().clone(),
+        Some(target.external_id().clone()),
+        None,
+        std::time::SystemTime::now(),
+    );
+    let resolved = match document {
+        fixer_core::MetadataDocument::Anime(value) => ResolvedArtifact::Anime {
+            resolved: exact_resolved(value, "anime", source)?,
+            output_root,
+            input,
+        },
+        fixer_core::MetadataDocument::Book(value) => ResolvedArtifact::Book {
+            resolved: exact_resolved(value, "book", source)?,
+            isbn,
+            output_root,
+            input,
+        },
+        fixer_core::MetadataDocument::Movie(value) => ResolvedArtifact::Movie {
+            resolved: exact_resolved(value, "movie", source)?,
+            output_root,
+            input,
+        },
+        fixer_core::MetadataDocument::Music(value) => ResolvedArtifact::Music {
+            resolved: exact_resolved(value, "music", source)?,
+            output_root,
+            input,
+        },
+        fixer_core::MetadataDocument::Television(value) => ResolvedArtifact::Television {
+            resolved: exact_resolved(value, "television", source)?,
+            output_root,
+            input,
+        },
+    };
+    let candidate = artifacts::CandidateArtifact {
+        index: 0,
+        media_kind: target.media_kind(),
+        provider: target.provider().as_str().to_owned(),
+        external_id: artifacts::ExternalIdArtifact {
+            namespace: target.external_id().namespace.clone(),
+            value: target.external_id().value.clone(),
+        },
+        title: title.chars().take(2_048).collect(),
+        year: None,
+        sequence: None,
+    };
+    Ok(SearchArtifact::Exact {
+        resolved: Box::new(resolved),
+        candidate,
+    })
+}
+
+fn exact_resolved<T>(
+    value: T,
+    field_path: &str,
+    source: fixer_core::SourceRef,
+) -> Result<Resolved<T>, JobFlowError> {
+    let mut provenance = fixer_core::ProvenanceMap::new();
+    provenance
+        .add(field_path, source)
+        .map_err(|error| JobFlowError::InvalidInput(error.to_string()))?;
+    Ok(Resolved {
+        value,
+        provenance,
+        conflicts: Vec::new(),
+        completeness: 1.0,
+        warnings: Vec::new(),
+    })
+}
+
+const fn media_kind(value: JobMediaKind) -> fixer_core::MediaKind {
+    match value {
+        JobMediaKind::Anime => fixer_core::MediaKind::Anime,
+        JobMediaKind::Book => fixer_core::MediaKind::Book,
+        JobMediaKind::Movie => fixer_core::MediaKind::Movie,
+        JobMediaKind::Music => fixer_core::MediaKind::Music,
+        JobMediaKind::Television => fixer_core::MediaKind::Television,
+    }
+}
+
 impl SearchArtifact {
     #[cfg(test)]
     pub async fn resolve(self) -> Result<SearchSummary, JobFlowError> {
@@ -386,6 +488,7 @@ impl SearchArtifact {
             | Self::Movie { count, .. }
             | Self::Music { count, .. }
             | Self::Television { count, .. } => *count,
+            Self::Exact { .. } => 1,
         }
     }
 
@@ -393,6 +496,7 @@ impl SearchArtifact {
         &self,
     ) -> Result<(Vec<artifacts::CandidateArtifact>, bool), JobFlowError> {
         let candidates = match self {
+            Self::Exact { candidate, .. } => return Ok((vec![candidate.clone()], false)),
             Self::Anime { search, .. } => search.candidates(),
             Self::Book { search, .. } => search.candidates(),
             Self::Movie { search, .. } => search.candidates(),
@@ -408,6 +512,12 @@ impl SearchArtifact {
     ) -> Result<ResolvedArtifact, JobFlowError> {
         let index = usize::try_from(candidate_index).map_err(|_| JobFlowError::IndexOverflow)?;
         Ok(match self {
+            Self::Exact { resolved, .. } if index == 0 => *resolved,
+            Self::Exact { .. } => {
+                return Err(JobFlowError::Sdk(
+                    fixer_sdk::SdkError::CandidateOutOfBounds { index, length: 1 },
+                ));
+            }
             Self::Anime {
                 search,
                 output_root,

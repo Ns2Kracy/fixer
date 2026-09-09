@@ -3,7 +3,7 @@
 use super::fingerprint::PathFingerprint;
 use fixer_core::{
     CoreError, OperationOutcome, OperationReport, OutputFingerprint, OutputOperation,
-    OutputOperationKind, OutputPlan,
+    OutputOperationKind, OutputPlan, ReplacementManifest,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -89,6 +89,8 @@ pub enum ExecutionError {
     TargetExists { path: PathBuf },
     #[error("prepared output plan is stale at `{path}`")]
     StalePlan { path: PathBuf },
+    #[error("replacement target is not an unchanged output from the prior scrape: `{path}`")]
+    ReplacementNotAllowed { path: PathBuf },
     #[error("source is unavailable: `{path}`")]
     SourceUnavailable { path: PathBuf },
     #[error("relative symlink cannot be represented from `{from}` to `{to}`")]
@@ -235,6 +237,51 @@ impl PreparedOutputPlan {
         }
         Ok(report)
     }
+    pub fn execute_replacing(
+        &self,
+        manifest: &ReplacementManifest,
+    ) -> Result<ExecutionReport, ExecutionFailure> {
+        let mut report = ExecutionReport::default();
+        if let Err(error) = self.ensure_fresh() {
+            return Err(ExecutionFailure { error, report });
+        }
+        for (index, operation) in self.plan.operations().iter().enumerate() {
+            if matches!(operation, OutputOperation::CreateDirectory { .. }) {
+                continue;
+            }
+            let target = absolute_target(&self.root, operation);
+            match fs::symlink_metadata(&target) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(ExecutionFailure {
+                        error: io_error("inspect replacement target", &target, error),
+                        report,
+                    });
+                }
+                Ok(_) => {}
+            }
+            let allowed = output_fingerprint(&target)
+                .ok()
+                .flatten()
+                .is_some_and(|fingerprint| {
+                    manifest.allows(&target.to_string_lossy(), &fingerprint)
+                });
+            if !allowed {
+                let error = ExecutionError::ReplacementNotAllowed { path: target };
+                let _ = push_operation_report(
+                    &mut report,
+                    &self.root,
+                    operation,
+                    index,
+                    OperationOutcome::Failed,
+                    None,
+                );
+                return Err(ExecutionFailure { error, report });
+            }
+        }
+        self.execute(ExecutionPolicy::default().with_overwrite(OverwritePolicy::Replace))
+    }
+
     fn preflight(&self, policy: ExecutionPolicy) -> Result<(), (usize, PathBuf, ExecutionError)> {
         for (index, operation) in self.plan.operations().iter().enumerate() {
             let target = absolute_target(&self.root, operation);
@@ -290,6 +337,10 @@ pub trait OutputPlanExt: Sized {
     fn prepare(self) -> Result<PreparedOutputPlan, ExecutionError>;
     fn preview(&self) -> Result<&OutputPlan, ExecutionError>;
     fn execute(self, policy: ExecutionPolicy) -> Result<ExecutionReport, ExecutionFailure>;
+    fn execute_replacing(
+        self,
+        manifest: &ReplacementManifest,
+    ) -> Result<ExecutionReport, ExecutionFailure>;
 }
 impl OutputPlanExt for OutputPlan {
     fn prepare(self) -> Result<PreparedOutputPlan, ExecutionError> {
@@ -335,6 +386,19 @@ impl OutputPlanExt for OutputPlan {
     fn execute(self, policy: ExecutionPolicy) -> Result<ExecutionReport, ExecutionFailure> {
         match self.prepare() {
             Ok(prepared) => prepared.execute(policy),
+            Err(error) => Err(ExecutionFailure {
+                error,
+                report: ExecutionReport::default(),
+            }),
+        }
+    }
+
+    fn execute_replacing(
+        self,
+        manifest: &ReplacementManifest,
+    ) -> Result<ExecutionReport, ExecutionFailure> {
+        match self.prepare() {
+            Ok(prepared) => prepared.execute_replacing(manifest),
             Err(error) => Err(ExecutionFailure {
                 error,
                 report: ExecutionReport::default(),

@@ -428,6 +428,37 @@ fn preflight_failure_reports_operation_without_partial_output() {
 }
 
 #[test]
+fn replacement_manifest_allows_only_unchanged_prior_outputs() {
+    let root = tempfile::tempdir().unwrap();
+    let original = write_plan(root.path(), "movie.json", b"original")
+        .execute(ExecutionPolicy::default())
+        .unwrap();
+    let manifest = fixer_core::ReplacementManifest::from_reports(original.operations()).unwrap();
+
+    fs::write(root.path().join("movie.json"), b"changed elsewhere").unwrap();
+    let failure = write_plan(root.path(), "movie.json", b"correction")
+        .execute_replacing(&manifest)
+        .unwrap_err();
+    assert!(matches!(
+        failure.error(),
+        ExecutionError::ReplacementNotAllowed { .. }
+    ));
+    assert_eq!(
+        fs::read(root.path().join("movie.json")).unwrap(),
+        b"changed elsewhere"
+    );
+
+    fs::write(root.path().join("movie.json"), b"original").unwrap();
+    write_plan(root.path(), "movie.json", b"correction")
+        .execute_replacing(&manifest)
+        .unwrap();
+    assert_eq!(
+        fs::read(root.path().join("movie.json")).unwrap(),
+        b"correction"
+    );
+}
+
+#[test]
 fn explicit_replace_policy_replaces_bytes_and_hardlinks() {
     let root = tempfile::tempdir().unwrap();
     let output = root.path().join("library");

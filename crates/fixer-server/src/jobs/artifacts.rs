@@ -23,7 +23,7 @@ pub struct ReviewArtifacts {
     pub conflicts_truncated: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CandidateArtifact {
     pub index: u64,
     pub media_kind: fixer_core::MediaKind,
@@ -34,7 +34,19 @@ pub struct CandidateArtifact {
     pub sequence: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+impl CandidateArtifact {
+    pub fn target(&self) -> Result<fixer_core::ProviderTarget, JobFlowError> {
+        let provider = fixer_core::ProviderId::new(&self.provider)
+            .map_err(|error| JobFlowError::InvalidInput(error.to_string()))?;
+        let external_id =
+            fixer_core::ExternalId::new(&self.external_id.namespace, &self.external_id.value)
+                .map_err(|error| JobFlowError::InvalidInput(error.to_string()))?;
+        fixer_core::ProviderTarget::new(self.media_kind, provider, external_id)
+            .map_err(|error| JobFlowError::InvalidInput(error.to_string()))
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ExternalIdArtifact {
     pub namespace: String,
     pub value: String,

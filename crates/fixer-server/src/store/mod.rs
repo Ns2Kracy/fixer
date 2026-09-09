@@ -136,7 +136,7 @@ impl JobUpdate {
         self
     }
 
-    pub const fn with_review(mut self, review: ReviewSummary) -> Self {
+    pub fn with_review(mut self, review: ReviewSummary) -> Self {
         self.review = Some(review);
         self
     }

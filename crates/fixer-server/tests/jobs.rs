@@ -1,6 +1,9 @@
 use std::{
     num::NonZeroUsize,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use axum::{
@@ -104,6 +107,88 @@ fn event_id(frame: &str) -> &str {
         .lines()
         .find_map(|line| line.strip_prefix("id: "))
         .expect("SSE frame contains an ID")
+}
+
+#[tokio::test]
+async fn scrape_run_creation_is_deduplicated_and_job_details_stay_hidden() {
+    let app = TestApp::new(16).await;
+    let request = || {
+        Request::post("/api/v1/scrape-runs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "media_kind": "movie",
+                    "input_path": "/media/In the Mood for Love (2000).mkv"
+                })
+                .to_string(),
+            ))
+            .unwrap()
+    };
+
+    let first = app.request(request()).await;
+    assert_eq!(first.status(), StatusCode::ACCEPTED);
+    let first = response_json(first).await;
+    assert_eq!(first["run"]["status"], "queued");
+    assert_eq!(first["run"]["item_name"], "In the Mood for Love (2000).mkv");
+
+    let duplicate = app.request(request()).await;
+    assert_eq!(duplicate.status(), StatusCode::OK);
+    let duplicate = response_json(duplicate).await;
+    assert_eq!(duplicate["run"]["id"], first["run"]["id"]);
+
+    app.create_movie_job().await;
+    let listed = response_json(
+        app.request(
+            Request::get("/api/v1/scrape-runs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(listed["runs"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn exact_scrape_run_persists_requested_provider_identity() {
+    let app = TestApp::new(16).await;
+    let response = app
+        .request(
+            Request::post("/api/v1/scrape-runs")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "media_kind": "movie",
+                        "input_path": "/media/Arrival (2016).mkv",
+                        "target": {
+                            "media_kind": "movie",
+                            "provider": "tmdb",
+                            "external_id": {"namespace": "tmdb", "value": "329865"}
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let created = response_json(response).await;
+    let id = created["run"]["id"].as_i64().unwrap();
+
+    let detail = response_json(
+        app.request(
+            Request::get(format!("/api/v1/scrape-runs/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(detail["run"]["requested_target"]["provider"], "tmdb");
+    assert_eq!(
+        detail["run"]["requested_target"]["external_id"]["value"],
+        "329865"
+    );
 }
 
 fn cursor_with_sequence(cursor: &str, sequence: u64) -> String {
@@ -604,7 +689,7 @@ async fn a_panicking_sdk_provider_interrupts_one_job_and_the_worker_survives() {
     let runtime = JobRuntime::new(store, capacity(32));
     let provider = PanicsOnceProvider {
         inner: fixture_provider(Duration::ZERO),
-        panicked: AtomicBool::new(false),
+        panicked: Arc::new(AtomicBool::new(false)),
     };
     let fixer = Fixer::builder()
         .provider(provider)
@@ -623,9 +708,72 @@ async fn a_panicking_sdk_provider_interrupts_one_job_and_the_worker_survives() {
     assert_eq!(second["job"]["review"]["candidate_count"], 1);
 }
 
+#[tokio::test]
+async fn exact_scrape_run_fetches_without_calling_provider_search() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let searched = Arc::new(AtomicBool::new(false));
+    let provider = PanicsOnceProvider {
+        inner: fixture_provider(Duration::ZERO),
+        panicked: Arc::clone(&searched),
+    };
+    let fixer = Fixer::builder()
+        .provider(provider)
+        .offline()
+        .build()
+        .unwrap();
+    let _workers = runtime.start_workers(capacity(1), SdkJobFlow::new(fixer));
+    let router = job_app(runtime);
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/scrape-runs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "media_kind": "movie",
+                    "input_path": "/media/Fixture Movie.mkv",
+                    "target": {
+                        "media_kind": "movie",
+                        "provider": "fixture.worker",
+                        "external_id": {
+                            "namespace": "fixture.worker",
+                            "value": "fixture-movie"
+                        }
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    wait_for_state(&router, 1, "awaiting_confirmation").await;
+
+    let detail = response_json(
+        send(
+            &router,
+            Request::get("/api/v1/scrape-runs/1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(detail["run"]["status"], "review_required");
+    assert_eq!(
+        detail["run"]["selected_target"]["provider"],
+        "fixture.worker"
+    );
+    assert!(!searched.load(Ordering::SeqCst));
+}
+
 struct PanicsOnceProvider {
     inner: FixtureProvider,
-    panicked: AtomicBool,
+    panicked: Arc<AtomicBool>,
 }
 
 impl Provider for PanicsOnceProvider {
@@ -1157,7 +1305,7 @@ async fn retry_requeues_only_interrupted_jobs_and_wakes_workers() {
     let runtime = JobRuntime::new(store, capacity(16));
     let provider = PanicsOnceProvider {
         inner: fixture_provider(Duration::ZERO),
-        panicked: AtomicBool::new(false),
+        panicked: Arc::new(AtomicBool::new(false)),
     };
     let fixer = Fixer::builder()
         .provider(provider)

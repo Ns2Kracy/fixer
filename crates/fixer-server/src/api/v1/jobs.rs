@@ -584,10 +584,13 @@ fn job_dto(job: &JobRecord, workspace: Option<&WorkspaceState>) -> JobDto {
         input: display_input(job.input(), workspace),
         state: job.state(),
         progress: job.progress().cloned(),
-        review: job.review().copied(),
+        review: job.review().cloned(),
         review_decision: job.review_decision().cloned(),
         plan: job.plan().cloned(),
-        execution: job.execution().cloned(),
+        execution: job
+            .execution()
+            .cloned()
+            .map(ExecutionSummary::without_operations),
         created_at_ms: job.created_at_ms(),
         updated_at_ms: job.updated_at_ms(),
     }
@@ -598,7 +601,14 @@ fn display_input(input: &JobInputDto, workspace: Option<&WorkspaceState>) -> Job
         input.media_kind(),
         display_path(workspace, input.input_path()),
         input.apply(),
-    );
+    )
+    .with_selection(input.selection().clone());
+    if input.unattended() {
+        displayed = displayed.with_unattended();
+    }
+    if let Some(run_id) = input.correction_of() {
+        displayed = displayed.with_correction_of(run_id);
+    }
     if let Some(organization) = input.organization() {
         let mut organization = organization.clone();
         organization.destination_path = display_path(workspace, &organization.destination_path);
@@ -658,7 +668,7 @@ fn map_json_rejection(_error: JsonRejection) -> ApiError {
     invalid_input("body", "must be valid JSON matching the job schema")
 }
 
-fn map_runtime_error(error: RuntimeError) -> ApiError {
+pub(super) fn map_runtime_error(error: RuntimeError) -> ApiError {
     match error {
         RuntimeError::Store(error) => map_store_error(&error),
         RuntimeError::FilesystemPolicy(_) => invalid_input(

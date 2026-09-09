@@ -49,7 +49,7 @@ fn job_input_and_summaries_are_stable_server_owned_dtos() {
 
     let review = ReviewSummary::new(3, 2);
     assert_eq!(
-        serde_json::to_value(review).unwrap(),
+        serde_json::to_value(&review).unwrap(),
         json!({"schema_version": 1, "candidate_count": 3, "conflict_count": 2})
     );
     assert_round_trip(&review);

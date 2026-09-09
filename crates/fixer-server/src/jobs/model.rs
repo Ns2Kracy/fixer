@@ -7,6 +7,14 @@ use crate::ingestion::model::RulePlacement;
 
 const SCHEMA_VERSION: u8 = 1;
 
+const fn automatic_selection() -> fixer_core::ScrapeSelection {
+    fixer_core::ScrapeSelection::Automatic
+}
+
+const fn is_automatic_selection(selection: &fixer_core::ScrapeSelection) -> bool {
+    matches!(selection, fixer_core::ScrapeSelection::Automatic)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SchemaVersion;
 
@@ -67,6 +75,15 @@ pub struct JobInputDto {
     media_kind: JobMediaKind,
     input_path: String,
     apply: bool,
+    #[serde(
+        default = "automatic_selection",
+        skip_serializing_if = "is_automatic_selection"
+    )]
+    selection: fixer_core::ScrapeSelection,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    unattended: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    correction_of: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     organization: Option<JobOrganizationDto>,
 }
@@ -78,6 +95,9 @@ impl JobInputDto {
             media_kind,
             input_path: input_path.into(),
             apply,
+            selection: fixer_core::ScrapeSelection::Automatic,
+            unattended: false,
+            correction_of: None,
             organization: None,
         }
     }
@@ -97,6 +117,33 @@ impl JobInputDto {
 
     pub const fn apply(&self) -> bool {
         self.apply
+    }
+
+    pub fn with_selection(mut self, selection: fixer_core::ScrapeSelection) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    pub const fn selection(&self) -> &fixer_core::ScrapeSelection {
+        &self.selection
+    }
+
+    pub const fn unattended(&self) -> bool {
+        self.unattended
+    }
+
+    pub const fn with_unattended(mut self) -> Self {
+        self.unattended = true;
+        self
+    }
+
+    pub const fn correction_of(&self) -> Option<i64> {
+        self.correction_of
+    }
+
+    pub const fn with_correction_of(mut self, run_id: i64) -> Self {
+        self.correction_of = Some(run_id);
+        self
     }
 
     pub const fn organization(&self) -> Option<&JobOrganizationDto> {
@@ -140,7 +187,7 @@ pub enum AutoReviewReason {
 }
 
 /// Versioned candidate/conflict counts persisted for review.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReviewSummary {
     schema_version: SchemaVersion,
@@ -148,6 +195,8 @@ pub struct ReviewSummary {
     conflict_count: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     automation_reason: Option<AutoReviewReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_target: Option<fixer_core::ProviderTarget>,
 }
 
 impl ReviewSummary {
@@ -157,6 +206,7 @@ impl ReviewSummary {
             candidate_count,
             conflict_count,
             automation_reason: None,
+            selected_target: None,
         }
     }
 
@@ -165,7 +215,24 @@ impl ReviewSummary {
         self
     }
 
-    pub const fn automation_reason(self) -> Option<AutoReviewReason> {
+    pub const fn candidate_count(&self) -> u64 {
+        self.candidate_count
+    }
+
+    pub const fn conflict_count(&self) -> u64 {
+        self.conflict_count
+    }
+
+    pub fn with_selected_target(mut self, target: fixer_core::ProviderTarget) -> Self {
+        self.selected_target = Some(target);
+        self
+    }
+
+    pub const fn selected_target(&self) -> Option<&fixer_core::ProviderTarget> {
+        self.selected_target.as_ref()
+    }
+
+    pub const fn automation_reason(&self) -> Option<AutoReviewReason> {
         self.automation_reason
     }
 }
@@ -271,6 +338,8 @@ pub struct ExecutionSummary {
     failed_operations: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     failure: Option<ExecutionFailureSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    operations: Vec<fixer_core::OperationReport>,
 }
 
 impl ExecutionSummary {
@@ -280,12 +349,27 @@ impl ExecutionSummary {
             completed_operations,
             failed_operations,
             failure: None,
+            operations: Vec::new(),
         }
     }
 
     pub fn with_failure(mut self, failure: ExecutionFailureSummary) -> Self {
         self.failure = Some(failure);
         self
+    }
+
+    pub fn with_operations(mut self, operations: Vec<fixer_core::OperationReport>) -> Self {
+        self.operations = operations;
+        self
+    }
+
+    pub fn without_operations(mut self) -> Self {
+        self.operations.clear();
+        self
+    }
+
+    pub fn operations(&self) -> &[fixer_core::OperationReport] {
+        &self.operations
     }
 
     pub const fn completed_operations(&self) -> u64 {
