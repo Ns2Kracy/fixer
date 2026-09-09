@@ -1,13 +1,12 @@
 use fixer_core::{
-    Candidate, ExternalId, MatchEvidence, Matcher, MergeConflict, OutputOperation, OutputPlan,
-    ResolutionWarning, Resolved, SourceRef,
+    Candidate, ExternalId, MergeConflict, OutputOperation, OutputPlan, ResolutionWarning, Resolved,
+    SourceRef,
 };
 use serde::Serialize;
 
 use super::worker::JobFlowError;
 
 const MAX_CANDIDATES: usize = 100;
-const MAX_EVIDENCE_PER_CANDIDATE: usize = 32;
 const MAX_WARNINGS: usize = 100;
 const MAX_CONFLICTS: usize = 200;
 const MAX_SOURCES_PER_CONFLICT: usize = 20;
@@ -33,23 +32,12 @@ pub struct CandidateArtifact {
     pub title: String,
     pub year: Option<u16>,
     pub sequence: Option<String>,
-    pub score: i32,
-    pub confidence: f32,
-    pub evidence: Vec<EvidenceArtifact>,
-    pub evidence_truncated: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ExternalIdArtifact {
     pub namespace: String,
     pub value: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct EvidenceArtifact {
-    pub kind: fixer_core::MatchEvidenceKind,
-    pub points: i32,
-    pub detail: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,26 +81,13 @@ pub struct OperationArtifact {
     pub content_bytes: Option<u64>,
 }
 
-pub fn candidates(
-    query: &fixer_core::MatchQuery,
-    values: &[Candidate],
-) -> Result<(Vec<CandidateArtifact>, bool), JobFlowError> {
+pub fn candidates(values: &[Candidate]) -> Result<(Vec<CandidateArtifact>, bool), JobFlowError> {
     let truncated = values.len() > MAX_CANDIDATES;
     let values = values
         .iter()
         .take(MAX_CANDIDATES)
         .enumerate()
         .map(|(index, candidate)| {
-            let score = Matcher
-                .score(query, candidate)
-                .map_err(|error| JobFlowError::Matching(error.to_string()))?;
-            let evidence_truncated = score.evidence.len() > MAX_EVIDENCE_PER_CANDIDATE;
-            let evidence = score
-                .evidence
-                .iter()
-                .take(MAX_EVIDENCE_PER_CANDIDATE)
-                .map(evidence)
-                .collect();
             let (title, year, sequence) = candidate_fields(candidate);
             Ok(CandidateArtifact {
                 index: u64::try_from(index).map_err(|_| JobFlowError::IndexOverflow)?,
@@ -122,10 +97,6 @@ pub fn candidates(
                 title: text(title),
                 year,
                 sequence: sequence.map(text),
-                score: score.total,
-                confidence: score.confidence(),
-                evidence,
-                evidence_truncated,
             })
         })
         .collect::<Result<Vec<_>, JobFlowError>>()?;
@@ -179,14 +150,6 @@ fn candidate_fields(candidate: &Candidate) -> (&str, Option<u16>, Option<&str>) 
         Candidate::Anime(value) => (&value.title, value.year, value.sequence.as_deref()),
         Candidate::Music(value) => (&value.title, value.year, value.sequence.as_deref()),
         Candidate::Book(value) => (&value.title, value.year, value.sequence.as_deref()),
-    }
-}
-
-fn evidence(value: &MatchEvidence) -> EvidenceArtifact {
-    EvidenceArtifact {
-        kind: value.kind,
-        points: value.points,
-        detail: text(&value.detail),
     }
 }
 

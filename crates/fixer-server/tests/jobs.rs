@@ -1233,13 +1233,10 @@ async fn review_and_plan_details_reconstruct_bounded_server_owned_artifacts() {
         "fixture.worker"
     );
     assert_eq!(details["candidates"][0]["title"], "Fixture Movie");
-    assert!(details["candidates"][0]["score"].as_i64().is_some());
-    assert!(
-        !details["candidates"][0]["evidence"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    let candidate = details["candidates"][0].as_object().unwrap();
+    assert!(!candidate.contains_key("score"));
+    assert!(!candidate.contains_key("confidence"));
+    assert!(!candidate.contains_key("evidence"));
     assert!(details["warnings"].is_array());
     assert!(details["conflicts"].is_array());
 

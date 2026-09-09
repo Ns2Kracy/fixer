@@ -132,8 +132,6 @@ pub enum AutoReviewReason {
     ManualJob,
     CandidateListTruncated,
     NoCandidates,
-    ConfidenceBelowThreshold,
-    TiedTopCandidates,
     MetadataConflicts,
     ProviderEnrichmentFailed,
     DiagnosticsTruncated,

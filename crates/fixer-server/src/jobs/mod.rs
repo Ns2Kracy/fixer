@@ -683,13 +683,7 @@ impl JobRuntime {
             let expected = worker::AutoDecision::Execute {
                 candidate_index: decision.candidate_index(),
             };
-            if worker::auto_decision(
-                input,
-                &diagnostics,
-                conflict_count,
-                flow.auto_accept_confidence(id),
-            ) != expected
-            {
+            if worker::auto_decision(input, &diagnostics, conflict_count) != expected {
                 return Err(RuntimeError::StalePlan);
             }
         }
@@ -801,8 +795,7 @@ impl JobRuntime {
             return;
         }
 
-        let threshold = flow.auto_accept_confidence(id);
-        let Ok(prepared) = self.prepare_review(job.input(), search, threshold).await else {
+        let Ok(prepared) = self.prepare_review(job.input(), search).await else {
             self.finish_active(id, JobState::Resolving, JobState::Failed, "failed")
                 .await;
             return;
@@ -856,7 +849,6 @@ impl JobRuntime {
         &self,
         input: &JobInputDto,
         search: worker::SearchArtifact,
-        threshold: f32,
     ) -> Result<PreparedReview, JobFlowError> {
         let candidate_count = search.candidate_count();
         let (candidates, candidates_truncated) = search.candidate_artifacts()?;
@@ -868,18 +860,14 @@ impl JobRuntime {
             conflicts: Vec::new(),
             conflicts_truncated: false,
         };
-        let selected_index = match worker::auto_decision(input, &review, 0, threshold) {
-            worker::AutoDecision::Execute { candidate_index } => candidate_index,
-            worker::AutoDecision::NeedsReview { .. } => 0,
-        };
-        let resolved = search.resolve_selected(selected_index).await?;
+        let resolved = search.resolve_selected(0).await?;
         let conflict_count = resolved.conflict_count()?;
         let diagnostics = resolved.review_diagnostics();
         review.warnings = diagnostics.warnings;
         review.warnings_truncated = diagnostics.warnings_truncated;
         review.conflicts = diagnostics.conflicts;
         review.conflicts_truncated = diagnostics.conflicts_truncated;
-        let mut automatic = worker::auto_decision(input, &review, conflict_count, threshold);
+        let mut automatic = worker::auto_decision(input, &review, conflict_count);
         if matches!(automatic, worker::AutoDecision::Execute { .. }) {
             automatic = resolved.plan().map_or_else(
                 |_| worker::AutoDecision::NeedsReview {

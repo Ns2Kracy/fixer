@@ -6,7 +6,7 @@ use std::{
 };
 
 use fixer_core::{
-    AnimeSeries, AssetKind, BookWork, Isbn13, LocalizedValue, MatchQuery, Movie, MovieRelease,
+    AnimeSeries, AssetKind, BookWork, Isbn13, LocalizedValue, Movie, MovieRelease,
     MusicReleaseGroup, OutputPlan, ReleaseDate, ReleaseId, Resolved, Series, WorkId,
 };
 use fixer_provider_local::{
@@ -63,7 +63,6 @@ pub fn auto_decision(
     input: &JobInputDto,
     review: &artifacts::ReviewArtifacts,
     conflicts: u64,
-    threshold: f32,
 ) -> AutoDecision {
     let automatic = input.apply()
         && input.organization().is_some_and(|organization| {
@@ -94,37 +93,11 @@ pub fn auto_decision(
             reason: AutoReviewReason::CandidateListTruncated,
         };
     }
-    let Some(top_confidence) = review
-        .candidates
-        .iter()
-        .map(|candidate| normalize_confidence(candidate.confidence))
-        .max_by(f32::total_cmp)
-    else {
+    let Some(candidate) = review.candidates.first() else {
         return AutoDecision::NeedsReview {
             reason: AutoReviewReason::NoCandidates,
         };
     };
-    let mut top = review.candidates.iter().filter(|candidate| {
-        normalize_confidence(candidate.confidence)
-            .total_cmp(&top_confidence)
-            .is_eq()
-    });
-    let Some(candidate) = top.next() else {
-        return AutoDecision::NeedsReview {
-            reason: AutoReviewReason::NoCandidates,
-        };
-    };
-    if top.next().is_some() {
-        return AutoDecision::NeedsReview {
-            reason: AutoReviewReason::TiedTopCandidates,
-        };
-    }
-    let threshold = normalize_confidence(threshold);
-    if top_confidence < threshold {
-        return AutoDecision::NeedsReview {
-            reason: AutoReviewReason::ConfidenceBelowThreshold,
-        };
-    }
     if conflicts != 0 {
         return AutoDecision::NeedsReview {
             reason: AutoReviewReason::MetadataConflicts,
@@ -132,14 +105,6 @@ pub fn auto_decision(
     }
     AutoDecision::Execute {
         candidate_index: candidate.index,
-    }
-}
-
-const fn normalize_confidence(confidence: f32) -> f32 {
-    if confidence.is_finite() {
-        confidence.clamp(0.0, 1.0)
-    } else {
-        0.0
     }
 }
 
@@ -329,26 +294,6 @@ impl WorkerFlow {
         }
     }
 
-    pub fn auto_accept_confidence(&self, job_id: JobId) -> f32 {
-        match self {
-            Self::Configured(flow) => match &flow.source {
-                SdkJobSource::Fixed(_) => {
-                    fixer_runtime::FixerConfig::default().auto_accept_confidence
-                }
-                SdkJobSource::Static(config) => config.auto_accept_confidence,
-                SdkJobSource::Shared { config, snapshots } => snapshots
-                    .lock()
-                    .expect("job configuration snapshots lock is not poisoned")
-                    .get(&job_id)
-                    .map_or_else(
-                        || config.snapshot().auto_accept_confidence,
-                        |snapshot| snapshot.auto_accept_confidence,
-                    ),
-            },
-            Self::Local => fixer_runtime::FixerConfig::default().auto_accept_confidence,
-        }
-    }
-
     pub fn release(&self, job_id: JobId) {
         if let Self::Configured(SdkJobFlow {
             source: SdkJobSource::Shared { snapshots, .. },
@@ -457,33 +402,14 @@ impl SearchArtifact {
     pub fn candidate_artifacts(
         &self,
     ) -> Result<(Vec<artifacts::CandidateArtifact>, bool), JobFlowError> {
-        let (query, candidates) = match self {
-            Self::Anime { search, title, .. } => (MatchQuery::anime(title), search.candidates()),
-            Self::Book {
-                search,
-                title,
-                isbn,
-                ..
-            } => {
-                let mut query = MatchQuery::book(title);
-                if let Some(isbn) = isbn {
-                    query = query.and_then(|query| {
-                        fixer_core::ExternalId::new("isbn", isbn.as_str())
-                            .map(|external_id| query.with_external_id(external_id))
-                    });
-                }
-                (query, search.candidates())
-            }
-            Self::Movie { search, title, .. } => (MatchQuery::movie(title), search.candidates()),
-            Self::Music { search, title, .. } => (MatchQuery::music(title), search.candidates()),
-            Self::Television { search, title, .. } => {
-                (MatchQuery::television(title), search.candidates())
-            }
+        let candidates = match self {
+            Self::Anime { search, .. } => search.candidates(),
+            Self::Book { search, .. } => search.candidates(),
+            Self::Movie { search, .. } => search.candidates(),
+            Self::Music { search, .. } => search.candidates(),
+            Self::Television { search, .. } => search.candidates(),
         };
-        artifacts::candidates(
-            &query.map_err(|error| JobFlowError::Matching(error.to_string()))?,
-            candidates,
-        )
+        artifacts::candidates(candidates)
     }
 
     pub async fn resolve_selected(
@@ -1093,8 +1019,6 @@ pub enum JobFlowError {
     IndexOverflow,
     #[error("book planning requires an ISBN-13 selected during scan")]
     MissingBookIsbn,
-    #[error("candidate matching failed: {0}")]
-    Matching(String),
     #[error("output planning failed: {0}")]
     Planning(String),
     #[error("reviewed-plan fingerprint failed: {0}")]
@@ -1169,29 +1093,21 @@ mod tests {
         })
     }
 
-    fn review(confidences: &[f32]) -> crate::jobs::artifacts::ReviewArtifacts {
+    fn review(candidate_count: usize) -> crate::jobs::artifacts::ReviewArtifacts {
         crate::jobs::artifacts::ReviewArtifacts {
-            candidates: confidences
-                .iter()
-                .enumerate()
-                .map(
-                    |(index, confidence)| crate::jobs::artifacts::CandidateArtifact {
-                        index: u64::try_from(index).unwrap(),
-                        media_kind: fixer_core::MediaKind::Movie,
-                        provider: "fixture".to_owned(),
-                        external_id: crate::jobs::artifacts::ExternalIdArtifact {
-                            namespace: "fixture".to_owned(),
-                            value: index.to_string(),
-                        },
-                        title: format!("Movie {index}"),
-                        year: None,
-                        sequence: None,
-                        score: 100,
-                        confidence: *confidence,
-                        evidence: Vec::new(),
-                        evidence_truncated: false,
+            candidates: (0..candidate_count)
+                .map(|index| crate::jobs::artifacts::CandidateArtifact {
+                    index: u64::try_from(index).unwrap(),
+                    media_kind: fixer_core::MediaKind::Movie,
+                    provider: "fixture".to_owned(),
+                    external_id: crate::jobs::artifacts::ExternalIdArtifact {
+                        namespace: "fixture".to_owned(),
+                        value: index.to_string(),
                     },
-                )
+                    title: format!("Movie {index}"),
+                    year: None,
+                    sequence: None,
+                })
                 .collect(),
             candidates_truncated: false,
             warnings: Vec::new(),
@@ -1204,7 +1120,7 @@ mod tests {
     #[test]
     fn auto_decision_blocks_failed_enrichment_and_truncated_warnings() {
         for code in ["provider_search_failed", "provider_fetch_failed"] {
-            let mut review = review(&[1.0]);
+            let mut review = review(1);
             review
                 .warnings
                 .push(crate::jobs::artifacts::WarningArtifact {
@@ -1212,46 +1128,34 @@ mod tests {
                     message: "remote unavailable".to_owned(),
                 });
             assert!(matches!(
-                super::auto_decision(&automatic_input(true), &review, 0, 0.9),
+                super::auto_decision(&automatic_input(true), &review, 0),
                 super::AutoDecision::NeedsReview { .. }
             ));
         }
-        let mut review = review(&[1.0]);
+        let mut review = review(1);
         review.warnings_truncated = true;
         assert!(matches!(
-            super::auto_decision(&automatic_input(true), &review, 0, 0.9),
+            super::auto_decision(&automatic_input(true), &review, 0),
             super::AutoDecision::NeedsReview { .. }
         ));
     }
 
     #[test]
-    fn auto_decision_requires_unique_threshold_match_without_conflicts() {
+    fn auto_decision_uses_first_deterministic_candidate_without_conflicts() {
         use crate::jobs::{model::AutoReviewReason, worker::AutoDecision};
 
         assert_eq!(
-            super::auto_decision(&automatic_input(true), &review(&[0.9, 0.7]), 0, 0.9),
+            super::auto_decision(&automatic_input(true), &review(2), 0),
             AutoDecision::Execute { candidate_index: 0 }
         );
         assert_eq!(
-            super::auto_decision(&automatic_input(true), &review(&[0.899]), 0, 0.9),
-            AutoDecision::NeedsReview {
-                reason: AutoReviewReason::ConfidenceBelowThreshold
-            }
-        );
-        assert_eq!(
-            super::auto_decision(&automatic_input(true), &review(&[0.9, 0.9]), 0, 0.9),
-            AutoDecision::NeedsReview {
-                reason: AutoReviewReason::TiedTopCandidates
-            }
-        );
-        assert_eq!(
-            super::auto_decision(&automatic_input(true), &review(&[0.95]), 1, 0.9),
+            super::auto_decision(&automatic_input(true), &review(1), 1),
             AutoDecision::NeedsReview {
                 reason: AutoReviewReason::MetadataConflicts
             }
         );
         assert_eq!(
-            super::auto_decision(&automatic_input(false), &review(&[1.0]), 0, 0.9),
+            super::auto_decision(&automatic_input(false), &review(1), 0),
             AutoDecision::NeedsReview {
                 reason: AutoReviewReason::ManualJob
             }
