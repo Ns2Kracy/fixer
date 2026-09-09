@@ -192,7 +192,7 @@ async fn manual_job_with_the_same_match_still_waits_for_confirmation() {
 }
 
 #[tokio::test]
-async fn destination_collision_never_enters_the_writer() {
+async fn destination_collision_fails_without_entering_the_writer() {
     let app = AutomationApp::new().await;
     let collision = app.destination.join("Auto/Fixture Movie/Fixture Movie.mkv");
     std::fs::create_dir_all(collision.parent().unwrap()).unwrap();
@@ -200,9 +200,13 @@ async fn destination_collision_never_enters_the_writer() {
     app.enqueue_trusted_snapshot().await;
     let workers = app.start_workers();
 
-    let awaiting = app.wait_for_state("awaiting_confirmation").await;
+    let failed = app.wait_for_state("failed").await;
     assert_eq!(
-        awaiting["job"]["review"]["automation_reason"],
+        failed["job"]["execution"]["failure"]["code"],
+        "automatic_scrape_blocked"
+    );
+    assert_eq!(
+        failed["job"]["review"]["automation_reason"],
         "destination_collision"
     );
     assert_eq!(std::fs::read(collision).unwrap(), b"keep me");
