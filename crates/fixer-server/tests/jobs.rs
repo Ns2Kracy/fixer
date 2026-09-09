@@ -18,12 +18,15 @@ use fixer_core::{
 use fixer_runtime::ConfigLoader;
 use fixer_sdk::{Fixer, FixtureDocument, FixtureProvider};
 use fixer_server::{
-    JobRuntime, SdkJobFlow, SqliteJobStore, WorkspaceState, job_app, workspace_app,
+    FsPolicy, JobRuntime, SdkJobFlow, SqliteJobStore, WorkspaceState, job_app, workspace_app,
 };
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::time::{Duration, timeout};
+use tokio::{
+    sync::Notify,
+    time::{Duration, timeout},
+};
 use tower::ServiceExt;
 
 struct TestApp {
@@ -150,9 +153,6 @@ async fn scrape_run_creation_is_deduplicated_and_job_details_stay_hidden() {
 }
 
 #[tokio::test]
-async fn exact_scrape_run_persists_requested_provider_identity() {
-    let app = TestApp::new(16).await;
-#[tokio::test]
 async fn closed_scrape_queue_rejects_submission_before_persisting() {
     let directory = tempfile::tempdir().unwrap();
     let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
@@ -186,6 +186,9 @@ async fn closed_scrape_queue_rejects_submission_before_persisting() {
     assert!(store.list_jobs(10, None).await.unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn exact_scrape_run_persists_requested_provider_identity() {
+    let app = TestApp::new(16).await;
     let response = app
         .request(
             Request::post("/api/v1/scrape-runs")
@@ -670,10 +673,10 @@ async fn bounded_dispatch_serializes_jobs_when_capacity_exceeds_one() {
         capacity(2),
         SdkJobFlow::new(fixture_fixer(Duration::from_millis(500))),
     );
+    assert_eq!(workers.worker_count(), 1);
     let router = job_app(runtime);
 
     create_job(&router, "/media/First Movie.mkv").await;
-    assert_eq!(workers.worker_count(), 1);
     create_job(&router, "/media/Second Movie.mkv").await;
 
     wait_for_state(&router, 1, "searching").await;
@@ -784,7 +787,7 @@ async fn exact_scrape_run_fetches_without_calling_provider_search() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-    wait_for_state(&router, 1, "awaiting_confirmation").await;
+    let stopped = wait_for_run_status(&router, 1, "failed").await;
 
     let detail = response_json(
         send(
@@ -796,12 +799,230 @@ async fn exact_scrape_run_fetches_without_calling_provider_search() {
         .await,
     )
     .await;
-    assert_eq!(detail["run"]["status"], "review_required");
+    assert_eq!(detail["run"]["status"], "failed");
+    assert_eq!(
+        stopped["run"]["execution"]["failure"]["code"],
+        "automatic_scrape_blocked"
+    );
     assert_eq!(
         detail["run"]["selected_target"]["provider"],
         "fixture.worker"
     );
     assert!(!searched.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn invalid_tmdb_targets_are_rejected_before_enqueueing() {
+    let app = TestApp::new(16).await;
+    for (media_kind, target_kind, value) in [
+        ("anime", "anime", "123"),
+        ("movie", "movie", "abc"),
+        ("television", "television", "000"),
+    ] {
+        let response = app
+            .request(
+                Request::post("/api/v1/scrape-runs")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "media_kind": media_kind,
+                            "input_path": "/media/invalid.mkv",
+                            "target": {
+                                "media_kind": target_kind,
+                                "provider": "tmdb",
+                                "external_id": {"namespace": "tmdb", "value": value}
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await["error"]["code"],
+            "invalid_input"
+        );
+    }
+}
+
+#[tokio::test]
+async fn retry_of_cancelled_run_is_not_an_output_correction() {
+    let app = TestApp::new(16).await;
+    let created = response_json(
+        app.request(
+            Request::post("/api/v1/scrape-runs")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "media_kind": "movie",
+                        "input_path": "/media/retry.mkv"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await,
+    )
+    .await;
+    let id = created["run"]["id"].as_i64().unwrap();
+    let cancelled = app
+        .request(
+            Request::post(format!("/api/v1/scrape-runs/{id}/cancel"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(cancelled.status(), StatusCode::OK);
+
+    let retried = app
+        .request(
+            Request::post(format!("/api/v1/scrape-runs/{id}/retry"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(retried.status(), StatusCode::ACCEPTED);
+    let retried = response_json(retried).await;
+    assert_ne!(retried["run"]["id"], id);
+    assert_eq!(retried["run"]["status"], "queued");
+    assert!(retried["run"].get("correction_of").is_none());
+}
+
+#[tokio::test]
+async fn provider_fetch_failure_is_terminal_and_auditable() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32));
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/scrape-runs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "media_kind": "movie",
+                    "input_path": "/media/Missing.mkv",
+                    "target": {
+                        "media_kind": "movie",
+                        "provider": "fixture.worker",
+                        "external_id": {
+                            "namespace": "fixture.worker",
+                            "value": "missing"
+                        }
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let failed = wait_for_run_status(&router, 1, "failed").await;
+    assert_eq!(failed["run"]["execution"]["failure"]["phase"], "searching");
+    assert_eq!(
+        failed["run"]["execution"]["failure"]["code"],
+        "search_failed"
+    );
+    assert!(
+        failed["run"]["execution"]["failure"]["message"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty())
+    );
+    workers.shutdown().await;
+}
+
+#[tokio::test]
+async fn unattended_exact_run_accepts_merge_conflicts_and_finishes() {
+    let directory = tempfile::tempdir().unwrap();
+    let media = directory.path().join("local.mkv");
+    std::fs::write(&media, b"fixture").unwrap();
+    std::fs::write(
+        media.with_extension("nfo"),
+        include_str!("../../fixer-provider-local/tests/fixtures/movie.nfo"),
+    )
+    .unwrap();
+    let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
+        .await
+        .unwrap();
+    let runtime = JobRuntime::new(store, capacity(32))
+        .with_fs_policy(FsPolicy::new([directory.path()]).unwrap());
+    let workers =
+        runtime.start_workers(capacity(1), SdkJobFlow::new(fixture_fixer(Duration::ZERO)));
+    let router = job_app(runtime);
+
+    let response = send(
+        &router,
+        Request::post("/api/v1/scrape-runs")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "media_kind": "movie",
+                    "input_path": media,
+                    "target": {
+                        "media_kind": "movie",
+                        "provider": "fixture.worker",
+                        "external_id": {
+                            "namespace": "fixture.worker",
+                            "value": "fixture-movie"
+                        }
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let completed = wait_for_run_status(&router, 1, "succeeded").await;
+    assert!(completed["run"]["conflict_count"].as_u64().unwrap() > 0);
+    assert!(
+        completed["run"]["execution"]["completed_operations"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(directory.path().join("movie.json").is_file());
+    workers.shutdown().await;
+}
+
+struct BlockingSearchProvider {
+    inner: FixtureProvider,
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+impl Provider for BlockingSearchProvider {
+    fn descriptor(&self) -> &ProviderDescriptor {
+        self.inner.descriptor()
+    }
+
+    fn search<'a>(
+        &'a self,
+        request: SearchRequest,
+        http: &'a dyn HttpClient,
+    ) -> BoxFuture<'a, Result<Vec<Candidate>, ProviderError>> {
+        Box::pin(async move {
+            self.entered.notify_one();
+            self.release.notified().await;
+            self.inner.search(request, http).await
+        })
+    }
+
+    fn fetch<'a>(
+        &'a self,
+        request: FetchRequest,
+        http: &'a dyn HttpClient,
+    ) -> BoxFuture<'a, Result<MetadataDocument, ProviderError>> {
+        self.inner.fetch(request, http)
+    }
 }
 
 struct PanicsOnceProvider {
@@ -836,25 +1057,42 @@ impl Provider for PanicsOnceProvider {
 }
 
 #[tokio::test]
-async fn awaited_worker_shutdown_cooperates_after_the_current_sdk_stage() {
+async fn awaited_worker_shutdown_interrupts_active_work_and_preserves_pending_work() {
     let directory = tempfile::tempdir().unwrap();
     let store = SqliteJobStore::open(directory.path().join("jobs.sqlite"))
         .await
         .unwrap();
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let provider = BlockingSearchProvider {
+        inner: fixture_provider(Duration::ZERO),
+        entered: Arc::clone(&entered),
+        release: Arc::clone(&release),
+    };
+    let fixer = Fixer::builder()
+        .provider(provider)
+        .offline()
+        .build()
+        .unwrap();
     let runtime = JobRuntime::new(store, capacity(32));
-    let workers = runtime.start_workers(
-        capacity(1),
-        SdkJobFlow::new(fixture_fixer(Duration::from_millis(100))),
-    );
+    let workers = runtime.start_workers(capacity(1), SdkJobFlow::new(fixer));
     let router = job_app(runtime);
 
-    create_job(&router, "/media/Shutdown Movie.mkv").await;
-    wait_for_state(&router, 1, "searching").await;
-    workers.shutdown().await;
+    create_job(&router, "/media/Active Shutdown Movie.mkv").await;
+    create_job(&router, "/media/Pending Shutdown Movie.mkv").await;
+    timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("active job did not enter provider search");
+    let shutdown = tokio::spawn(workers.shutdown());
+    tokio::task::yield_now().await;
+    release.notify_one();
+    shutdown.await.unwrap();
 
-    let job = get_job(&router, 1).await;
-    assert_eq!(job["job"]["state"], "interrupted");
-    assert_eq!(job["job"]["progress"]["stage"], "interrupted");
+    let active = get_job(&router, 1).await;
+    assert_eq!(active["job"]["state"], "interrupted");
+    assert_eq!(active["job"]["progress"]["stage"], "interrupted");
+    let pending = get_job(&router, 2).await;
+    assert_eq!(pending["job"]["state"], "queued");
 }
 
 #[tokio::test]
@@ -940,6 +1178,28 @@ async fn get_job(router: &Router, id: i64) -> Value {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     response_json(response).await
+}
+
+async fn wait_for_run_status(router: &Router, id: i64, expected: &str) -> Value {
+    timeout(Duration::from_secs(2), async {
+        loop {
+            let response = send(
+                router,
+                Request::get(format!("/api/v1/scrape-runs/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let run = response_json(response).await;
+            if run["run"]["status"] == expected {
+                return run;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("scrape run state transition timed out")
 }
 
 async fn wait_for_state(router: &Router, id: i64, expected: &str) -> Value {
