@@ -6,14 +6,16 @@ use std::{
 };
 
 use fixer_core::{
-    AnimeSeries, AssetKind, BookWork, Isbn13, LocalizedValue, Movie, MovieRelease,
-    MusicReleaseGroup, OutputPlan, ReleaseDate, ReleaseId, Resolved, Series, WorkId,
+    AnimeSeries, AssetKind, BookWork, Isbn13, LocalizedValue, MetadataDocument, Movie,
+    MovieRelease, MusicReleaseGroup, OutputPlan, ReleaseDate, ReleaseId, Resolved, Series, WorkId,
 };
 use fixer_provider_local::{
     LocalProvider, identify_path, parse_json, parse_nfo, scan, scan_anime, scan_books, scan_music,
     scan_television,
 };
-use fixer_sdk::{AnimeSearch, BookSearch, Fixer, MovieSearch, MusicSearch, TelevisionSearch};
+use fixer_sdk::{
+    AnimeSearch, BookSearch, Fixer, MovieSearch, MusicSearch, ScrapedMedia, TelevisionSearch,
+};
 use fixer_writer_local::{
     AnimeWriter, BookWriter, JsonWriter, MusicWriter, OrganizationMedia, OrganizationPlacement,
     OrganizationRequest, TelevisionWriter, metadata_only, organize,
@@ -160,6 +162,7 @@ pub struct ScannedJob {
     title: String,
     isbn: Option<Isbn13>,
     output_root: PathBuf,
+    scanned: Option<MetadataDocument>,
     input: JobInputDto,
 }
 
@@ -250,14 +253,29 @@ impl WorkerFlow {
     ) -> Result<ScannedJob, JobFlowError> {
         match self {
             Self::Configured(flow) => match &flow.source {
-                SdkJobSource::Fixed(fixer) => Ok(ScannedJob {
-                    fixer: fixer.clone(),
-                    media_kind: input.media_kind(),
-                    title: path_query_title(Path::new(input.input_path()))?,
-                    isbn: None,
-                    output_root: scan_root(Path::new(input.input_path()))?,
-                    input: input.clone(),
-                }),
+                SdkJobSource::Fixed(fixer) => {
+                    if Path::new(input.input_path()).exists() {
+                        let input = input.clone();
+                        let fixer = fixer.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let mut scanned = scan_local(&input)?;
+                            scanned.fixer = fixer;
+                            Ok(scanned)
+                        })
+                        .await
+                        .map_err(|error| JobFlowError::BlockingTask(error.to_string()))?
+                    } else {
+                        Ok(ScannedJob {
+                            fixer: fixer.clone(),
+                            scanned: None,
+                            media_kind: input.media_kind(),
+                            title: path_query_title(Path::new(input.input_path()))?,
+                            isbn: None,
+                            output_root: scan_root(Path::new(input.input_path()))?,
+                            input: input.clone(),
+                        })
+                    }
+                }
                 SdkJobSource::Static(config) => {
                     let input = input.clone();
                     let config = Arc::clone(config);
@@ -315,10 +333,11 @@ impl ScannedJob {
             title,
             isbn,
             output_root,
+            scanned,
             input,
         } = self;
         if let fixer_core::ScrapeSelection::Exact(target) = input.selection().clone() {
-            return exact_search(fixer, target, title, isbn, output_root, input).await;
+            return exact_search(fixer, scanned, target, title, isbn, output_root, input).await;
         }
         let artifact = match media_kind {
             JobMediaKind::Anime => {
@@ -382,6 +401,7 @@ async fn exact_search(
     title: String,
     isbn: Option<Isbn13>,
     output_root: PathBuf,
+    scanned: Option<MetadataDocument>,
     input: JobInputDto,
 ) -> Result<SearchArtifact, JobFlowError> {
     if target.media_kind() != media_kind(input.media_kind()) {
@@ -389,40 +409,79 @@ async fn exact_search(
             "exact target media kind does not match the run".to_owned(),
         ));
     }
-    let document = fixer.fetch_exact(&target).await?;
-    let source = fixer_core::SourceRef::new(
-        target.provider().clone(),
-        Some(target.external_id().clone()),
-        None,
-        std::time::SystemTime::now(),
-    );
-    let resolved = match document {
-        fixer_core::MetadataDocument::Anime(value) => ResolvedArtifact::Anime {
-            resolved: exact_resolved(value, "anime", source)?,
-            output_root,
-            input,
-        },
-        fixer_core::MetadataDocument::Book(value) => ResolvedArtifact::Book {
-            resolved: exact_resolved(value, "book", source)?,
-            isbn,
-            output_root,
-            input,
-        },
-        fixer_core::MetadataDocument::Movie(value) => ResolvedArtifact::Movie {
-            resolved: exact_resolved(value, "movie", source)?,
-            output_root,
-            input,
-        },
-        fixer_core::MetadataDocument::Music(value) => ResolvedArtifact::Music {
-            resolved: exact_resolved(value, "music", source)?,
-            output_root,
-            input,
-        },
-        fixer_core::MetadataDocument::Television(value) => ResolvedArtifact::Television {
-            resolved: exact_resolved(value, "television", source)?,
-            output_root,
-            input,
-        },
+    let resolved = if let Some(scanned) = scanned {
+        let scraped = fixer
+            .scrape(scanned)
+            .selection(fixer_core::ScrapeSelection::Exact(target.clone()))
+            .resolve()
+            .await?;
+        match scraped.into_media() {
+            ScrapedMedia::Anime(resolved) => ResolvedArtifact::Anime {
+                resolved,
+                output_root,
+                input,
+            },
+            ScrapedMedia::Book(resolved) => ResolvedArtifact::Book {
+                resolved,
+                isbn,
+                output_root,
+                input,
+            },
+            ScrapedMedia::Movie(resolved) => ResolvedArtifact::Movie {
+                resolved,
+                output_root,
+                input,
+            },
+            ScrapedMedia::Music(resolved) => ResolvedArtifact::Music {
+                resolved,
+                output_root,
+                input,
+            },
+            ScrapedMedia::Television(resolved) => ResolvedArtifact::Television {
+                resolved,
+                output_root,
+                input,
+            },
+            _ => {
+                return Err(JobFlowError::Sdk(fixer_sdk::SdkError::UnexpectedDocument));
+            }
+        }
+    } else {
+        let document = fixer.fetch_exact(&target).await?;
+        let source = fixer_core::SourceRef::new(
+            target.provider().clone(),
+            Some(target.external_id().clone()),
+            None,
+            std::time::SystemTime::now(),
+        );
+        match document {
+            MetadataDocument::Anime(value) => ResolvedArtifact::Anime {
+                resolved: exact_resolved(value, "anime", source)?,
+                output_root,
+                input,
+            },
+            MetadataDocument::Book(value) => ResolvedArtifact::Book {
+                resolved: exact_resolved(value, "book", source)?,
+                isbn,
+                output_root,
+                input,
+            },
+            MetadataDocument::Movie(value) => ResolvedArtifact::Movie {
+                resolved: exact_resolved(value, "movie", source)?,
+                output_root,
+                input,
+            },
+            MetadataDocument::Music(value) => ResolvedArtifact::Music {
+                resolved: exact_resolved(value, "music", source)?,
+                output_root,
+                input,
+            },
+            MetadataDocument::Television(value) => ResolvedArtifact::Television {
+                resolved: exact_resolved(value, "television", source)?,
+                output_root,
+                input,
+            },
+        }
     };
     let candidate = artifacts::CandidateArtifact {
         index: 0,
@@ -827,7 +886,7 @@ fn scan_with_config(
 ) -> Result<ScannedJob, JobFlowError> {
     let input_path = PathBuf::from(input.input_path());
     let root = scan_root(&input_path)?;
-    let (provider, title, isbn, output_root) = match input.media_kind() {
+    let (provider, title, isbn, output_root, scanned) = match input.media_kind() {
         JobMediaKind::Anime => {
             let result = scan_anime(&root).map_err(local_error)?;
             let (document, output_root) =
@@ -837,11 +896,13 @@ fn scan_with_config(
                 LocalProvider::from_anime_documents([document]).map_err(local_error)?,
                 title,
                 None,
+            let scanned = MetadataDocument::Anime(document.clone());
                 output_root,
             )
         }
         JobMediaKind::Book => select_book(&input_path, &root)?,
         JobMediaKind::Movie => select_movie(&input_path, &root)?,
+                scanned,
         JobMediaKind::Music => {
             let result = scan_music(&root).map_err(local_error)?;
             let (document, output_root) =
@@ -851,11 +912,13 @@ fn scan_with_config(
                 LocalProvider::from_music_documents([document]).map_err(local_error)?,
                 title,
                 None,
+            let scanned = MetadataDocument::Music(document.clone());
                 output_root,
             )
         }
         JobMediaKind::Television => {
             let result = scan_television(&root).map_err(local_error)?;
+                scanned,
             let (document, output_root) =
                 select_rooted(result.documents, result.roots, &input_path)?;
             let title = title_of(&document.titles)?;
@@ -863,11 +926,13 @@ fn scan_with_config(
                 LocalProvider::from_television_documents([document]).map_err(local_error)?,
                 title,
                 None,
+            let scanned = MetadataDocument::Television(document.clone());
                 output_root,
             )
         }
     };
     let fixer = match config {
+                scanned,
         Some(config) => fixer_runtime::build_fixer(config, provider)?,
         None => Fixer::builder().provider(provider).offline().build()?,
     };
@@ -877,6 +942,7 @@ fn scan_with_config(
         title,
         isbn,
         output_root,
+        scanned: Some(scanned),
         input: input.clone(),
     })
 }
@@ -884,7 +950,16 @@ fn scan_with_config(
 fn select_book(
     input_path: &Path,
     root: &Path,
-) -> Result<(LocalProvider, String, Option<Isbn13>, PathBuf), JobFlowError> {
+) -> Result<
+    (
+        LocalProvider,
+        String,
+        Option<Isbn13>,
+        PathBuf,
+        MetadataDocument,
+    ),
+    JobFlowError,
+> {
     let result = scan_books(root).map_err(local_error)?;
     if result.documents.len() != result.roots.len() {
         return Err(JobFlowError::InvalidInput(
@@ -935,14 +1010,25 @@ fn select_book(
         LocalProvider::from_book_documents([work]).map_err(local_error)?,
         title,
         Some(isbn),
+    let scanned = MetadataDocument::Book(work.clone());
         output_root,
     ))
 }
 
 fn select_movie(
+        scanned,
     input_path: &Path,
     root: &Path,
-) -> Result<(LocalProvider, String, Option<Isbn13>, PathBuf), JobFlowError> {
+) -> Result<
+    (
+        LocalProvider,
+        String,
+        Option<Isbn13>,
+        PathBuf,
+        MetadataDocument,
+    ),
+    JobFlowError,
+> {
     let movie = if input_path.is_file() {
         let json = input_path.with_extension("json");
         let nfo = input_path.with_extension("nfo");
@@ -960,7 +1046,12 @@ fn select_movie(
         };
         movie.clone()
     };
-    let title = title_of(&movie.titles)?;
+    let title = if input_path.is_dir() {
+        identify_path(input_path).map_err(local_error)?.title
+    } else {
+        title_of(&movie.titles)?
+    };
+    let scanned = MetadataDocument::Movie(movie.clone());
     Ok((
         LocalProvider::from_documents([movie]).map_err(local_error)?,
         title,
@@ -970,6 +1061,7 @@ fn select_movie(
 }
 
 fn movie_from_hint(hint: fixer_provider_local::MediaHint) -> Result<Movie, JobFlowError> {
+        scanned,
     let slug = hint
         .title
         .chars()
